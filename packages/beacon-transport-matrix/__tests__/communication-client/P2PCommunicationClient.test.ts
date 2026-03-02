@@ -207,6 +207,56 @@ describe('P2PCommunicationClient', () => {
       expect(mockStorage.delete).not.toHaveBeenCalledWith(StorageKey.MATRIX_SELECTED_NODE)
     })
 
+    it('throws without deleting stored node when device is offline', async () => {
+      Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
+
+      mockStorage.get.mockResolvedValue('stored-node.papers.tech')
+      mockStorage.delete.mockResolvedValue(undefined)
+
+      ;(axios.get as jest.Mock).mockRejectedValueOnce(new Error('Network Error'))
+
+      await expect(freshClient.getRelayServer()).rejects.toThrow('Network Error')
+
+      // Should NOT have deleted the stored node
+      expect(mockStorage.delete).not.toHaveBeenCalledWith(StorageKey.MATRIX_SELECTED_NODE)
+
+      Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
+    })
+
+    it('throws without resetting when device is offline during timestamp refresh', async () => {
+      Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
+
+      mockStorage.get.mockResolvedValue('')
+      mockStorage.set.mockResolvedValue(undefined)
+      mockStorage.delete.mockResolvedValue(undefined)
+
+      ;(axios.get as jest.Mock).mockResolvedValue({
+        data: { region: 'eu', known_servers: ['a'], timestamp: 1000 }
+      })
+
+      await freshClient.getRelayServer()
+
+      // Force stale timestamp
+      const relayServerPromise = (freshClient as any).relayServer
+      if (relayServerPromise) {
+        const resolved = await relayServerPromise.promise
+        resolved.localTimestamp = 0
+      }
+
+      // Go offline, then fail the refresh
+      Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
+      ;(axios.get as jest.Mock)
+        .mockReset()
+        .mockRejectedValueOnce(new Error('Network Error'))
+
+      await expect(freshClient.getRelayServer()).rejects.toThrow('Network Error')
+
+      // Should NOT have deleted the stored node
+      expect(mockStorage.delete).not.toHaveBeenCalledWith(StorageKey.MATRIX_SELECTED_NODE)
+
+      Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
+    })
+
     it('resets and retries when cached relay server becomes unreachable on timestamp refresh', async () => {
       mockStorage.get.mockResolvedValue('')
       mockStorage.set.mockResolvedValue(undefined)

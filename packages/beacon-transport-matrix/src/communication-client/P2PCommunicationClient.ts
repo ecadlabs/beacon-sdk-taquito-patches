@@ -239,6 +239,10 @@ export class P2PCommunicationClient extends CommunicationClient {
         })
         return { server: relayServer.server, timestamp: info.timestamp }
       } catch (error) {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          logger.log('getRelayServer', 'device is offline, keeping stored node')
+          throw error
+        }
         logger.log('getRelayServer', `cached server ${relayServer.server} is unreachable, resetting`)
         await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
         this.relayServer = undefined
@@ -260,6 +264,10 @@ export class P2PCommunicationClient extends CommunicationClient {
         })
         return { server: node, timestamp: info.timestamp }
       } catch (error) {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          logger.log('getRelayServer', 'device is offline, keeping stored node')
+          throw error
+        }
         logger.log('getRelayServer', `stored node ${node} is unreachable, falling through to discovery`)
         await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
       }
