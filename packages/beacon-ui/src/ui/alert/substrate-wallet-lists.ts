@@ -1,4 +1,4 @@
-import { App, DesktopApp, ExtensionApp, WebApp } from '@airgap/beacon-types'
+import { App, DesktopApp, ExtensionApp, WebApp } from '@ecadlabs/beacon-types'
 
 export const extensionList: ExtensionApp[] = []
 

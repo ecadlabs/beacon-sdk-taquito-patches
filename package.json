@@ -1,5 +1,5 @@
 {
-  "name": "@airgap/beacon-sdk",
+  "name": "@ecadlabs/beacon-sdk",
   "description": "The beacon-sdk allows you to easily connect DApps with Wallets through P2P communication or a chrome extension.",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
@@ -56,18 +56,18 @@
   },
   "author": "Papers AG <contact@papers.ch> (https://papers.ch)",
   "dependencies": {
-    "@airgap/beacon-blockchain-substrate": "file:packages/beacon-blockchain-substrate",
-    "@airgap/beacon-blockchain-tezos": "file:packages/beacon-blockchain-tezos",
-    "@airgap/beacon-blockchain-tezos-sapling": "file:packages/beacon-blockchain-tezos-sapling",
-    "@airgap/beacon-core": "file:packages/beacon-core",
-    "@airgap/beacon-dapp": "file:packages/beacon-dapp",
-    "@airgap/beacon-transport-matrix": "file:packages/beacon-transport-matrix",
-    "@airgap/beacon-transport-postmessage": "file:packages/beacon-transport-postmessage",
-    "@airgap/beacon-transport-walletconnect": "file:packages/beacon-transport-walletconnect",
-    "@airgap/beacon-types": "file:packages/beacon-types",
-    "@airgap/beacon-ui": "file:packages/beacon-ui",
-    "@airgap/beacon-utils": "file:packages/beacon-utils",
-    "@airgap/beacon-wallet": "file:packages/beacon-wallet",
+    "@ecadlabs/beacon-blockchain-substrate": "file:packages/beacon-blockchain-substrate",
+    "@ecadlabs/beacon-blockchain-tezos": "file:packages/beacon-blockchain-tezos",
+    "@ecadlabs/beacon-blockchain-tezos-sapling": "file:packages/beacon-blockchain-tezos-sapling",
+    "@ecadlabs/beacon-core": "file:packages/beacon-core",
+    "@ecadlabs/beacon-dapp": "file:packages/beacon-dapp",
+    "@ecadlabs/beacon-transport-matrix": "file:packages/beacon-transport-matrix",
+    "@ecadlabs/beacon-transport-postmessage": "file:packages/beacon-transport-postmessage",
+    "@ecadlabs/beacon-transport-walletconnect": "file:packages/beacon-transport-walletconnect",
+    "@ecadlabs/beacon-types": "file:packages/beacon-types",
+    "@ecadlabs/beacon-ui": "file:packages/beacon-ui",
+    "@ecadlabs/beacon-utils": "file:packages/beacon-utils",
+    "@ecadlabs/beacon-wallet": "file:packages/beacon-wallet",
     "@walletconnect/sign-client": "2.18.0",
     "@walletconnect/types": "2.18.0",
     "@walletconnect/utils": "2.18.0",
@@ -148,5 +148,9 @@
     "hooks": {
       "pre-commit": "npm run check-version && pretty-quick --staged"
     }
+  },
+  "version": "4.8.0-ecad.1",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   }
 }

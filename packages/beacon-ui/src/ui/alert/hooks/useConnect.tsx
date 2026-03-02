@@ -1,5 +1,5 @@
-import { Logger, windowRef } from '@airgap/beacon-core'
-import { StorageKey, ExtensionMessage, ExtensionMessageTarget } from '@airgap/beacon-types'
+import { Logger, windowRef } from '@ecadlabs/beacon-core'
+import { StorageKey, ExtensionMessage, ExtensionMessageTarget } from '@ecadlabs/beacon-types'
 import { useState } from 'react'
 import { getTzip10Link } from '../../../utils/get-tzip10-link'
 import { isTwBrowser, isAndroid, isMobileOS, isIOS } from '../../../utils/platform'

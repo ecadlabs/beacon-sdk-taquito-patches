@@ -3,7 +3,7 @@ import {
   getAccountIdentifier,
   Logger,
   PermissionManager
-} from '@airgap/beacon-core'
+} from '@ecadlabs/beacon-core'
 import {
   ErrorResponse,
   BeaconMessage,
@@ -25,8 +25,8 @@ import {
   ProofOfEventChallengeResponse,
   SimulatedProofOfEventChallengeResponse
   // EncryptPayloadResponse
-} from '@airgap/beacon-types'
-import { getAddressFromPublicKey, CONTRACT_PREFIX, isValidAddress } from '@airgap/beacon-utils'
+} from '@ecadlabs/beacon-types'
+import { getAddressFromPublicKey, CONTRACT_PREFIX, isValidAddress } from '@ecadlabs/beacon-utils'
 
 interface OutgoingResponseInterceptorOptions {
   senderId: string

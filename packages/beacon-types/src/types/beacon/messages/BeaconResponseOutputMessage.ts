@@ -7,7 +7,7 @@ import {
   AccountInfo,
   ProofOfEventChallengeResponse,
   SimulatedProofOfEventChallengeResponse
-} from '@airgap/beacon-types'
+} from '@ecadlabs/beacon-types'
 
 /**
  * @category DApp

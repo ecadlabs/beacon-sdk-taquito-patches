@@ -1,4 +1,4 @@
-import { ColorMode } from '@airgap/beacon-types'
+import { ColorMode } from '@ecadlabs/beacon-types'
 
 let colorMode: ColorMode = ColorMode.LIGHT
 

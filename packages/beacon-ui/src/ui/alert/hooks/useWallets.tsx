@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { PostMessageTransport } from '@airgap/beacon-transport-postmessage'
+import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
 import { arrangeTopWallets, mergeWallets, parseWallets } from '../../../utils/wallets'
-import { Extension, NetworkType } from '@airgap/beacon-types'
+import { Extension, NetworkType } from '@ecadlabs/beacon-types'
 import { desktopList, extensionList, iOSList, webList } from '../wallet-lists'
-import { windowRef } from '@airgap/beacon-core'
+import { windowRef } from '@ecadlabs/beacon-core'
 
 const useWallets = (networkType?: NetworkType, featuredWallets?: string[]) => {
   const [availableExtensions, setAvailableExtensions] = useState<Extension[]>([])

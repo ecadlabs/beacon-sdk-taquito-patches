@@ -1,4 +1,4 @@
-import { Logger, Transport, PeerManager } from '@airgap/beacon-core'
+import { Logger, Transport, PeerManager } from '@ecadlabs/beacon-core'
 import {
   ConnectionContext,
   ExtendedP2PPairingResponse,
@@ -9,8 +9,8 @@ import {
   Origin,
   P2PPairingRequest,
   NodeDistributions
-} from '@airgap/beacon-types'
-import { P2PCommunicationClient } from '@airgap/beacon-transport-matrix'
+} from '@ecadlabs/beacon-types'
+import { P2PCommunicationClient } from '@ecadlabs/beacon-transport-matrix'
 import { KeyPair } from '@stablelib/ed25519'
 
 const logger = new Logger('P2PTransport')

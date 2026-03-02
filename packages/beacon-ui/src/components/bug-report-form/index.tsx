@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { BACKEND_URL, IndexedDBStorage, Logger, SDK_VERSION } from '@airgap/beacon-core'
-import { StorageKey } from '@airgap/beacon-types'
+import { BACKEND_URL, IndexedDBStorage, Logger, SDK_VERSION } from '@ecadlabs/beacon-core'
+import { StorageKey } from '@ecadlabs/beacon-types'
 import { currentBrowser, currentOS } from '../../utils/platform'
 
 const logger = new Logger('BugReport')

@@ -1,5 +1,5 @@
-import { StorageKey, Storage, PostMessagePairingRequest } from '@airgap/beacon-types'
-import { PostMessageTransport } from '@airgap/beacon-transport-postmessage'
+import { StorageKey, Storage, PostMessagePairingRequest } from '@ecadlabs/beacon-types'
+import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
 import { KeyPair } from '@stablelib/ed25519'
 
 // const logger = new Logger('WalletPostMessageTransport')

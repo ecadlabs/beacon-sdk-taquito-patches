@@ -8,9 +8,9 @@ import {
   getSenderId,
   Logger,
   NOTIFICATION_ORACLE_URL
-} from '@airgap/beacon-core'
+} from '@ecadlabs/beacon-core'
 
-import { ExposedPromise, toHex } from '@airgap/beacon-utils'
+import { ExposedPromise, toHex } from '@ecadlabs/beacon-utils'
 
 import {
   ConnectionContext,
@@ -37,7 +37,7 @@ import {
   P2PPairingRequest,
   ExtendedP2PPairingRequest,
   ExtendedWalletConnectPairingRequest
-} from '@airgap/beacon-types'
+} from '@ecadlabs/beacon-types'
 import { WalletClientOptions } from './WalletClientOptions'
 import { WalletP2PTransport } from '../transports/WalletP2PTransport'
 import { IncomingRequestInterceptor } from '../interceptors/IncomingRequestInterceptor'

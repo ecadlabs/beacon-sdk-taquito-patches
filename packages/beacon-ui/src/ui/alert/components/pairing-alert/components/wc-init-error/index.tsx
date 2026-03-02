@@ -1,4 +1,4 @@
-import { StorageKey } from '@airgap/beacon-types'
+import { StorageKey } from '@ecadlabs/beacon-types'
 import Info from '../../../../../../components/info'
 import { AlertState, WCInitErrorProps } from '../../../../../common'
 

@@ -1,4 +1,4 @@
-import { AppMetadata, PermissionResponseV3 } from '@airgap/beacon-types'
+import { AppMetadata, PermissionResponseV3 } from '@ecadlabs/beacon-types'
 import { SubstratePermissionScope } from '../permission-scope'
 
 export interface SubstratePermissionResponse extends PermissionResponseV3<'substrate'> {

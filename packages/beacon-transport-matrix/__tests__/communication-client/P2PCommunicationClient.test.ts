@@ -2,8 +2,8 @@
 
 // Mock external dependencies
 jest.mock('axios')
-jest.mock('@airgap/beacon-utils', () => {
-  const actual = jest.requireActual('@airgap/beacon-utils')
+jest.mock('@ecadlabs/beacon-utils', () => {
+  const actual = jest.requireActual('@ecadlabs/beacon-utils')
 
   class ExposedPromise<T> {
     public promise: Promise<T>
@@ -58,9 +58,9 @@ import {
   openCryptobox,
   toHex,
   getKeypairFromSeed
-} from '@airgap/beacon-utils'
+} from '@ecadlabs/beacon-utils'
 import { MatrixClient } from '../../src/matrix-client/MatrixClient'
-import { StorageKey } from '@airgap/beacon-types'
+import { StorageKey } from '@ecadlabs/beacon-types'
 import { P2PCommunicationClient } from '../../src/communication-client/P2PCommunicationClient'
 
 describe('P2PCommunicationClient', () => {

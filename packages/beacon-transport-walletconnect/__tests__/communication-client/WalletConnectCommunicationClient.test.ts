@@ -6,11 +6,11 @@ import {
   SignPayloadRequest,
   NetworkType,
   SigningType
-} from '@airgap/beacon-types'
+} from '@ecadlabs/beacon-types'
 import { WalletConnectCommunicationClient } from '../../src/communication-client/WalletConnectCommunicationClient'
 
-jest.mock('@airgap/beacon-core', () => {
-  const actual = jest.requireActual('@airgap/beacon-core')
+jest.mock('@ecadlabs/beacon-core', () => {
+  const actual = jest.requireActual('@ecadlabs/beacon-core')
   return {
     ...actual,
     Logger: jest.fn().mockImplementation(() => ({
@@ -57,7 +57,7 @@ jest.mock('@walletconnect/utils', () => ({
   getSdkError: jest.fn((code: string) => ({ code }))
 }))
 
-jest.mock('@airgap/beacon-utils', () => ({
+jest.mock('@ecadlabs/beacon-utils', () => ({
   generateGUID: jest.fn().mockResolvedValue('guid'),
   getAddressFromPublicKey: jest.fn().mockResolvedValue('tz1address'),
   isPublicKeySC: jest.fn().mockReturnValue(true)

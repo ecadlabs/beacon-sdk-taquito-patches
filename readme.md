@@ -1,8 +1,43 @@
-# Beacon SDK
+# Beacon SDK (ECAD Labs Taquito Patches)
 
-[![npm](https://img.shields.io/npm/v/@airgap/beacon-sdk.svg?colorB=brightgreen)](https://www.npmjs.com/package/@airgap/beacon-sdk)
-[![documentation](https://img.shields.io/badge/documentation-online-brightgreen.svg)](https://airgap-it.github.io/beacon-sdk/)
-[![GitHub Action](https://github.com/airgap-it/beacon-sdk/workflows/Build%2C%20Test%20and%20Analyze/badge.svg)](https://github.com/airgap-it/beacon-sdk/actions?query=workflow%3A%22Build%2C+Test+and+Analyze%22+branch%3Amain)
+> **This is a patched fork, not the upstream Beacon SDK.**
+>
+> This branch (`taquito-patches`) exists so ECAD Labs can ship same-day bug fixes
+> for [Taquito](https://github.com/ecadlabs/taquito) without waiting on upstream
+> release cycles. Packages are renamed from `@airgap/beacon-*` to
+> `@ecadlabs/beacon-*` and published to **GitHub Packages** (not npmjs.org).
+>
+> **Upstream**: [airgap-it/beacon-sdk](https://github.com/airgap-it/beacon-sdk)
+>
+> ### Branch strategy
+>
+> | Branch | Purpose |
+> |--------|---------|
+> | `master` | Tracks upstream. Periodically synced via `git fetch upstream && git merge upstream/master`. |
+> | `fix/*` | Individual bug fixes branched off master. PRs go to upstream. Keep `@airgap` names. |
+> | `taquito-patches` | **This branch.** Accumulates fixes not yet merged upstream. Has the `@airgap` -> `@ecadlabs` rename. Tagged and published to GitHub Packages. Fixes are dropped as upstream merges them. |
+>
+> ### How Taquito consumes this
+>
+> Taquito's root `package.json` uses npm `overrides` to redirect `@airgap/beacon-*`
+> to `@ecadlabs/beacon-*` at install time. No source code changes in Taquito are
+> needed. Consumers of `@taquito/beacon-wallet` from npm still get `@airgap/beacon-dapp`
+> from the public registry as usual.
+>
+> ### Publishing a new version
+>
+> 1. Apply fix to this branch (or merge a `fix/*` branch in)
+> 2. Bump version: `npx lerna version 4.8.0-ecad.N --no-push --exact --yes`
+> 3. Tag: `git tag v4.8.0-ecad.N && git push origin taquito-patches --tags`
+> 4. GitHub Actions publishes to GitHub Packages automatically on tag push
+>
+> ### Dropping this fork
+>
+> When upstream ships the fix: remove the `overrides` block and `.npmrc` from
+> Taquito, run `npm install`, done.
+
+---
+
 [![code style: prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg?style=flat-square)](https://github.com/prettier/prettier)
 
 > Connect Wallets with dApps on Tezos
@@ -27,13 +62,13 @@ The documentation can be found [here](https://docs.walletbeacon.io/), technical 
 ## Installation
 
 ```
-npm i --save @airgap/beacon-sdk
+npm i --save @ecadlabs/beacon-sdk
 ```
 
 ## Example DApp integration
 
 ```ts
-import { DAppClient } from '@airgap/beacon-sdk'
+import { DAppClient } from '@ecadlabs/beacon-sdk'
 
 const dAppClient = new DAppClient({ name: 'My Sample DApp' })
 

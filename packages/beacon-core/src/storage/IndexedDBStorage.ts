@@ -1,4 +1,4 @@
-import { Storage, StorageKey, StorageKeyReturnType } from '@airgap/beacon-types'
+import { Storage, StorageKey, StorageKeyReturnType } from '@ecadlabs/beacon-types'
 import { Logger } from '../utils/Logger'
 
 const logger = new Logger('IndexedDBStorage')

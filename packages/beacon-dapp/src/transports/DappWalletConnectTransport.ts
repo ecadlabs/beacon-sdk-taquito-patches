@@ -4,12 +4,12 @@ import {
   ExtendedWalletConnectPairingResponse,
   TransportStatus,
   NetworkType
-} from '@airgap/beacon-types'
-import { Logger } from '@airgap/beacon-core'
-import { WalletConnectTransport } from '@airgap/beacon-transport-walletconnect'
+} from '@ecadlabs/beacon-types'
+import { Logger } from '@ecadlabs/beacon-core'
+import { WalletConnectTransport } from '@ecadlabs/beacon-transport-walletconnect'
 import { KeyPair } from '@stablelib/ed25519'
 import { SignClientTypes } from '@walletconnect/types'
-import { isMobileOS } from '@airgap/beacon-ui'
+import { isMobileOS } from '@ecadlabs/beacon-ui'
 
 const logger = new Logger('DappWalletConnectTransport')
 

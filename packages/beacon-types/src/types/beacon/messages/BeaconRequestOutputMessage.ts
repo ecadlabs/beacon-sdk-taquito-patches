@@ -2,7 +2,7 @@ import {
   Optional,
   ProofOfEventChallengeRequest,
   SimulatedProofOfEventChallengeRequest
-} from '@airgap/beacon-types'
+} from '@ecadlabs/beacon-types'
 import {
   AppMetadata,
   PermissionRequest,
@@ -10,7 +10,7 @@ import {
   SignPayloadRequest,
   // EncryptPayloadRequest,
   BroadcastRequest
-} from '@airgap/beacon-types'
+} from '@ecadlabs/beacon-types'
 
 /**
  * @category Wallet

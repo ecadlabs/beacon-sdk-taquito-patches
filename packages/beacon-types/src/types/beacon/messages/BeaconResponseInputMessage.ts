@@ -2,7 +2,7 @@ import {
   Optional,
   ProofOfEventChallengeResponse,
   SimulatedProofOfEventChallengeResponse
-} from '@airgap/beacon-types'
+} from '@ecadlabs/beacon-types'
 import {
   PermissionResponse,
   OperationResponse,
@@ -11,7 +11,7 @@ import {
   BroadcastResponse,
   AcknowledgeResponse,
   ErrorResponse
-} from '@airgap/beacon-types'
+} from '@ecadlabs/beacon-types'
 
 /**
  * @category Wallet

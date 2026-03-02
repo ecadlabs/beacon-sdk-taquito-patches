@@ -1,4 +1,4 @@
-import { BeaconBaseMessage, BeaconErrorType, BeaconMessageType } from '@airgap/beacon-types'
+import { BeaconBaseMessage, BeaconErrorType, BeaconMessageType } from '@ecadlabs/beacon-types'
 
 /**
  * @category Message

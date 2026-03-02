@@ -1,6 +1,6 @@
 {
-  "name": "@airgap/beacon-types",
-  "version": "4.8.0",
+  "name": "@ecadlabs/beacon-types",
+  "version": "4.8.0-ecad.1",
   "description": "This package contains types that are used throughout the Beacon SDK.",
   "author": "Andreas Gassmann <a.gassmann@papers.ch>",
   "homepage": "https://walletbeacon.io",
@@ -20,7 +20,7 @@
     "dist"
   ],
   "publishConfig": {
-    "access": "public"
+    "registry": "https://npm.pkg.github.com"
   },
   "repository": {
     "type": "git",

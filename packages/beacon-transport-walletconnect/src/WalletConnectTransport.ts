@@ -10,10 +10,10 @@ import {
   WalletConnectPairingRequest,
   NetworkType,
   TransportType
-} from '@airgap/beacon-types'
-import { Transport, PeerManager } from '@airgap/beacon-core'
+} from '@ecadlabs/beacon-types'
+import { Transport, PeerManager } from '@ecadlabs/beacon-core'
 import { SignClientTypes } from '@walletconnect/types'
-import { ExposedPromise } from '@airgap/beacon-utils'
+import { ExposedPromise } from '@ecadlabs/beacon-utils'
 
 /**
  * @internalapi

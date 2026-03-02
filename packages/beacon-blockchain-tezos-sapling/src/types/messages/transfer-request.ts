@@ -1,4 +1,4 @@
-import { BlockchainMessage } from '@airgap/beacon-types'
+import { BlockchainMessage } from '@ecadlabs/beacon-types'
 import { TezosSaplingMessageType } from '../message-type'
 import { TezosSaplingPermissionScope } from '../permission-scope'
 

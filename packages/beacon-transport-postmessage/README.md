@@ -1,6 +1,6 @@
-# `@airgap/beacon-transport-postmessage`
+# `@ecadlabs/beacon-transport-postmessage`
 
-This package is part of the `@airgap/beacon-sdk` project. [Read more](https://github.com/airgap-it/beacon-sdk)
+This package is part of the `@ecadlabs/beacon-sdk` project. [Read more](https://github.com/airgap-it/beacon-sdk)
 
 ## Introduction
 

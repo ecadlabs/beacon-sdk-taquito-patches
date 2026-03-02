@@ -4,7 +4,7 @@ import {
   PermissionScope,
   AppMetadata,
   Network
-} from '@airgap/beacon-types'
+} from '@ecadlabs/beacon-types'
 
 /**
  * @category Message

@@ -1,6 +1,6 @@
-import { keys } from '@airgap/beacon-utils'
+import { keys } from '@ecadlabs/beacon-utils'
 import { MatrixRoom, MatrixRoomStatus } from './models/MatrixRoom'
-import { Storage, StorageKey } from '@airgap/beacon-types'
+import { Storage, StorageKey } from '@ecadlabs/beacon-types'
 
 type OnStateChangedListener = (
   oldState: MatrixStateStore,

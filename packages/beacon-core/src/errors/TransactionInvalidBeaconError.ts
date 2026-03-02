@@ -1,4 +1,4 @@
-import { BeaconErrorType } from '@airgap/beacon-types'
+import { BeaconErrorType } from '@ecadlabs/beacon-types'
 import { BeaconError } from './BeaconError';
 
 

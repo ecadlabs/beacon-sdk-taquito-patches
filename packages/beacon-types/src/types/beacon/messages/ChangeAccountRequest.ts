@@ -4,7 +4,7 @@ import {
   Network,
   PermissionScope,
   Threshold
-} from '@airgap/beacon-types'
+} from '@ecadlabs/beacon-types'
 import { Notification } from '../../Notification'
 
 export interface ChangeAccountRequest extends BeaconBaseMessage {

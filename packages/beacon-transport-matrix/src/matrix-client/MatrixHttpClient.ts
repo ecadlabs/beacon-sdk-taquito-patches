@@ -1,8 +1,8 @@
 import axios, { AxiosError, AxiosResponse, CancelTokenSource, Method as HttpMethod } from 'axios'
 
-import { keys } from '@airgap/beacon-utils'
+import { keys } from '@ecadlabs/beacon-utils'
 import { MatrixRequest, MatrixRequestParams } from './models/api/MatrixRequest'
-import { Logger } from '@airgap/beacon-core'
+import { Logger } from '@ecadlabs/beacon-core'
 
 const logger = new Logger('MatrixHttpClient')
 
