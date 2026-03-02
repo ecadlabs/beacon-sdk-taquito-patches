@@ -230,26 +230,39 @@ export class P2PCommunicationClient extends CommunicationClient {
         return { server: relayServer.server, timestamp: relayServer.timestamp }
       }
 
-      const info = await this.getBeaconInfo(relayServer.server)
-      this.relayServer.resolve({
-        server: relayServer.server,
-        timestamp: info.timestamp,
-        localTimestamp: new Date().getTime()
-      })
-      return { server: relayServer.server, timestamp: info.timestamp }
+      try {
+        const info = await this.getBeaconInfo(relayServer.server)
+        this.relayServer.resolve({
+          server: relayServer.server,
+          timestamp: info.timestamp,
+          localTimestamp: new Date().getTime()
+        })
+        return { server: relayServer.server, timestamp: info.timestamp }
+      } catch (error) {
+        logger.log('getRelayServer', `cached server ${relayServer.server} is unreachable, resetting`)
+        await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
+        this.relayServer = undefined
+        this.selectedRegion = undefined
+        return this.getRelayServer()
+      }
     } else {
       this.relayServer = new ExposedPromise()
     }
 
     const node = await this.storage.get(StorageKey.MATRIX_SELECTED_NODE)
     if (node && node.length > 0) {
-      const info = await this.getBeaconInfo(node)
-      this.relayServer.resolve({
-        server: node,
-        timestamp: info.timestamp,
-        localTimestamp: new Date().getTime()
-      })
-      return { server: node, timestamp: info.timestamp }
+      try {
+        const info = await this.getBeaconInfo(node)
+        this.relayServer.resolve({
+          server: node,
+          timestamp: info.timestamp,
+          localTimestamp: new Date().getTime()
+        })
+        return { server: node, timestamp: info.timestamp }
+      } catch (error) {
+        logger.log('getRelayServer', `stored node ${node} is unreachable, falling through to discovery`)
+        await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
+      }
     }
 
     const server = await this.findBestRegionAndGetServer()
@@ -273,7 +286,7 @@ export class P2PCommunicationClient extends CommunicationClient {
 
   public async getBeaconInfo(server: string): Promise<BeaconInfoResponse> {
     return axios
-      .get<BeaconInfoResponse>(`https://${server}/_synapse/client/beacon/info`)
+      .get<BeaconInfoResponse>(`https://${server}/_synapse/client/beacon/info`, { timeout: 10_000 })
       .then((res) => ({
         region: res.data.region,
         known_servers: res.data.known_servers,
