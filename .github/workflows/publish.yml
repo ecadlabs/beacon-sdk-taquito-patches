@@ -30,6 +30,6 @@ jobs:
         run: npm run test
 
       - name: Publish packages
-        run: npx lerna publish from-package --yes --no-git-tag-version --no-push
+        run: git stash -- package-lock.json && npx lerna publish from-package --yes --no-git-tag-version --no-push
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
