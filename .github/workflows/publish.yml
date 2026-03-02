@@ -21,7 +21,7 @@ jobs:
           scope: '@ecadlabs'
 
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: rm -f package-lock.json && npm install --ignore-scripts
 
       - name: Build
         run: npm run build
