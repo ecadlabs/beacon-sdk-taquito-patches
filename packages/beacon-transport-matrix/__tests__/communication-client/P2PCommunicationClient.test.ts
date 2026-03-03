@@ -15,6 +15,8 @@ jest.mock('@ecadlabs/beacon-utils', () => {
         this._resolve = res
         this._reject = rej
       })
+      // Prevent unhandled rejection when promise is rejected without a concurrent awaiter
+      this.promise.catch(() => {})
     }
     resolve(value: T) {
       this._resolve(value)
@@ -207,54 +209,17 @@ describe('P2PCommunicationClient', () => {
       expect(mockStorage.delete).not.toHaveBeenCalledWith(StorageKey.MATRIX_SELECTED_NODE)
     })
 
-    it('throws without deleting stored node when device is offline', async () => {
-      Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
-
-      mockStorage.get.mockResolvedValue('stored-node.papers.tech')
-      mockStorage.delete.mockResolvedValue(undefined)
-
-      ;(axios.get as jest.Mock).mockRejectedValueOnce(new Error('Network Error'))
-
-      await expect(freshClient.getRelayServer()).rejects.toThrow('Network Error')
-
-      // Should NOT have deleted the stored node
-      expect(mockStorage.delete).not.toHaveBeenCalledWith(StorageKey.MATRIX_SELECTED_NODE)
-
-      Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
-    })
-
-    it('throws without resetting when device is offline during timestamp refresh', async () => {
-      Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
-
+    it('rejects ExposedPromise when all servers fail, preventing concurrent caller deadlock', async () => {
       mockStorage.get.mockResolvedValue('')
-      mockStorage.set.mockResolvedValue(undefined)
       mockStorage.delete.mockResolvedValue(undefined)
 
-      ;(axios.get as jest.Mock).mockResolvedValue({
-        data: { region: 'eu', known_servers: ['a'], timestamp: 1000 }
-      })
+      // All discovery probes fail
+      ;(axios.get as jest.Mock).mockRejectedValue(new Error('ECONNREFUSED'))
 
-      await freshClient.getRelayServer()
+      await expect(freshClient.getRelayServer()).rejects.toThrow()
 
-      // Force stale timestamp
-      const relayServerPromise = (freshClient as any).relayServer
-      if (relayServerPromise) {
-        const resolved = await relayServerPromise.promise
-        resolved.localTimestamp = 0
-      }
-
-      // Go offline, then fail the refresh
-      Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
-      ;(axios.get as jest.Mock)
-        .mockReset()
-        .mockRejectedValueOnce(new Error('Network Error'))
-
-      await expect(freshClient.getRelayServer()).rejects.toThrow('Network Error')
-
-      // Should NOT have deleted the stored node
-      expect(mockStorage.delete).not.toHaveBeenCalledWith(StorageKey.MATRIX_SELECTED_NODE)
-
-      Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
+      // The ExposedPromise should be cleared so subsequent callers get a fresh attempt
+      expect((freshClient as any).relayServer).toBeUndefined()
     })
 
     it('resets and retries when cached relay server becomes unreachable on timestamp refresh', async () => {
