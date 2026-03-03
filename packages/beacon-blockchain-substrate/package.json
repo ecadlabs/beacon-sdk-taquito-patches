@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-blockchain-substrate",
-  "version": "4.8.1-ecad.1",
+  "version": "4.8.1-ecad.2",
   "description": "This package adds support for `substrate` based blockchains. It can be used in combination with the `@ecadlabs/beacon-dapp` or `@ecadlabs/beacon-wallet` packages.",
   "author": "Andreas Gassmann <a.gassmann@papers.ch>",
   "homepage": "https://walletbeacon.io",
@@ -30,8 +30,8 @@
     "url": "https://github.com/airgap-it/beacon-sdk/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-types": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-ui": "4.8.1-ecad.1"
+    "@ecadlabs/beacon-types": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-ui": "4.8.1-ecad.2"
   },
   "publishConfig": {
     "access": "public"

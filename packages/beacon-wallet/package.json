@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-wallet",
-  "version": "4.8.1-ecad.1",
+  "version": "4.8.1-ecad.2",
   "description": "Use this package in your wallet to instanciate a WalletClient object and communicate to dApps.",
   "author": "Andreas Gassmann <a.gassmann@papers.ch>",
   "homepage": "https://walletbeacon.io",
@@ -32,9 +32,9 @@
     "url": "https://github.com/airgap-it/beacon-sdk/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-core": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-transport-matrix": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-transport-postmessage": "4.8.1-ecad.1"
+    "@ecadlabs/beacon-core": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-transport-matrix": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-transport-postmessage": "4.8.1-ecad.2"
   },
   "publishConfig": {
     "access": "public"

@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-sdk",
-  "version": "4.8.1-ecad.1",
+  "version": "4.8.1-ecad.2",
   "description": "The `beacon-sdk` simplifies and abstracts the communication between dApps and wallets over different transport layers.",
   "author": "Andreas Gassmann <a.gassmann@papers.ch>",
   "homepage": "https://walletbeacon.io",
@@ -31,16 +31,16 @@
     "url": "https://github.com/airgap-it/beacon-sdk/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-blockchain-substrate": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-blockchain-tezos": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-core": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-dapp": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-transport-matrix": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-transport-postmessage": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-types": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-ui": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-utils": "4.8.1-ecad.1",
-    "@ecadlabs/beacon-wallet": "4.8.1-ecad.1"
+    "@ecadlabs/beacon-blockchain-substrate": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-blockchain-tezos": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-core": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-dapp": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-transport-matrix": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-transport-postmessage": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-types": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-ui": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-utils": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-wallet": "4.8.1-ecad.2"
   },
   "publishConfig": {
     "access": "public"
