@@ -32,5 +32,8 @@
   "dependencies": {
     "@ecadlabs/beacon-types": "4.8.1-ecad.1",
     "@ecadlabs/beacon-ui": "4.8.1-ecad.1"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -38,5 +38,8 @@
     "@ecadlabs/beacon-transport-walletconnect": "4.8.1-ecad.1",
     "@ecadlabs/beacon-ui": "4.8.1-ecad.1",
     "broadcast-channel": "^7.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

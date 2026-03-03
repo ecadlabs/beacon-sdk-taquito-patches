@@ -34,5 +34,8 @@
     "@ecadlabs/beacon-core": "4.8.1-ecad.1",
     "@ecadlabs/beacon-types": "4.8.1-ecad.1",
     "@ecadlabs/beacon-utils": "4.8.1-ecad.1"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
