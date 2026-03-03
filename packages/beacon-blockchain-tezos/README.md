@@ -1,23 +1,16 @@
 # `@ecadlabs/beacon-blockchain-tezos`
 
-This package is part of the `@ecadlabs/beacon-sdk` project. [Read more](https://github.com/airgap-it/beacon-sdk)
+> **Do not install this package directly.** It is pulled in automatically by
+> [`@taquito/beacon-wallet`](https://www.npmjs.com/package/@taquito/beacon-wallet).
 
-## Introduction
+This is a patched fork of
+[`@airgap/beacon-blockchain-tezos`](https://www.npmjs.com/package/@airgap/beacon-blockchain-tezos),
+maintained by [ECAD Labs](https://ecadlabs.com) to ship bug fixes for
+[Taquito](https://github.com/ecadlabs/taquito) without waiting on upstream
+release cycles.
 
-This package adds support for the `tezos` blockchain. It can be used in combination with the `@ecadlabs/beacon-dapp` or `@ecadlabs/beacon-wallet` packages.
+For Beacon SDK documentation, see the upstream repo:
+[airgap-it/beacon-sdk](https://github.com/airgap-it/beacon-sdk)
 
-## Usage
-
-```
-import { DAppClient } from '@airga/beacon-dapp'
-import { TezosBlockchain } from '@airga/beacon-blockchain-tezos'
-
-const client = new DAppClient({
-    name: 'Example DApp',
-})
-
-const tezosBlockchain = new TezosBlockchain()
-client.addBlockchain(tezosBlockchain)
-```
-
-Check our documentation for more information. [Documentation](https://docs.walletbeacon.io)
+For details on what patches are applied, see the fork repo:
+[ecadlabs/beacon-sdk-taquito-patches](https://github.com/ecadlabs/beacon-sdk-taquito-patches)

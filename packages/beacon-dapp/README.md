@@ -1,17 +1,16 @@
 # `@ecadlabs/beacon-dapp`
 
-This package is part of the `@ecadlabs/beacon-sdk` project. [Read more](https://github.com/airgap-it/beacon-sdk)
+> **Do not install this package directly.** It is pulled in automatically by
+> [`@taquito/beacon-wallet`](https://www.npmjs.com/package/@taquito/beacon-wallet).
 
-## Introduction
+This is a patched fork of
+[`@airgap/beacon-dapp`](https://www.npmjs.com/package/@airgap/beacon-dapp),
+maintained by [ECAD Labs](https://ecadlabs.com) to ship bug fixes for
+[Taquito](https://github.com/ecadlabs/taquito) without waiting on upstream
+release cycles.
 
-Use this package on your dApp to instanciate a `DAppClient` object and communicate to wallets.
+For Beacon SDK documentation, see the upstream repo:
+[airgap-it/beacon-sdk](https://github.com/airgap-it/beacon-sdk)
 
-## Usage
-
-```
-import { DAppClient } from '@ecadlabs/beacon-dapp'
-
-const dAppClient = new DAppClient({ name: "Beacon Docs" });
-```
-
-Check our documentation for more information. [Documentation](https://docs.walletbeacon.io)
+For details on what patches are applied, see the fork repo:
+[ecadlabs/beacon-sdk-taquito-patches](https://github.com/ecadlabs/beacon-sdk-taquito-patches)

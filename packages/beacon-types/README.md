@@ -1,11 +1,16 @@
 # `@ecadlabs/beacon-types`
 
-This package is part of the `@ecadlabs/beacon-sdk` project. [Read more](https://github.com/airgap-it/beacon-sdk)
+> **Do not install this package directly.** It is pulled in automatically by
+> [`@taquito/beacon-wallet`](https://www.npmjs.com/package/@taquito/beacon-wallet).
 
-## Introduction
+This is a patched fork of
+[`@airgap/beacon-types`](https://www.npmjs.com/package/@airgap/beacon-types),
+maintained by [ECAD Labs](https://ecadlabs.com) to ship bug fixes for
+[Taquito](https://github.com/ecadlabs/taquito) without waiting on upstream
+release cycles.
 
-This package contains types that are used throughout the SDK.
+For Beacon SDK documentation, see the upstream repo:
+[airgap-it/beacon-sdk](https://github.com/airgap-it/beacon-sdk)
 
-Unless you need to import types from this package, you probably don't need to add it to your project.
-
-Check our documentation for more information. [Documentation](https://docs.walletbeacon.io)
+For details on what patches are applied, see the fork repo:
+[ecadlabs/beacon-sdk-taquito-patches](https://github.com/ecadlabs/beacon-sdk-taquito-patches)

@@ -5,7 +5,7 @@
 > This branch (`taquito-patches`) exists so ECAD Labs can ship same-day bug fixes
 > for [Taquito](https://github.com/ecadlabs/taquito) without waiting on upstream
 > release cycles. Packages are renamed from `@airgap/beacon-*` to
-> `@ecadlabs/beacon-*` and published to **GitHub Packages** (not npmjs.org).
+> `@ecadlabs/beacon-*` and published to the **public npm registry**.
 >
 > **Upstream**: [airgap-it/beacon-sdk](https://github.com/airgap-it/beacon-sdk)
 >
@@ -15,26 +15,27 @@
 > |--------|---------|
 > | `master` | Tracks upstream. Periodically synced via `git fetch upstream && git merge upstream/master`. |
 > | `fix/*` | Individual bug fixes branched off master. PRs go to upstream. Keep `@airgap` names. |
-> | `taquito-patches` | **This branch.** Accumulates fixes not yet merged upstream. Has the `@airgap` -> `@ecadlabs` rename. Tagged and published to GitHub Packages. Fixes are dropped as upstream merges them. |
+> | `taquito-patches` | **This branch.** Accumulates fixes not yet merged upstream. Has the `@airgap` -> `@ecadlabs` rename. Tagged and published to the public npm registry. Fixes are dropped as upstream merges them. |
 >
 > ### How Taquito consumes this
 >
-> Taquito's root `package.json` uses npm `overrides` to redirect `@airgap/beacon-*`
-> to `@ecadlabs/beacon-*` at install time. No source code changes in Taquito are
-> needed. Consumers of `@taquito/beacon-wallet` from npm still get `@airgap/beacon-dapp`
-> from the public registry as usual.
+> `@taquito/beacon-wallet` declares `@ecadlabs/beacon-dapp` directly in its
+> dependencies (using `"@airgap/beacon-dapp": "npm:@ecadlabs/beacon-dapp@^4.8.1-ecad"`),
+> so users get the patched fork automatically on `npm install`. No overrides or
+> `.npmrc` configuration is needed.
 >
 > ### Publishing a new version
 >
 > 1. Apply fix to this branch (or merge a `fix/*` branch in)
-> 2. Bump version: `npx lerna version 4.8.0-ecad.N --no-push --exact --yes`
-> 3. Tag: `git tag v4.8.0-ecad.N && git push origin taquito-patches --tags`
-> 4. GitHub Actions publishes to GitHub Packages automatically on tag push
+> 2. Bump version: `npx lerna version 4.8.1-ecad.N --no-push --exact --yes`
+> 3. Tag: `git tag v4.8.1-ecad.N && git push origin taquito-patches --tags`
+> 4. GitHub Actions publishes to the public npm registry automatically on tag push
 >
 > ### Dropping this fork
 >
-> When upstream ships the fix: remove the `overrides` block and `.npmrc` from
-> Taquito, run `npm install`, done.
+> When upstream ships the fix: update `@taquito/beacon-wallet` to depend on
+> `@airgap/beacon-dapp` directly instead of the `npm:@ecadlabs/beacon-dapp` alias,
+> run `npm install`, done.
 
 ---
 
