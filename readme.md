@@ -1,41 +1,51 @@
-# Beacon SDK (ECAD Labs Taquito Patches)
+# Beacon SDK (ECAD fork)
 
-> **This is a patched fork, not the upstream Beacon SDK.**
+> **This repository is the ECAD-maintained Beacon SDK fork.**
 >
-> This branch (`taquito-patches`) exists so ECAD Labs can ship same-day bug fixes
-> for [Taquito](https://github.com/ecadlabs/taquito) without waiting on upstream
-> release cycles. Packages are renamed from `@airgap/beacon-*` to
-> `@ecadlabs/beacon-*` and published to the **public npm registry**.
+> It descends from [airgap-it/beacon-sdk](https://github.com/airgap-it/beacon-sdk),
+> the original upstream Beacon project. ECAD publishes this fork under the neutral
+> `@ecadlabs/beacon-*` npm scope and uses it to support Taquito and related
+> integrations.
 >
-> **Upstream**: [airgap-it/beacon-sdk](https://github.com/airgap-it/beacon-sdk)
+> We also track [trilitech/octez.connect](https://github.com/trilitech/octez.connect),
+> which continues the same SDK line under the `@tezos-x/*` scope. We may
+> selectively import changes from that line when they fit our needs, while
+> continuing to publish and support `@ecadlabs/beacon-*`.
 >
-> ### Branch strategy
+> Where ECAD ports fixes from published `octez.connect` releases, we aim to keep
+> that provenance explicit in our documentation, review notes, and history.
 >
-> | Branch | Purpose |
-> |--------|---------|
-> | `master` | Tracks upstream. Periodically synced via `git fetch upstream && git merge upstream/master`. |
-> | `fix/*` | Individual bug fixes branched off master. PRs go to upstream. Keep `@airgap` names. |
-> | `taquito-patches` | **This branch.** Accumulates fixes not yet merged upstream. Has the `@airgap` -> `@ecadlabs` rename. Tagged and published to the public npm registry. Fixes are dropped as upstream merges them. |
+> A future move to `@tezos-x/*` packages remains possible, but it is not the
+> default assumption for this repository today.
+>
+> ### Current branch and package strategy
+>
+> | Item | Role |
+> |------|------|
+> | `taquito-patches` | Main ECAD maintenance branch for the fork. |
+> | `fix/*` | Short-lived ECAD fix branches when a focused patch is easier to stage separately. |
+> | `@ecadlabs/beacon-*` | Public package names published from this repo. |
+> | `trilitech` remote | External maintenance line we evaluate for import candidates. |
+> | `upstream` remote | Historical AirGap lineage reference. |
 >
 > ### How Taquito consumes this
 >
-> `@taquito/beacon-wallet` declares `@ecadlabs/beacon-dapp` directly in its
-> dependencies (using `"@airgap/beacon-dapp": "npm:@ecadlabs/beacon-dapp@^4.8.1-ecad"`),
-> so users get the patched fork automatically on `npm install`. No overrides or
-> `.npmrc` configuration is needed.
+> Taquito currently depends on `@ecadlabs/beacon-*` packages directly. This keeps
+> the supported Beacon integration under ECAD control while leaving room to
+> reassess package sourcing in the future.
 >
 > ### Publishing a new version
 >
-> 1. Apply fix to this branch (or merge a `fix/*` branch in)
-> 2. Bump version: `npx lerna version 4.8.1-ecad.N --no-push --exact --yes`
-> 3. Tag: `git tag v4.8.1-ecad.N && git push origin taquito-patches --tags`
-> 4. GitHub Actions publishes to the public npm registry automatically on tag push
+> 1. Apply or merge the desired fix on `taquito-patches`
+> 2. Bump version, for example: `npx lerna version 4.8.1-ecad.N --no-push --exact --yes`
+> 3. Tag and push: `git tag v4.8.1-ecad.N && git push origin taquito-patches --tags`
+> 4. GitHub Actions publishes the `@ecadlabs/beacon-*` packages to the public npm registry
 >
-> ### Dropping this fork
+> ### Reassessing package sourcing
 >
-> When upstream ships the fix: update `@taquito/beacon-wallet` to depend on
-> `@airgap/beacon-dapp` directly instead of the `npm:@ecadlabs/beacon-dapp` alias,
-> run `npm install`, done.
+> If the external maintenance line becomes stable and appropriate for our needs,
+> ECAD may choose to consume or adopt a different package line in the future.
+> That decision should be made explicitly and separately from routine patch work.
 
 ---
 
