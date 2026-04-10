@@ -20,7 +20,7 @@ const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
   const p2pPayload = props.pairingPayload!.p2pSyncCode
   const postPayload = props.pairingPayload!.postmessageSyncCode
   const isMobile = useIsMobile()
-  const wallets = useWallets(
+  const { wallets, availableExtensions } = useWallets(
     props.pairingPayload?.networkType,
     !props.substratePairing ? props.featuredWallets : undefined
   )
@@ -193,38 +193,46 @@ const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
                 ]}
               />
             )}
-            {!isMobile && wallet?.types.includes('extension') && (
-              <Info
-                border
-                title={
-                  wallet.firefoxId
-                    ? `Connect with ${wallet?.name} Browser Extension`
-                    : `Install ${wallet?.name} Wallet`
-                }
-                description={
-                  wallet.firefoxId
-                    ? `Please connect below to use your ${wallet?.name} Wallet browser extension.`
-                    : `To connect your ${wallet?.name} Wallet, install the browser extension.`
-                }
-                buttons={
-                  wallet.firefoxId
-                    ? [
-                        {
-                          label: 'Use Extension',
-                          type: 'primary',
-                          onClick: () => handleClickConnectExtension()
-                        }
-                      ]
-                    : [
-                        {
-                          label: 'Install extension',
-                          type: 'primary',
-                          onClick: () => handleClickInstallExtension()
-                        }
-                      ]
-                }
-              />
-            )}
+            {!isMobile && wallet?.types.includes('extension') && (() => {
+              const isExtensionInstalled = props.substratePairing
+                ? false
+                : availableExtensions.some(
+                    (ext) => ext.id === wallet.id || ext.id === wallet.firefoxId
+                  )
+
+              return (
+                <Info
+                  border
+                  title={
+                    isExtensionInstalled
+                      ? `Connect with ${wallet?.name} Browser Extension`
+                      : `Install ${wallet?.name} Wallet`
+                  }
+                  description={
+                    isExtensionInstalled
+                      ? `Please connect below to use your ${wallet?.name} Wallet browser extension.`
+                      : `To connect your ${wallet?.name} Wallet, install the browser extension.`
+                  }
+                  buttons={
+                    isExtensionInstalled
+                      ? [
+                          {
+                            label: 'Use Extension',
+                            type: 'primary',
+                            onClick: () => handleClickConnectExtension()
+                          }
+                        ]
+                      : [
+                          {
+                            label: 'Install extension',
+                            type: 'primary',
+                            onClick: () => handleClickInstallExtension()
+                          }
+                        ]
+                  }
+                />
+              )
+            })()}
             {!isMobileOS(window) && wallet?.types.includes('desktop') && (
               <Info
                 border

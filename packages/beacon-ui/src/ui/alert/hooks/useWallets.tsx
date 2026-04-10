@@ -101,8 +101,11 @@ const useWallets = (networkType?: NetworkType, featuredWallets?: string[]) => {
     )
   }, [availableExtensions, networkType, featuredWallets])
 
-  // Memoize the final Map structure
-  return useMemo(() => new Map(wallets.map((wallet) => [wallet.id, wallet])), [wallets])
+  // Expose both the merged wallet map and the extension probe results so the UI
+  // can distinguish "known extension" from "extension actually responded".
+  const walletsMap = useMemo(() => new Map(wallets.map((wallet) => [wallet.id, wallet])), [wallets])
+
+  return { wallets: walletsMap, availableExtensions }
 }
 
 export default useWallets
