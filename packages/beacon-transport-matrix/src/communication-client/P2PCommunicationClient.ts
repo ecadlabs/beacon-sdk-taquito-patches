@@ -220,6 +220,7 @@ export class P2PCommunicationClient extends CommunicationClient {
   public async getRelayServer(): Promise<{ server: string; timestamp: number }> {
     // Fast path: in-memory cached relay server that's still fresh
     if (this.relayServer) {
+      const currentPromise = this.relayServer
       const relayServer = await this.relayServer.promise
 
       if (Date.now() - relayServer.localTimestamp < 60 * 1000) {
@@ -228,23 +229,44 @@ export class P2PCommunicationClient extends CommunicationClient {
 
       try {
         const info = await this.getBeaconInfo(relayServer.server)
-        this.relayServer.resolve({
+        const refreshedPromise = ExposedPromise.resolve({
           server: relayServer.server,
           timestamp: info.timestamp,
           localTimestamp: new Date().getTime()
         })
+
+        if (this.relayServer === currentPromise) {
+          this.relayServer = refreshedPromise
+        }
+
         return { server: relayServer.server, timestamp: info.timestamp }
       } catch (error) {
         logger.log('getRelayServer', `cached server ${relayServer.server} is unreachable, resetting`)
         await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
-        this.relayServer = undefined
-        this.selectedRegion = undefined
+        const replacementRelayPromise = this.relayServer
+        if (replacementRelayPromise === currentPromise) {
+          this.relayServer = undefined
+          this.selectedRegion = undefined
+        } else if (replacementRelayPromise) {
+          const latestRelayServer = await replacementRelayPromise.promise
+          return { server: latestRelayServer.server, timestamp: latestRelayServer.timestamp }
+        }
         // Fall through to discovery below
       }
     }
 
+    if (this.relayServer) {
+      const relayServer = await this.relayServer.promise
+      return { server: relayServer.server, timestamp: relayServer.timestamp }
+    }
+
     // First caller creates the promise; concurrent callers will await it at line above
-    this.relayServer = new ExposedPromise()
+    const discoveryPromise = new ExposedPromise<{
+      server: string
+      timestamp: number
+      localTimestamp: number
+    }>()
+    this.relayServer = discoveryPromise
 
     try {
       // Try the localStorage-cached node first
@@ -252,7 +274,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       if (node && node.length > 0) {
         try {
           const info = await this.getBeaconInfo(node)
-          this.relayServer.resolve({
+          discoveryPromise.resolve({
             server: node,
             timestamp: info.timestamp,
             localTimestamp: new Date().getTime()
@@ -275,7 +297,7 @@ export class P2PCommunicationClient extends CommunicationClient {
         .set(StorageKey.MATRIX_SELECTED_NODE, server.server)
         .catch((error) => logger.log(error))
 
-      this.relayServer.resolve({
+      discoveryPromise.resolve({
         server: server.server,
         timestamp: server.timestamp,
         localTimestamp: new Date().getTime()
@@ -284,8 +306,10 @@ export class P2PCommunicationClient extends CommunicationClient {
       return { server: server.server, timestamp: server.timestamp }
     } catch (error) {
       // Always settle the ExposedPromise so concurrent callers don't hang forever
-      this.relayServer.reject(error)
-      this.relayServer = undefined
+      discoveryPromise.reject(error)
+      if (this.relayServer === discoveryPromise) {
+        this.relayServer = undefined
+      }
       throw error
     }
   }
