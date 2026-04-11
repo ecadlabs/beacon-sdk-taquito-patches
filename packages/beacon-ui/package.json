@@ -57,7 +57,7 @@
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.0",
     "postcss-import": "^16.1.0",
-    "rollup": "4.39.0",
+    "rollup": "4.60.1",
     "rollup-plugin-postcss": "^4.0.2",
     "rollup-plugin-string": "^3.0.0",
     "rollup-plugin-svg": "^2.0.0",
