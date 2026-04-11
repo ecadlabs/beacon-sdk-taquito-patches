@@ -34,7 +34,7 @@
     "@stablelib/ed25519": "^2.1.0",
     "@stablelib/nacl": "^2.0.1",
     "@stablelib/random": "^2.0.1",
-    "@stablelib/utf8": "^2.0.1",
+    "@stablelib/utf8": "^2.1.0",
     "bs58check": "4.0.0"
   },
   "publishConfig": {

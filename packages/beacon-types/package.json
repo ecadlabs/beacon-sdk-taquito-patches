@@ -30,7 +30,7 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@types/chrome": "0.0.315"
+    "@types/chrome": "^0.1.40"
   },
   "publishConfig": {
     "access": "public"

@@ -20,12 +20,14 @@ export class ChromeStorage implements Storage {
     return new Promise((resolve) => {
       chrome.storage.local.get(null, (storageContent) => {
         if (storageContent[key]) {
-          resolve(storageContent[key])
+          resolve(storageContent[key] as StorageKeyReturnType[K])
         } else {
-          if (typeof defaultValues[key] === 'object') {
-            resolve(JSON.parse(JSON.stringify(defaultValues[key])))
+          const defaultValue = defaultValues[key]
+
+          if (typeof defaultValue === 'object') {
+            resolve(JSON.parse(JSON.stringify(defaultValue)) as StorageKeyReturnType[K])
           } else {
-            resolve(defaultValues[key])
+            resolve(defaultValue as StorageKeyReturnType[K])
           }
         }
       })
