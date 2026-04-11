@@ -31,8 +31,25 @@ const resolvePublishTag = ({ version, extraArgs, env }) => {
   return env.NPM_DIST_TAG ?? getPrereleaseTag(version)
 }
 
+const resolvePublishCommand = ({ publishArgs, env, nodeExecPath }) => {
+  const npmExecPath = env.npm_execpath
+
+  if (npmExecPath) {
+    return {
+      command: nodeExecPath,
+      args: [npmExecPath, ...publishArgs]
+    }
+  }
+
+  return {
+    command: 'npm',
+    args: publishArgs
+  }
+}
+
 module.exports = {
   getPrereleaseTag,
   hasExplicitTagArg,
+  resolvePublishCommand,
   resolvePublishTag
 }
