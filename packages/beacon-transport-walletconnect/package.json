@@ -35,10 +35,8 @@
     "@ecadlabs/beacon-types": "4.8.1-ecad.4",
     "@ecadlabs/beacon-utils": "4.8.1-ecad.4",
     "@walletconnect/sign-client": "^2.23.9",
-    "elliptic": "^6.6.1"
-  },
-  "devDependencies": {
-    "@types/elliptic": "^6.4.18"
+    "@walletconnect/types": "^2.23.9",
+    "@walletconnect/utils": "^2.23.9"
   },
   "publishConfig": {
     "access": "public"
