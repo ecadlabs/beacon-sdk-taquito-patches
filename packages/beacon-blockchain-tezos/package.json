@@ -2,8 +2,8 @@
   "name": "@ecadlabs/beacon-blockchain-tezos",
   "version": "4.8.1-ecad.2",
   "description": "This package adds support for the `tezos` blockchain. It can be used in combination with the `@ecadlabs/beacon-dapp` or `@ecadlabs/beacon-wallet` packages.",
-  "author": "Andreas Gassmann <a.gassmann@papers.ch>",
-  "homepage": "https://walletbeacon.io",
+  "author": "ECAD Labs",
+  "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
   "license": "ISC",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
@@ -21,13 +21,13 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/airgap-it/beacon-sdk.git"
+    "url": "git+https://github.com/ecadlabs/beacon-sdk-taquito-patches.git"
   },
   "scripts": {
     "tsc": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json"
   },
   "bugs": {
-    "url": "https://github.com/airgap-it/beacon-sdk/issues"
+    "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
     "@ecadlabs/beacon-types": "4.8.1-ecad.2",

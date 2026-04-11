@@ -2,8 +2,8 @@
   "name": "@ecadlabs/beacon-transport-matrix",
   "version": "4.8.1-ecad.2",
   "description": "This package contains methods to facilitate communication over the Beacon network, a decentralised P2P network that is based on the matrix protocol.",
-  "author": "Andreas Gassmann <a.gassmann@papers.ch>",
-  "homepage": "https://walletbeacon.io",
+  "author": "ECAD Labs",
+  "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
   "license": "ISC",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
@@ -21,14 +21,14 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/airgap-it/beacon-sdk.git"
+    "url": "git+https://github.com/ecadlabs/beacon-sdk-taquito-patches.git"
   },
   "scripts": {
     "tsc": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json",
     "test": "jest"
   },
   "bugs": {
-    "url": "https://github.com/airgap-it/beacon-sdk/issues"
+    "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
     "@ecadlabs/beacon-core": "4.8.1-ecad.2",
