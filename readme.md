@@ -1,6 +1,6 @@
-# Beacon SDK (ECAD fork)
+# Beacon SDK (ECAD-maintained line)
 
-> **This repository is the ECAD-maintained Beacon SDK fork.**
+> **This repository is the ECAD-maintained Beacon SDK package line.**
 >
 > It descends from [airgap-it/beacon-sdk](https://github.com/airgap-it/beacon-sdk),
 > the original upstream Beacon project. ECAD publishes this fork under the neutral
@@ -28,6 +28,15 @@
 > | `trilitech` remote | External maintenance line we evaluate for import candidates. |
 > | `upstream` remote | Historical AirGap lineage reference. |
 >
+> ### Release and review posture
+>
+> - Pull requests are the expected integration path for `taquito-patches`
+> - CI runs on both `push` and `pull_request`
+> - npm publication is handled from this repository through GitHub Actions using
+>   npm Trusted Publishers, not long-lived npm automation tokens
+> - Workspace versioning is synchronized from the root manifest into every
+>   published package before release
+>
 > ### How Taquito consumes this
 >
 > Taquito currently depends on `@ecadlabs/beacon-*` packages directly. This keeps
@@ -37,9 +46,11 @@
 > ### Publishing a new version
 >
 > 1. Apply or merge the desired fix on `taquito-patches`
-> 2. Bump version, for example: `npx lerna version 4.8.1-ecad.N --no-push --exact --yes`
-> 3. Tag and push: `git tag v4.8.1-ecad.N && git push origin taquito-patches --tags`
-> 4. GitHub Actions publishes the `@ecadlabs/beacon-*` packages to the public npm registry
+> 2. Set the release version, for example:
+>    `npm version 4.8.1-ecad.N --no-git-tag-version && npm run version:sync`
+> 3. Refresh the lockfile: `npm install --package-lock-only --ignore-scripts`
+> 4. Tag and push: `git tag v4.8.1-ecad.N && git push origin taquito-patches --tags`
+> 5. GitHub Actions publishes the `@ecadlabs/beacon-*` packages to the public npm registry through npm Trusted Publishers
 >
 > ### Reassessing package sourcing
 >
@@ -68,7 +79,10 @@ Besides this Typescript SDK, we also provide SDKs for native iOS and Android Wal
 
 ## Documentation
 
-The documentation can be found [here](https://docs.walletbeacon.io/), technical documentation can be found [here](https://typedocs.walletbeacon.io/).
+The repository README is the canonical maintenance overview for the ECAD package
+line. API documentation is generated from this repo and intended to be published
+via GitHub Pages at
+[ecadlabs.github.io/beacon-sdk-taquito-patches](https://ecadlabs.github.io/beacon-sdk-taquito-patches/).
 
 ## Installation
 
@@ -131,16 +145,19 @@ For a more complete example, take a look at the `example-wallet.html` file.
 
 ## Adding a wallet to beacon-sdk
 
-Please create a PR and add your wallet [here](https://github.com/airgap-it/beacon-sdk/blob/master/scripts/generate-wallet-list.ts).
+Please create a PR and add your wallet in
+[`scripts/generate-wallet-list.ts`](./scripts/generate-wallet-list.ts).
 
 For iOS wallets, the wallet needs to define a custom url scheme to support the same-device functionality.
 
 ## Development
 
 ```
-$ npm i
+$ npm ci
+$ npm run check:versions
 $ npm run build
 $ npm run test
+$ npm run e2e
 ```
 
 Once the SDK is built, you can open the `dapp.html` or `wallet.html` file in your browser and try out the basic functionality. To support browser extensions as well, the file should be viewed over a webserver. You can navigate to the example folder and easily start one with `python -m SimpleHTTPServer 8000` (or `python3 -m http.server 8000` with Python 3.x) and then open the examples with `http://localhost:8000/`.
