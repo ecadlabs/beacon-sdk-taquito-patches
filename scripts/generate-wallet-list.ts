@@ -30,7 +30,7 @@ import {
   tezosSaplingWebList
 } from './blockchains/tezos-sapling'
 
-const resizeImg = require('resize-img')
+const { createDataUri } = require('./helpers/logo')
 
 const generateForBlockchains = (
   packagePath: string,
@@ -53,16 +53,7 @@ const generateForBlockchains = (
         }
 
         const imgBuffer = await readFile(path.join(REGISTRY_DIR, entry.logo))
-
-        if (ext === 'svg') {
-          entry.logo = `data:image/svg+xml;base64,${imgBuffer.toString('base64')}`
-        } else {
-          const resizedImage = await resizeImg(imgBuffer, {
-            width: 256,
-            height: 256
-          })
-          entry.logo = `data:image/${ext};base64,${resizedImage.toString('base64')}`
-        }
+        entry.logo = createDataUri(imgBuffer, ext)
 
         return entry
       })

@@ -10,6 +10,14 @@
     "jsx": "preserve",
     "jsxImportSource": "react",
     "types": ["vite/client", "node", "chrome", "jest"],
+    "typeRoots": [
+      "./node_modules/@types",
+      "../../node_modules/@types",
+      "./src/typings",
+      "../../src/typings",
+      "./node_modules",
+      "../../node_modules"
+    ],
     "noEmit": true,
     "baseUrl": ".",
     "paths": {

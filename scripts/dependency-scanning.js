@@ -1,35 +1,38 @@
 'use strict'
 
 const fs = require('fs')
-const audit = require('../audit.json')
-const advisories = Object.values(audit.advisories)
-const result = []
+const { execFileSync } = require('child_process')
 
-function getPriority(priority) {
-  switch (priority.toLowerCase()) {
-    case 'moderate':
-      return 'Medium'
-    case 'low':
-      return 'Low'
-    default:
-      return 'High'
+const { createDependencyScanningReport } = require('./helpers/dependency-scanning')
+
+function runAudit() {
+  try {
+    const stdout = execFileSync('npm', ['audit', '--json'], {
+      encoding: 'utf8'
+    })
+
+    return {
+      audit: JSON.parse(stdout),
+      exitCode: 0
+    }
+  } catch (error) {
+    const stdout = error.stdout ? error.stdout.toString() : ''
+
+    if (!stdout.trim()) {
+      throw error
+    }
+
+    return {
+      audit: JSON.parse(stdout),
+      exitCode: error.status || 1
+    }
   }
 }
 
-for (const advisory of advisories) {
-  const { title, overview, recommendation, severity, url } = advisory
-  const message = `${title}\n\n${overview}`
-  const cve = advisory.cves && advisory.cves.length ? advisory.cves[0] : null
+const { audit, exitCode } = runAudit()
+const report = createDependencyScanningReport(audit)
 
-  result.push({
-    message,
-    cve,
-    cwe: advisory.cwe,
-    solution: recommendation,
-    url,
-    priority: getPriority(severity)
-  })
-}
+fs.writeFileSync('audit.json', `${JSON.stringify(audit, null, 2)}\n`, 'utf8')
+fs.writeFileSync('gl-dependency-scanning-report.json', `${JSON.stringify(report, null, 2)}\n`, 'utf8')
 
-const filename = 'gl-dependency-scanning-report.json'
-fs.writeFileSync(filename, JSON.stringify(result), 'utf8')
+process.exitCode = exitCode
