@@ -80,9 +80,7 @@ Besides this Typescript SDK, we also provide SDKs for native iOS and Android Wal
 ## Documentation
 
 The repository README is the canonical maintenance overview for the ECAD package
-line. API documentation is generated from this repo and intended to be published
-via GitHub Pages at
-[ecadlabs.github.io/beacon-sdk-taquito-patches](https://ecadlabs.github.io/beacon-sdk-taquito-patches/).
+line.
 
 ## Installation
 
