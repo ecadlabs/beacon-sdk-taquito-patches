@@ -3,7 +3,7 @@
 > **This repository is the ECAD-maintained Beacon SDK package line.**
 >
 > It descends from [airgap-it/beacon-sdk](https://github.com/airgap-it/beacon-sdk),
-> the original upstream Beacon project. ECAD publishes this fork under the neutral
+> the original upstream Beacon project. ECAD publishes this line under the neutral
 > `@ecadlabs/beacon-*` npm scope and uses it to support Taquito and related
 > integrations.
 >
@@ -22,7 +22,7 @@
 >
 > | Item | Role |
 > |------|------|
-> | `taquito-patches` | Main ECAD maintenance branch for the fork. |
+> | `taquito-patches` | Main ECAD maintenance branch for the package line. |
 > | `fix/*` | Short-lived ECAD fix branches when a focused patch is easier to stage separately. |
 > | `@ecadlabs/beacon-*` | Public package names published from this repo. |
 > | `trilitech` remote | External maintenance line we evaluate for import candidates. |
@@ -36,68 +36,88 @@
 >   npm Trusted Publishers, not long-lived npm automation tokens
 > - Workspace versioning is synchronized from the root manifest into every
 >   published package before release
->
-> ### How Taquito consumes this
->
-> Taquito currently depends on `@ecadlabs/beacon-*` packages directly. This keeps
-> the supported Beacon integration under ECAD control while leaving room to
-> reassess package sourcing in the future.
->
-> ### Publishing a new version
->
-> 1. Apply or merge the desired fix on `taquito-patches`
-> 2. Set the release version, for example:
->    `npm version 4.8.1-ecad.N --no-git-tag-version && npm run version:sync`
-> 3. Refresh the lockfile: `npm install --package-lock-only --ignore-scripts`
-> 4. Tag and push: `git tag v4.8.1-ecad.N && git push origin taquito-patches --tags`
-> 5. GitHub Actions publishes the `@ecadlabs/beacon-*` packages to the public npm registry through npm Trusted Publishers
->
-> ### Reassessing package sourcing
->
-> If the external maintenance line becomes stable and appropriate for our needs,
-> ECAD may choose to consume or adopt a different package line in the future.
-> That decision should be made explicitly and separately from routine patch work.
+> - Prerelease versions publish under the prerelease identifier as the npm
+>   dist-tag, for example `4.8.1-ecad.4` publishes under `ecad`
+
+### Published packages
+
+Primary entry points:
+
+- `@ecadlabs/beacon-sdk`
+- `@ecadlabs/beacon-dapp`
+- `@ecadlabs/beacon-wallet`
+
+Lower-level packages also published from this repo:
+
+- `@ecadlabs/beacon-types`
+- `@ecadlabs/beacon-core`
+- `@ecadlabs/beacon-utils`
+- `@ecadlabs/beacon-ui`
+- `@ecadlabs/beacon-transport-matrix`
+- `@ecadlabs/beacon-transport-postmessage`
+- `@ecadlabs/beacon-transport-walletconnect`
+- `@ecadlabs/beacon-blockchain-tezos`
+- `@ecadlabs/beacon-blockchain-tezos-sapling`
+- `@ecadlabs/beacon-blockchain-substrate`
+
+### How Taquito consumes this
+
+Taquito currently depends on `@ecadlabs/beacon-*` packages directly. This keeps
+the supported Beacon integration under ECAD control while leaving room to
+reassess package sourcing in the future.
+
+### Publishing a new version
+
+1. Apply or merge the desired fix on `taquito-patches`
+2. Set the release version, for example:
+   `npm version 4.8.1-ecad.N --no-git-tag-version && npm run version:sync`
+3. Refresh package README files: `npm run readmes:sync`
+4. Refresh the lockfile: `npm install --package-lock-only --ignore-scripts`
+5. Tag and push: `git tag v4.8.1-ecad.N && git push origin taquito-patches --tags`
+6. GitHub Actions publishes the `@ecadlabs/beacon-*` packages to the public npm registry through npm Trusted Publishers
+
+### Reassessing package sourcing
+
+If the external maintenance line becomes stable and appropriate for our needs,
+ECAD may choose to consume or adopt a different package line in the future.
+That decision should be made explicitly and separately from routine patch work.
 
 ---
 
 [![code style: prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg?style=flat-square)](https://github.com/prettier/prettier)
 
-> Connect Wallets with dApps on Tezos
+> Connect wallets with dApps on Tezos
 
-[Beacon](https://walletbeacon.io) is the implementation of the wallet interaction standard [tzip-10](https://gitlab.com/tzip/tzip/blob/master/proposals/tzip-10/tzip-10.md) which describes the connnection of a dApp with a wallet.
+[Beacon](https://walletbeacon.io) is the implementation of the wallet interaction standard [TZIP-10](https://gitlab.com/tzip/tzip/blob/master/proposals/tzip-10/tzip-10.md), which describes communication between a dApp and a wallet.
 
 ## Intro
 
-The `beacon-sdk` simplifies and abstracts the communication between dApps and wallets over different transport layers.
+The `beacon-sdk` simplifies and abstracts communication between dApps and
+wallets over different transport layers.
 
-Developers that plan to develop complex smart contract interactions can use [Taquito](https://github.com/ecadlabs/taquito) with the `BeaconWallet`, which uses this SDK under the hood, but provides helpful methods to interact with contracts.
+Developers building more complex smart contract interactions can use
+[Taquito](https://github.com/ecadlabs/taquito) with `BeaconWallet`, which uses
+this SDK under the hood and provides higher-level contract interaction helpers.
 
-Besides this Typescript SDK, we also provide SDKs for native iOS and Android Wallets:
+Besides this TypeScript SDK, there are also native Beacon SDKs for iOS and Android wallets:
 
 - [Beacon Android SDK (Kotlin)](https://github.com/airgap-it/beacon-android-sdk)
 - [Beacon iOS SDK (Swift)](https://github.com/airgap-it/beacon-ios-sdk)
 
-## Documentation
-
-The repository README is the canonical maintenance overview for the ECAD package
-line.
-
 ## Installation
 
-```
-npm i --save @ecadlabs/beacon-sdk
+```sh
+npm install @ecadlabs/beacon-sdk
 ```
 
-## Example DApp integration
+## Example dApp integration
 
 ```ts
-import { DAppClient } from '@ecadlabs/beacon-sdk'
+import { BeaconEvent, DAppClient } from '@ecadlabs/beacon-sdk'
 
 const dAppClient = new DAppClient({ name: 'My Sample DApp' })
 
-// Listen for all the active account changes
 dAppClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, async (account) => {
-  // An active account has been set, update the dApp UI
   console.log(`${BeaconEvent.ACTIVE_ACCOUNT_SET} triggered: `, account)
 })
 
@@ -110,52 +130,57 @@ try {
 }
 ```
 
-For a more complete example, take a look at the `example-dapp.html` file.
+For a more complete example, see `example-dapp.html`.
 
-## Example Wallet integration
+## Example wallet integration
 
 ```ts
+import {
+  BeaconMessageType,
+  PermissionResponseInput,
+  PermissionScope,
+  WalletClient
+} from '@ecadlabs/beacon-sdk'
+
 const client = new WalletClient({ name: 'My Wallet' })
-await client.init() // Establish P2P connection
+await client.init()
 
 client
   .connect(async (message) => {
-    // Example: Handle PermissionRequest. A wallet should handle all request types
     if (message.type === BeaconMessageType.PermissionRequest) {
-      // Show a UI to the user where he can confirm sharing an account with the DApp
-
       const response: PermissionResponseInput = {
         type: BeaconMessageType.PermissionResponse,
-        network: message.network, // Use the same network that the user requested
-        scopes: [PermissionScope.OPERATION_REQUEST], // Ignore the scopes that have been requested and instead give only operation permissions
+        network: message.network,
+        scopes: [PermissionScope.OPERATION_REQUEST],
         id: message.id,
         publicKey: 'tezos public key'
       }
 
-      // Send response back to DApp
       await client.respond(response)
     }
   })
   .catch((error) => console.error('connect error', error))
 ```
 
-For a more complete example, take a look at the `example-wallet.html` file.
+For a more complete example, see `example-wallet.html`.
 
-## Adding a wallet to beacon-sdk
+## Adding a wallet to Beacon SDK
 
 Please create a PR and add your wallet in
 [`scripts/generate-wallet-list.ts`](./scripts/generate-wallet-list.ts).
 
-For iOS wallets, the wallet needs to define a custom url scheme to support the same-device functionality.
+For iOS wallets, the wallet needs to define a custom URL scheme to support same-device functionality.
 
 ## Development
 
-```
-$ npm ci
-$ npm run check:versions
-$ npm run build
-$ npm run test
-$ npm run e2e
+```sh
+npm ci
+npm run check:versions
+npm run build
+npm run test
+npm run e2e
 ```
 
-Once the SDK is built, you can open the `dapp.html` or `wallet.html` file in your browser and try out the basic functionality. To support browser extensions as well, the file should be viewed over a webserver. You can navigate to the example folder and easily start one with `python -m SimpleHTTPServer 8000` (or `python3 -m http.server 8000` with Python 3.x) and then open the examples with `http://localhost:8000/`.
+Once the SDK is built, you can open `dapp.html` or `wallet.html` in your
+browser and try the basic functionality. To support browser extensions, the
+examples should be served over HTTP rather than opened directly from disk.

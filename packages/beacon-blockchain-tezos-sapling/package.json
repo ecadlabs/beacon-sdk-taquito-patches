@@ -1,7 +1,7 @@
 {
   "name": "@ecadlabs/beacon-blockchain-tezos-sapling",
   "version": "4.8.1-ecad.3",
-  "description": "This package adds support for `tezos-sapling`, the sapling integration on the Tezos blockchain. It can be used in combination with the `@ecadlabs/beacon-dapp` or `@ecadlabs/beacon-wallet` packages.",
+  "description": "Tezos Sapling support package for the Beacon SDK.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
   "license": "ISC",

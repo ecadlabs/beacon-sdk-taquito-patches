@@ -1,17 +1,25 @@
 # `@ecadlabs/beacon-transport-matrix`
 
-> **Do not install this package directly.** It is pulled in automatically by
-> [`@taquito/beacon-wallet`](https://www.npmjs.com/package/@taquito/beacon-wallet).
+Matrix transport for Beacon peer-to-peer communication.
 
-This is a patched fork of
-[`@airgap/beacon-transport-matrix`](https://www.npmjs.com/package/@airgap/beacon-transport-matrix),
-maintained by [ECAD Labs](https://ecadlabs.com) to ship bug fixes for
-[Taquito](https://github.com/ecadlabs/taquito) without waiting on upstream
-release cycles.
+This is a lower-level support package in the ECAD-maintained Beacon SDK line. Most consumers should install a higher-level package instead.
 
-For Beacon SDK documentation, maintenance policy, and patch history, see:
+## Package provenance
+
+This package is published from the ECAD-maintained Beacon SDK repository:
 [ecadlabs/beacon-sdk-taquito-patches](https://github.com/ecadlabs/beacon-sdk-taquito-patches)
 
-This ECAD package line descends from the original
-[airgap-it/beacon-sdk](https://github.com/airgap-it/beacon-sdk) project and
-may selectively port fixes from the broader Beacon and `octez.connect` lineage.
+- Original Beacon lineage: [airgap-it/beacon-sdk](https://github.com/airgap-it/beacon-sdk)
+- External maintenance line ECAD may selectively import from: [trilitech/octez.connect](https://github.com/trilitech/octez.connect)
+
+## Usually install instead
+
+- `@ecadlabs/beacon-sdk` for the general Beacon SDK surface
+- `@ecadlabs/beacon-dapp` for dApp integrations
+- `@ecadlabs/beacon-wallet` for wallet integrations
+- `@taquito/beacon-wallet` if you are consuming Beacon through Taquito
+## Notes
+
+- ECAD publishes these packages under the neutral `@ecadlabs/beacon-*` scope
+- Taquito consumes this package line directly where Beacon patches are needed
+- Release notes, package policy, and the current package list live in the repository README

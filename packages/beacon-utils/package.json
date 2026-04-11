@@ -1,7 +1,7 @@
 {
   "name": "@ecadlabs/beacon-utils",
   "version": "4.8.1-ecad.3",
-  "description": "This package contains utility functions that are used throughout the beacon-sdk",
+  "description": "Shared utility helpers used across the Beacon SDK packages.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
   "license": "ISC",

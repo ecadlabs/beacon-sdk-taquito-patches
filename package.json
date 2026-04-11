@@ -45,6 +45,7 @@
     "check:versions": "node scripts/check-workspace-version.mjs && node scripts/check-security-deps.mjs",
     "check-version": "npm run check:versions",
     "version:sync": "node scripts/set-workspace-version.mjs",
+    "readmes:sync": "node scripts/sync-package-readmes.mjs",
     "typedoc": "typedoc",
     "publish:packages": "node scripts/publish-workspaces.mjs",
     "build:ui": "cd packages/beacon-ui && npm run tsc && cd ../.. && npm run webpack:sdk"

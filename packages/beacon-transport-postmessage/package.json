@@ -1,7 +1,7 @@
 {
   "name": "@ecadlabs/beacon-transport-postmessage",
   "version": "4.8.1-ecad.3",
-  "description": "This package contains methods to facilitate communication over the postmessage interface of the browser to talk to browser extensions.",
+  "description": "PostMessage transport for Beacon communication with browser extensions.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
   "license": "ISC",
