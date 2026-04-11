@@ -1,10 +1,8 @@
-import { ExposedPromise } from '@ecadlabs/beacon-utils'
-import { getKeypairFromSeed, toHex, generateGUID } from '@ecadlabs/beacon-utils'
+import { ExposedPromise, getKeypairFromSeed, KeyPair, toHex, generateGUID } from '@ecadlabs/beacon-utils'
 import { AnalyticsInterface, Storage, StorageKey } from '@ecadlabs/beacon-types'
 import { SDK_VERSION } from '../../constants'
 import { windowRef } from '../../MockWindow'
 import { BeaconClientOptions } from './BeaconClientOptions'
-import { KeyPair } from '@stablelib/ed25519'
 import { MockAnalytics } from '../../MockAnalytics'
 
 /**

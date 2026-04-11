@@ -31,7 +31,7 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@stablelib/ed25519": "^2.0.2",
+    "@stablelib/ed25519": "^2.1.0",
     "@stablelib/nacl": "^2.0.1",
     "@stablelib/random": "^2.0.1",
     "@stablelib/utf8": "^2.0.1",

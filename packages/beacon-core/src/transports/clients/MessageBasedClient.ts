@@ -3,12 +3,12 @@ import {
   decryptCryptoboxPayload,
   encryptCryptoboxPayload,
   generateGUID,
+  KeyPair,
   secretbox_NONCEBYTES,
   secretbox_MACBYTES
 } from '@ecadlabs/beacon-utils'
 import { CommunicationClient } from './CommunicationClient'
 import { PostMessagePairingRequest, PostMessagePairingResponse } from '@ecadlabs/beacon-types'
-import { KeyPair } from '@stablelib/ed25519'
 
 /**
  * @internalapi

@@ -33,7 +33,6 @@
   "dependencies": {
     "@ecadlabs/beacon-types": "4.8.1-ecad.2",
     "@ecadlabs/beacon-utils": "4.8.1-ecad.2",
-    "@stablelib/ed25519": "^2.0.2",
     "@stablelib/nacl": "^2.0.1",
     "@stablelib/utf8": "^2.0.1",
     "@stablelib/x25519-session": "^2.0.1",

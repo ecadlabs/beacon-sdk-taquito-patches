@@ -16,6 +16,13 @@ export {
   encodePoeChallengePayload,
   isPublicKeySC
 } from './utils/crypto'
+export {
+  convertPublicKeyToX25519,
+  convertSecretKeyToX25519,
+  generateKeyPairFromSeed,
+  sign,
+  type KeyPair
+} from './utils/ed25519'
 export { generateGUID } from './utils/generate-uuid'
 
 export const CONTRACT_PREFIX = 'KT1'

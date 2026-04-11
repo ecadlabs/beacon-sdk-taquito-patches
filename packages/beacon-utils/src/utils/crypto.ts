@@ -3,11 +3,15 @@ import { box, generateKeyPair, openBox, openSecretBox, secretBox } from '@stable
 import { randomBytes } from '@stablelib/random'
 import { encode } from '@stablelib/utf8'
 import { hash } from '@stablelib/blake2b'
-import { generateKeyPairFromSeed } from '@stablelib/ed25519'
-import { convertPublicKeyToX25519, convertSecretKeyToX25519, KeyPair } from '@stablelib/ed25519'
 import { BLAKE2b } from '@stablelib/blake2b'
 import { concat } from '@stablelib/bytes'
-import { sign } from '@stablelib/ed25519'
+import {
+  convertPublicKeyToX25519,
+  convertSecretKeyToX25519,
+  generateKeyPairFromSeed,
+  sign,
+  type KeyPair
+} from './ed25519'
 
 export const secretbox_NONCEBYTES = 24 // crypto_secretbox_NONCEBYTES
 export const secretbox_MACBYTES = 16 // crypto_secretbox_MACBYTES

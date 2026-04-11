@@ -11,7 +11,7 @@ import {
   NodeDistributions
 } from '@ecadlabs/beacon-types'
 import { P2PCommunicationClient } from '@ecadlabs/beacon-transport-matrix'
-import { KeyPair } from '@stablelib/ed25519'
+import { KeyPair } from '@ecadlabs/beacon-utils'
 
 const logger = new Logger('P2PTransport')
 

@@ -13,7 +13,7 @@ import {
 import { Storage } from '@ecadlabs/beacon-types'
 import { Transport, PeerManager, Logger, windowRef } from '@ecadlabs/beacon-core'
 import { PostMessageClient } from './PostMessageClient'
-import { KeyPair } from '@stablelib/ed25519'
+import { KeyPair } from '@ecadlabs/beacon-utils'
 
 const logger = new Logger('PostMessageTransport')
 
