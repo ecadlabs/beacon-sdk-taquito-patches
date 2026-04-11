@@ -1,10 +1,8 @@
 {
-  "name": "@ecadlabs/beacon-sdk",
-  "description": "The beacon-sdk allows you to easily connect DApps with Wallets through P2P communication or a chrome extension.",
-  "main": "dist/cjs/index.js",
-  "module": "dist/esm/index.js",
-  "unpkg": "dist/walletbeacon.min.js",
-  "types": "dist/esm/index.d.ts",
+  "name": "beacon-sdk-taquito-patches-workspace",
+  "private": true,
+  "version": "4.8.1-ecad.2",
+  "description": "Workspace for the ECAD-maintained Beacon SDK packages.",
   "workspaces": [
     "packages/*"
   ],
@@ -18,10 +16,10 @@
     "dapp"
   ],
   "license": "MIT",
-  "homepage": "https://www.airgap.it",
+  "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
   "repository": {
     "type": "git",
-    "url": "https://github.com/airgap-it/beacon-sdk"
+    "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches.git"
   },
   "engines": {
     "npm": ">=7.0.0",
@@ -29,7 +27,8 @@
   },
   "scripts": {
     "prebuild": "ts-node --project tsconfig-cjs.json scripts/generate-wallet-list.ts",
-    "build": "npm run check-version && lerna run tsc && npm run webpack:all",
+    "build": "npm run check:versions && npm run build:packages && npm run webpack:all",
+    "build:packages": "node scripts/run-workspaces.mjs tsc --topological",
     "webpack:all": "npm run webpack:sdk && npm run webpack:dapp && npm run webpack:wallet",
     "webpack:sdk": "webpack --mode=development --config webpack.config.js --entry=./packages/beacon-sdk/dist/cjs/index.js --output-path ./webpack_builds/sdk && terser --ecma=12 ./webpack_builds/sdk/main.js -o ./packages/beacon-sdk/dist/walletbeacon.min.js && cp ./packages/beacon-sdk/dist/walletbeacon.min.js ./examples/walletbeacon.min.js",
     "webpack:dapp": "webpack --mode=development --entry=./packages/beacon-dapp/dist/cjs/index.js --output-path ./webpack_builds/dapp && terser --ecma=12 ./webpack_builds/dapp/main.js -o ./packages/beacon-dapp/dist/walletbeacon.dapp.min.js",
@@ -38,23 +37,19 @@
     "lint": "eslint 'src/**/*.ts'",
     "lint:fix": "eslint 'src/**/*.ts' --fix",
     "lint-ci": "eslint 'src/**/*.ts' -f json -o lintReport.json || true",
-    "bootstrap": "lerna bootstrap",
-    "test": "lerna run test --stream",
+    "test": "node scripts/run-workspaces.mjs test",
     "test-ci": "nyc --reporter=lcov npm test",
-    "e2e": "npx playwright test e2e",
+    "e2e": "playwright test e2e",
+    "e2e:smoke": "playwright test e2e --grep-invert @extended",
     "audit-ci": "npm audit --json > audit.json && node scripts/dependency-scanning.js",
-    "prepare": "npm run build",
-    "check-version": "ts-node --project tsconfig-cjs.json scripts/check-sdk-version.ts",
+    "check:versions": "node scripts/check-workspace-version.mjs",
+    "check-version": "npm run check:versions",
+    "version:sync": "node scripts/set-workspace-version.mjs",
     "typedoc": "typedoc",
-    "publish": "lerna run tsc && lerna publish",
-    "bump:version": "lerna version --no-git-tag-version --exact",
-    "bump:major": "lerna version --no-git-tag-version major --exact --yes",
-    "bump:minor": "lerna version --no-git-tag-version minor --exact --yes",
-    "bump:patch": "lerna version --no-git-tag-version patch --exact --yes",
-    "bump:beta": "lerna version --no-git-tag-version prerelease --preid beta --exact --yes",
+    "publish:packages": "node scripts/publish-workspaces.mjs",
     "build:ui": "cd packages/beacon-ui && npm run tsc && cd ../.. && npm run webpack:sdk"
   },
-  "author": "Papers AG <contact@papers.ch> (https://papers.ch)",
+  "author": "ECAD Labs",
   "dependencies": {
     "@ecadlabs/beacon-blockchain-substrate": "file:packages/beacon-blockchain-substrate",
     "@ecadlabs/beacon-blockchain-tezos": "file:packages/beacon-blockchain-tezos",
@@ -103,7 +98,6 @@
     "jest-environment-jsdom": "^29.7.0",
     "jsdom": "26.1.0",
     "jsdom-global": "3.0.2",
-    "lerna": "8.2.2",
     "mocha": "11.1.0",
     "nyc": "17.1.0",
     "prettier": "3.5.3",
@@ -121,9 +115,6 @@
     "webpack": "^5.99.5",
     "webpack-cli": "^6.0.1"
   },
-  "files": [
-    "/dist"
-  ],
   "nyc": {
     "include": [
       "src/**/*.ts"
@@ -146,11 +137,7 @@
   },
   "husky": {
     "hooks": {
-      "pre-commit": "npm run check-version && pretty-quick --staged"
+      "pre-commit": "npm run check:versions && pretty-quick --staged"
     }
-  },
-  "version": "4.8.0-ecad.1",
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
   }
 }
