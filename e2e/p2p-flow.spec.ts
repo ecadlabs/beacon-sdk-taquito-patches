@@ -128,7 +128,7 @@ test('should clearActiveAccount on both tabs', async () => {
   expect(activeAccount).toBe('undefined')
 })
 
-test('should disconnect on tab1 and reconnect on tab2', async () => {
+test('@extended should disconnect on tab1 and reconnect on tab2', async () => {
   const dapp2 = await dappCtx.newPage()
   await dapp2.goto('http://localhost:1234/dapp.html')
 
@@ -187,7 +187,7 @@ test('should disconnect on tab1 and reconnect on tab2', async () => {
   await dapp.waitForSelector('div:has-text("Aborted")', { state: 'visible', timeout: 30_000 })
 })
 
-test('should disconnect on tab2 and reconnect on tab3', async () => {
+test('@extended should disconnect on tab2 and reconnect on tab3', async () => {
   const dapp2 = await dappCtx.newPage()
   await dapp2.goto('http://localhost:1234/dapp.html')
 

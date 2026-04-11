@@ -81,7 +81,7 @@ export default defineConfig({
   webServer: [
     {
       // Command to start the first server (Dapp on port 1234)
-      command: 'npx http-server examples -p 1234',
+      command: 'npx static-server examples -p 1234',
       // Health‐check URL; Playwright waits until http://localhost:1234 responds
       url: 'http://localhost:1234',
       // A human‐readable name for logs
@@ -91,7 +91,7 @@ export default defineConfig({
     },
     {
       // Command to start the second server (Wallet on port 4321)
-      command: 'npx http-server examples -p 4321',
+      command: 'npx static-server examples -p 4321',
       url: 'http://localhost:4321',
       name: 'Server2',
       timeout: 120 * 1000
