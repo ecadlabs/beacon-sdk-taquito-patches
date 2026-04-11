@@ -46,4 +46,4 @@ jobs:
         run: ./scripts/npm11.sh run e2e:smoke
 
       - name: Publish public packages
-        run: ./scripts/npm11.sh run publish:packages
+        run: ./scripts/npm11.sh run publish:packages -- --tag latest

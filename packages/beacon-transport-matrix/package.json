@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-transport-matrix",
-  "version": "4.8.1-ecad.4",
+  "version": "4.8.1-ecad.5",
   "description": "Matrix transport for Beacon peer-to-peer communication.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
@@ -31,8 +31,8 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-core": "4.8.1-ecad.4",
-    "@ecadlabs/beacon-utils": "4.8.1-ecad.4",
+    "@ecadlabs/beacon-core": "4.8.1-ecad.5",
+    "@ecadlabs/beacon-utils": "4.8.1-ecad.5",
     "axios": "^1.15.0"
   },
   "publishConfig": {
