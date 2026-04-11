@@ -114,7 +114,7 @@
     "typescript": "5.8.3",
     "uglify-js": "3.19.3",
     "webpack": "^5.106.1",
-    "webpack-cli": "^6.0.1"
+    "webpack-cli": "^7.0.2"
   },
   "nyc": {
     "include": [
