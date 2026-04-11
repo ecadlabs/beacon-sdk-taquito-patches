@@ -30,4 +30,3 @@ This repository maintains the ECAD Beacon SDK package line under the
 
 - The workflow filename configured in npm Trusted Publishers must match
   `.github/workflows/release.yml` exactly.
-- GitHub Pages can publish the generated API docs from `.github/workflows/docs.yml`.
