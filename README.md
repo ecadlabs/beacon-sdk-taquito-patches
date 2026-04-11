@@ -34,6 +34,7 @@
 > - CI runs on both `push` and `pull_request`
 > - npm publication is handled from this repository through GitHub Actions using
 >   npm Trusted Publishers, not long-lived npm automation tokens
+> - We do not keep a root `CHANGELOG.md` that only redirects to external notes
 > - Workspace versioning is synchronized from the root manifest into every
 >   published package before release
 > - Prerelease versions publish under the prerelease identifier as the npm
