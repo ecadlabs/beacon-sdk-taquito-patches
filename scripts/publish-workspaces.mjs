@@ -1,31 +1,11 @@
 import { spawnSync } from 'node:child_process'
 
+import publishWorkspaceHelpers from './helpers/publish-workspaces.js'
 import { getWorkspacePackages, topologicallySortWorkspaces } from './workspace-utils.mjs'
 
+const { resolvePublishTag } = publishWorkspaceHelpers
 const extraArgs = process.argv.slice(2)
 const packages = topologicallySortWorkspaces(getWorkspacePackages())
-
-const getPrereleaseTag = (version) => {
-  const prerelease = version.split('-')[1]
-
-  if (!prerelease) {
-    return undefined
-  }
-
-  return prerelease.split('.')[0]
-}
-
-const hasExplicitTagArg = extraArgs.some((arg, index) => {
-  if (arg === '--tag') {
-    return true
-  }
-
-  if (index > 0 && extraArgs[index - 1] === '--tag') {
-    return true
-  }
-
-  return arg.startsWith('--tag=')
-})
 
 for (const pkg of packages) {
   if (pkg.manifest.private) {
@@ -33,9 +13,13 @@ for (const pkg of packages) {
   }
 
   const publishArgs = ['publish', '--access', 'public']
-  const distTag = process.env.NPM_DIST_TAG ?? getPrereleaseTag(pkg.manifest.version)
+  const distTag = resolvePublishTag({
+    version: pkg.manifest.version,
+    extraArgs,
+    env: process.env
+  })
 
-  if (distTag && !hasExplicitTagArg) {
+  if (distTag) {
     publishArgs.push('--tag', distTag)
   }
 

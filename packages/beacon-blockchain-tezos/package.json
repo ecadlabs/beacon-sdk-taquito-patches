@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-blockchain-tezos",
-  "version": "4.8.1-ecad.4",
+  "version": "4.8.1-ecad.5",
   "description": "Tezos blockchain support package for the Beacon SDK.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
@@ -30,8 +30,8 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-types": "4.8.1-ecad.4",
-    "@ecadlabs/beacon-ui": "4.8.1-ecad.4"
+    "@ecadlabs/beacon-types": "4.8.1-ecad.5",
+    "@ecadlabs/beacon-ui": "4.8.1-ecad.5"
   },
   "publishConfig": {
     "access": "public"
