@@ -7,7 +7,7 @@
     "declaration": true,
     "outDir": "./dist/esm",
     "typeRoots": ["./node_modules/@types", "./src/typings", "./node_modules"],
-    "types": ["vite/client", "node", "chrome", "jest"],
+    "types": ["node", "chrome", "jest"],
     "sourceMap": true,
     "inlineSources": true,
     "baseUrl": ".",
