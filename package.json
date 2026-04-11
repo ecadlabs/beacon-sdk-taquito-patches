@@ -21,9 +21,10 @@
     "type": "git",
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches.git"
   },
+  "packageManager": "npm@11.0.0",
   "engines": {
-    "npm": ">=7.0.0",
-    "node": ">=20.19.0"
+    "npm": ">=11.0.0",
+    "node": ">=22.12.0"
   },
   "scripts": {
     "prebuild": "ts-node --project tsconfig-cjs.json scripts/generate-wallet-list.ts",
