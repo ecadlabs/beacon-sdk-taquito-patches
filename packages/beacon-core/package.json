@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-core",
-  "version": "4.8.1-ecad.2",
+  "version": "4.8.1-ecad.3",
   "description": "This package contains internal methods that are used by both the dApp and wallet client.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
@@ -31,8 +31,8 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-types": "4.8.1-ecad.2",
-    "@ecadlabs/beacon-utils": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-types": "4.8.1-ecad.3",
+    "@ecadlabs/beacon-utils": "4.8.1-ecad.3",
     "@stablelib/nacl": "^2.0.1",
     "@stablelib/utf8": "^2.1.0",
     "@stablelib/x25519-session": "^2.0.1",
