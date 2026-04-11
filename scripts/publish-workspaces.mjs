@@ -4,6 +4,7 @@ import publishWorkspaceHelpers from './helpers/publish-workspaces.js'
 import { getWorkspacePackages, topologicallySortWorkspaces } from './workspace-utils.mjs'
 
 const { resolvePublishTag } = publishWorkspaceHelpers
+const { resolvePublishCommand } = publishWorkspaceHelpers
 const extraArgs = process.argv.slice(2)
 const packages = topologicallySortWorkspaces(getWorkspacePackages())
 
@@ -24,7 +25,12 @@ for (const pkg of packages) {
   }
 
   publishArgs.push(...extraArgs)
-  const result = spawnSync('npm', publishArgs, {
+  const publishCommand = resolvePublishCommand({
+    publishArgs,
+    env: process.env,
+    nodeExecPath: process.execPath
+  })
+  const result = spawnSync(publishCommand.command, publishCommand.args, {
     cwd: pkg.directory,
     stdio: 'inherit'
   })
