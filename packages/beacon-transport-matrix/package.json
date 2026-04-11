@@ -33,7 +33,7 @@
   "dependencies": {
     "@ecadlabs/beacon-core": "4.8.1-ecad.2",
     "@ecadlabs/beacon-utils": "4.8.1-ecad.2",
-    "axios": "^1.8.4"
+    "axios": "^1.15.0"
   },
   "publishConfig": {
     "access": "public"
