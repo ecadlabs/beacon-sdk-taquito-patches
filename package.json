@@ -27,7 +27,7 @@
   },
   "scripts": {
     "prebuild": "ts-node --project tsconfig-cjs.json scripts/generate-wallet-list.ts",
-    "build": "npm run check:versions && npm run build:packages && npm run webpack:all",
+    "build": "npm run check:versions && npm run build:packages && npm run webpack:all && npm run check:sourcemaps",
     "build:packages": "node scripts/run-workspaces.mjs tsc --topological",
     "webpack:all": "npm run webpack:sdk && npm run webpack:dapp && npm run webpack:wallet",
     "webpack:sdk": "webpack --mode=development --config webpack.config.js --entry=./packages/beacon-sdk/dist/cjs/index.js --output-path ./webpack_builds/sdk && terser --ecma=12 ./webpack_builds/sdk/main.js -o ./packages/beacon-sdk/dist/walletbeacon.min.js && cp ./packages/beacon-sdk/dist/walletbeacon.min.js ./examples/walletbeacon.min.js",
@@ -43,6 +43,7 @@
     "e2e:smoke": "playwright test e2e --grep-invert @extended",
     "audit-ci": "npm audit --json > audit.json && node scripts/dependency-scanning.js",
     "check:versions": "node scripts/check-workspace-version.mjs && node scripts/check-security-deps.mjs",
+    "check:sourcemaps": "node scripts/check-sourcemaps.mjs",
     "check-version": "npm run check:versions",
     "version:sync": "node scripts/set-workspace-version.mjs",
     "readmes:sync": "node scripts/sync-package-readmes.mjs",
