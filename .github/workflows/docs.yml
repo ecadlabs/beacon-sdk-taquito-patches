@@ -21,22 +21,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
-          registry-url: https://registry.npmjs.org
+
+      - uses: actions/configure-pages@v6
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --include=optional
 
       - name: Build API docs
         run: npm run typedoc
 
       - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: docs
 
@@ -50,4 +51,4 @@ jobs:
 
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
