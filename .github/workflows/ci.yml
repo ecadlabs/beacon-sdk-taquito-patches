@@ -24,8 +24,10 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Pin npm 11
-        run: npm install -g npm@11
+      - name: Activate npm 11
+        run: |
+          corepack enable
+          corepack prepare npm@11.0.0 --activate
 
       - name: Install dependencies
         run: npm ci --include=optional
@@ -52,8 +54,10 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Pin npm 11
-        run: npm install -g npm@11
+      - name: Activate npm 11
+        run: |
+          corepack enable
+          corepack prepare npm@11.0.0 --activate
 
       - name: Install dependencies
         run: npm ci --include=optional
