@@ -1,7 +1,7 @@
 {
   "name": "@ecadlabs/beacon-dapp",
   "version": "4.8.1-ecad.3",
-  "description": "Use this package on your dApp to instanciate a DAppClient object and communicate to wallets.",
+  "description": "Beacon dApp client for connecting Tezos dApps to wallets.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
   "license": "ISC",
