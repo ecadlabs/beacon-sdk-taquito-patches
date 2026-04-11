@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-dapp",
-  "version": "4.8.1-ecad.5",
+  "version": "4.8.1-ecad.6",
   "description": "Beacon dApp client for connecting Tezos dApps to wallets.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
@@ -32,12 +32,12 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-core": "4.8.1-ecad.5",
-    "@ecadlabs/beacon-transport-matrix": "4.8.1-ecad.5",
-    "@ecadlabs/beacon-transport-postmessage": "4.8.1-ecad.5",
-    "@ecadlabs/beacon-transport-walletconnect": "4.8.1-ecad.5",
-    "@ecadlabs/beacon-ui": "4.8.1-ecad.5",
-    "@ecadlabs/beacon-utils": "4.8.1-ecad.5",
+    "@ecadlabs/beacon-core": "4.8.1-ecad.6",
+    "@ecadlabs/beacon-transport-matrix": "4.8.1-ecad.6",
+    "@ecadlabs/beacon-transport-postmessage": "4.8.1-ecad.6",
+    "@ecadlabs/beacon-transport-walletconnect": "4.8.1-ecad.6",
+    "@ecadlabs/beacon-ui": "4.8.1-ecad.6",
+    "@ecadlabs/beacon-utils": "4.8.1-ecad.6",
     "@walletconnect/types": "^2.23.9",
     "broadcast-channel": "^7.3.0"
   },
