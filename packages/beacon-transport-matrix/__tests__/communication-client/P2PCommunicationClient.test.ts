@@ -184,6 +184,22 @@ describe('P2PCommunicationClient', () => {
       freshClient = new P2PCommunicationClient('MyApp', fakeKeyPair as any, 2, mockStorage as any)
     })
 
+    it('ships only octez.io relay nodes by default', () => {
+      const enabledRelayServers = (freshClient as any).ENABLED_RELAY_SERVERS
+      const defaultServers = Object.values(enabledRelayServers).flat()
+
+      expect(defaultServers).toEqual([
+        'beacon-node-1.octez.io',
+        'beacon-node-2.octez.io',
+        'beacon-node-3.octez.io',
+        'beacon-node-4.octez.io',
+        'beacon-node-5.octez.io',
+        'beacon-node-6.octez.io',
+        'beacon-node-7.octez.io',
+        'beacon-node-8.octez.io'
+      ])
+    })
+
     const createDeferred = <T>(): Deferred<T> => {
       let resolve!: (value: T) => void
       let reject!: (reason?: unknown) => void
