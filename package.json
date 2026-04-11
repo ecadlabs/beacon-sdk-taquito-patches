@@ -72,6 +72,14 @@
     "@web3modal/standalone": "2.4.3",
     "stream-browserify": "^3.0.0"
   },
+  "overrides": {
+    "unstorage": "1.17.5",
+    "h3": "1.15.9",
+    "defu": "6.1.7",
+    "anymatch": {
+      "picomatch": "2.3.2"
+    }
+  },
   "devDependencies": {
     "@babel/cli": "^7.28.6",
     "@babel/core": "^7.29.0",
