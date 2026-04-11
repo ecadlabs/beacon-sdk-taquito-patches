@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-ui",
-  "version": "4.8.1-ecad.2",
+  "version": "4.8.1-ecad.3",
   "description": "This package contains the UI part (alerts and toasts) of the Beacon SDK.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
@@ -31,10 +31,10 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-core": "4.8.1-ecad.2",
-    "@ecadlabs/beacon-transport-postmessage": "4.8.1-ecad.2",
-    "@ecadlabs/beacon-types": "4.8.1-ecad.2",
-    "@ecadlabs/beacon-utils": "4.8.1-ecad.2",
+    "@ecadlabs/beacon-core": "4.8.1-ecad.3",
+    "@ecadlabs/beacon-transport-postmessage": "4.8.1-ecad.3",
+    "@ecadlabs/beacon-types": "4.8.1-ecad.3",
+    "@ecadlabs/beacon-utils": "4.8.1-ecad.3",
     "@walletconnect/utils": "^2.23.9",
     "qrcode-svg": "^1.1.0",
     "react": "^19.2.5",
