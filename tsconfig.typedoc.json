@@ -3,7 +3,6 @@
   "exclude": [
     ".devcontainer",
     ".github",
-    ".gitlab",
     "assets",
     "dist",
     "docs",
