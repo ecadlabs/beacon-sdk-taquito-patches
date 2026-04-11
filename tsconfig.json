@@ -9,6 +9,7 @@
     "typeRoots": ["./node_modules/@types", "./src/typings", "./node_modules"],
     "types": ["vite/client", "node", "chrome", "jest"],
     "sourceMap": true,
+    "inlineSources": true,
     "baseUrl": ".",
     /* Strict Type-Checking Options */
     "strict": true /* Enable all strict type-checking options. */,
