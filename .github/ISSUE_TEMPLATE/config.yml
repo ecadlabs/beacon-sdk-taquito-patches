@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/ecadlabs/beacon-sdk-taquito-patches/security/advisories/new
+    about: Please report security-sensitive issues privately through GitHub Security Advisories.
