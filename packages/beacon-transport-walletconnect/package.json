@@ -34,7 +34,7 @@
     "@ecadlabs/beacon-core": "4.8.1-ecad.2",
     "@ecadlabs/beacon-types": "4.8.1-ecad.2",
     "@ecadlabs/beacon-utils": "4.8.1-ecad.2",
-    "@walletconnect/sign-client": "2.18.0",
+    "@walletconnect/sign-client": "^2.23.9",
     "elliptic": "^6.6.1"
   },
   "devDependencies": {
