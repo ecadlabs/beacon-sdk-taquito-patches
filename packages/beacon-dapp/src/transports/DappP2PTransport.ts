@@ -7,7 +7,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import { Logger } from '@ecadlabs/beacon-core'
 import { P2PTransport } from '@ecadlabs/beacon-transport-matrix'
-import { KeyPair } from '@stablelib/ed25519'
+import { KeyPair } from '@ecadlabs/beacon-utils'
 
 const logger = new Logger('DappP2PTransport')
 

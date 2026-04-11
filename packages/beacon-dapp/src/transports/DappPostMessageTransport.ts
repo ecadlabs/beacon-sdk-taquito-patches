@@ -6,7 +6,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import { Logger } from '@ecadlabs/beacon-core'
 import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
-import { KeyPair } from '@stablelib/ed25519'
+import { KeyPair } from '@ecadlabs/beacon-utils'
 
 const logger = new Logger('DappPostMessageTransport')
 

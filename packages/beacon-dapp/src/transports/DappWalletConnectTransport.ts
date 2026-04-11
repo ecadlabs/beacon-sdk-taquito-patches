@@ -7,7 +7,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import { Logger } from '@ecadlabs/beacon-core'
 import { WalletConnectTransport } from '@ecadlabs/beacon-transport-walletconnect'
-import { KeyPair } from '@stablelib/ed25519'
+import { KeyPair } from '@ecadlabs/beacon-utils'
 import { SignClientTypes } from '@walletconnect/types'
 import { isMobileOS } from '@ecadlabs/beacon-ui'
 

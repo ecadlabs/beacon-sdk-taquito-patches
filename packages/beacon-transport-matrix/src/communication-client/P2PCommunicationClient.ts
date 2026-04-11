@@ -1,15 +1,18 @@
-import { sign } from '@stablelib/ed25519'
 import axios from 'axios'
 import {
+  ExposedPromise,
+  generateGUID,
   getHexHash,
-  toHex,
-  recipientString,
-  openCryptobox,
-  encryptCryptoboxPayload,
   decryptCryptoboxPayload,
-  secretbox_NONCEBYTES,
+  encryptCryptoboxPayload,
+  getKeypairFromSeed,
+  KeyPair,
+  openCryptobox,
+  recipientString,
   secretbox_MACBYTES,
-  getKeypairFromSeed
+  secretbox_NONCEBYTES,
+  sign,
+  toHex
 } from '@ecadlabs/beacon-utils'
 import { MatrixClient } from '../matrix-client/MatrixClient'
 import {
@@ -35,8 +38,6 @@ import {
   Logger,
   CommunicationClient
 } from '@ecadlabs/beacon-core'
-import { ExposedPromise, generateGUID } from '@ecadlabs/beacon-utils'
-import { KeyPair } from '@stablelib/ed25519'
 import { hash } from '@stablelib/blake2b'
 import { encode } from '@stablelib/utf8'
 

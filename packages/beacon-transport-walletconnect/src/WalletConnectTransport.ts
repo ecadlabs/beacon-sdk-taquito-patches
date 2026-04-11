@@ -1,4 +1,3 @@
-import { KeyPair } from '@stablelib/ed25519'
 import { WalletConnectCommunicationClient } from './communication-client/WalletConnectCommunicationClient'
 import {
   ConnectionContext,
@@ -13,7 +12,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import { Transport, PeerManager } from '@ecadlabs/beacon-core'
 import { SignClientTypes } from '@walletconnect/types'
-import { ExposedPromise } from '@ecadlabs/beacon-utils'
+import { ExposedPromise, KeyPair } from '@ecadlabs/beacon-utils'
 
 /**
  * @internalapi
