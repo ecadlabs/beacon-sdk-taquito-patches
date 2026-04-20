@@ -3,23 +3,17 @@ import { App, DesktopApp, ExtensionApp, WebApp } from 'packages/beacon-types/src
 // TODO: Temporary build fix
 export enum NetworkType {
   MAINNET = 'mainnet',
-  GHOSTNET = 'ghostnet', // Long running testnet
+  /** @deprecated Ghostnet is succeeded by shadownet. */
+  GHOSTNET = 'ghostnet',
   WEEKLYNET = 'weeklynet', // Testnet, resets every week
   DAILYNET = 'dailynet', // Testnet, resets every day
-  DELPHINET = 'delphinet',
-  EDONET = 'edonet',
-  FLORENCENET = 'florencenet',
-  GRANADANET = 'granadanet',
-  HANGZHOUNET = 'hangzhounet',
-  ITHACANET = 'ithacanet',
-  JAKARTANET = 'jakartanet',
-  KATHMANDUNET = 'kathmandunet',
-  LIMANET = 'limanet',
-  MUMBAINET = 'mumbainet',
-  NAIROBINET = 'nairobinet',
-  OXFORDNET = 'oxfordnet',
-  PARISNET = 'parisnet',
-  QUEBECNET = 'quebecnet',
+  /** @deprecated Seoulnet is succeeded by tallinnnet. */
+  SEOULNET = 'seoulnet',
+  SHADOWNET = 'shadownet',
+  TALLINNNET = 'tallinnnet',
+  TEZLINK_SHADOWNET = 'tezlink-shadownet',
+  TEZOSX_PREVIEWNET = 'tezosx-previewnet',
+  USHUAIANET = 'ushuaianet',
   CUSTOM = 'custom'
 }
 

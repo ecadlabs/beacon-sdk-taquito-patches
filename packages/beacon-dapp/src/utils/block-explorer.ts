@@ -1,10 +1,16 @@
 import { Network, NetworkType } from '@ecadlabs/beacon-types'
 
 export abstract class BlockExplorer {
-  constructor(public readonly rpcUrls: { [key in NetworkType]: string }) {}
+  constructor(public readonly rpcUrls: { [key in NetworkType]?: string }) {}
 
   protected async getLinkForNetwork(network: Network): Promise<string> {
-    return this.rpcUrls[network.type]
+    const link = this.rpcUrls[network.type]
+
+    if (!link) {
+      throw new Error(`Block explorer not configured for network "${network.type}"`)
+    }
+
+    return link
   }
 
   /**
