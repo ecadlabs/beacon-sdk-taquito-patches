@@ -1,4 +1,3 @@
-import axios from 'axios'
 import {
   ExposedPromise,
   generateGUID,
@@ -308,13 +307,18 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async getBeaconInfo(server: string): Promise<BeaconInfoResponse> {
-    return axios
-      .get<BeaconInfoResponse>(`https://${server}/_synapse/client/beacon/info`, { timeout: 10_000 })
-      .then((res) => ({
-        region: res.data.region,
-        known_servers: res.data.known_servers,
-        timestamp: Math.floor(res.data.timestamp)
-      }))
+    const response = await fetch(`https://${server}/_synapse/client/beacon/info`, {
+      signal: AbortSignal.timeout(10_000)
+    })
+    if (!response.ok) {
+      throw new Error(`getBeaconInfo ${server} failed: ${response.status} ${response.statusText}`)
+    }
+    const data = (await response.json()) as BeaconInfoResponse
+    return {
+      region: data.region,
+      known_servers: data.known_servers,
+      timestamp: Math.floor(data.timestamp)
+    }
   }
 
   public async tryJoinRooms(roomId: string, retry: number = 1): Promise<void> {

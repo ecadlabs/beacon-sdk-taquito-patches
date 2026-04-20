@@ -162,7 +162,6 @@
     "@types/sinon": "^21.0.1",
     "@typescript-eslint/eslint-plugin": "^8.58.1",
     "@typescript-eslint/parser": "^8.58.1",
-    "axios-mock-adapter": "^2.1.0",
     "babel-jest": "^30.3.0",
     "eslint": "^8.56.0",
     "eslint-config-prettier": "^10.1.8",

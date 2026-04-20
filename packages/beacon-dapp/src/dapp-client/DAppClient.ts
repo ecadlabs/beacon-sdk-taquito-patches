@@ -1,4 +1,3 @@
-import axios from 'axios'
 import bs58check from 'bs58check'
 import { BeaconEvent, BeaconEventHandlerFunction, BeaconEventType } from '../events'
 import {
@@ -2744,22 +2743,32 @@ export class DAppClient extends Client {
       secretKey: Buffer.from(keypair.secretKey)
     })
 
-    const notificationResponse = await axios.post(`${url}/send`, {
-      recipient,
-      title,
-      body,
-      timestamp,
-      payload,
-      accessToken,
-      protocolIdentifier,
-      sender: {
-        name: this.name,
-        publicKey,
-        signature
-      }
+    const notificationResponse = await fetch(`${url}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipient,
+        title,
+        body,
+        timestamp,
+        payload,
+        accessToken,
+        protocolIdentifier,
+        sender: {
+          name: this.name,
+          publicKey,
+          signature
+        }
+      })
     })
 
-    return notificationResponse.data
+    if (!notificationResponse.ok) {
+      throw new Error(
+        `sendNotification failed: ${notificationResponse.status} ${notificationResponse.statusText}`
+      )
+    }
+
+    return notificationResponse.json()
   }
 
   private async onNewAccount(
