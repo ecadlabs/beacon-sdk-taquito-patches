@@ -1,5 +1,3 @@
-import axios, { AxiosError, AxiosResponse, CancelTokenSource, Method as HttpMethod } from 'axios'
-
 import { keys } from '@ecadlabs/beacon-utils'
 import { MatrixRequest, MatrixRequestParams } from './models/api/MatrixRequest'
 import { Logger } from '@ecadlabs/beacon-core'
@@ -10,23 +8,22 @@ interface HttpOptions {
   accessToken?: string
 }
 
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
+
 const CLIENT_API_R0 = '/_matrix/client/r0'
 
 /**
  * Handling the HTTP connection to the matrix synapse node
  */
 export class MatrixHttpClient {
-  private readonly cancelTokenSource: CancelTokenSource
+  private readonly abortController: AbortController
 
   constructor(private readonly baseUrl: string) {
-    this.cancelTokenSource = axios.CancelToken.source()
+    this.abortController = new AbortController()
   }
 
   /**
    * Get data from the synapse node
-   *
-   * @param endpoint
-   * @param options
    */
   public async get<T>(
     endpoint: string,
@@ -38,11 +35,6 @@ export class MatrixHttpClient {
 
   /**
    * Post data to the synapse node
-   *
-   * @param endpoint
-   * @param body
-   * @param options
-   * @param params
    */
   public async post<T>(
     endpoint: string,
@@ -55,11 +47,6 @@ export class MatrixHttpClient {
 
   /**
    * Put data to the synapse node
-   *
-   * @param endpoint
-   * @param body
-   * @param options
-   * @param params
    */
   public async put<T>(
     endpoint: string,
@@ -71,17 +58,11 @@ export class MatrixHttpClient {
   }
 
   public async cancelAllRequests(): Promise<void> {
-    return this.cancelTokenSource.cancel('Manually cancelled')
+    this.abortController.abort('Manually cancelled')
   }
 
   /**
    * Send a request to the synapse node
-   *
-   * @param method
-   * @param endpoint
-   * @param config
-   * @param requestParams
-   * @param data
    */
   private async send<T>(
     method: HttpMethod,
@@ -90,58 +71,69 @@ export class MatrixHttpClient {
     requestParams?: MatrixRequestParams<T>,
     data?: MatrixRequest<T>
   ): Promise<T> {
-    const headers = config ? this.getHeaders(config) : undefined
-    const params = requestParams ? this.getParams(requestParams) : undefined
+    const headers: Record<string, string> = {}
+    if (data !== undefined) {
+      headers['Content-Type'] = 'application/json'
+    }
+    if (config?.accessToken) {
+      headers['Authorization'] = `Bearer ${config.accessToken}`
+    }
 
-    let response: AxiosResponse<T>
+    const params = requestParams ? this.getParams(requestParams) : undefined
+    const url = this.buildUrl(this.apiUrl(CLIENT_API_R0), endpoint, params)
+
+    let response: Response
     try {
-      response = await axios.request({
+      response = await fetch(url, {
         method,
-        url: endpoint,
-        baseURL: this.apiUrl(CLIENT_API_R0),
         headers,
-        data,
-        params,
-        cancelToken: this.cancelTokenSource.token
+        body: data !== undefined ? JSON.stringify(data) : undefined,
+        signal: this.abortController.signal
       })
     } catch (error) {
-      const axiosError: AxiosError = error as any
-      logger.error('send', axiosError.code, axiosError.message, (axiosError as any).response.data)
-      throw (error as any).response.data
+      logger.error('send', (error as Error).name, (error as Error).message)
+      throw error
     }
 
-    return response.data
+    const payload = await this.parseBody<T>(response)
+
+    if (!response.ok) {
+      logger.error('send', String(response.status), response.statusText, payload)
+      throw payload
+    }
+
+    return payload
   }
 
-  /**
-   * Get the headers based on the options object
-   *
-   * @param options
-   */
-  private getHeaders(options: HttpOptions): { [key: string]: any } | undefined {
-    const headers: Record<string, any> = {}
-    const entries: [string, any][] = []
-
-    if (options.accessToken) {
-      entries.push(['Authorization', `Bearer ${options.accessToken}`])
+  private async parseBody<T>(response: Response): Promise<T> {
+    const text = await response.text()
+    if (!text) {
+      return undefined as unknown as T
     }
-
-    if (entries.length === 0) {
-      return undefined
+    try {
+      return JSON.parse(text) as T
+    } catch {
+      return text as unknown as T
     }
-
-    for (const [key, value] of entries) {
-      headers[key] = value
-    }
-
-    return headers
   }
 
-  /**
-   * Get parameters
-   *
-   * @param _params
-   */
+  private buildUrl(
+    base: string,
+    endpoint: string,
+    params?: Record<string, string | number | boolean>
+  ): string {
+    const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+    let url = `${base}${path}`
+    if (params && Object.keys(params).length > 0) {
+      const search = new URLSearchParams()
+      for (const [key, value] of Object.entries(params)) {
+        search.append(key, String(value))
+      }
+      url += `?${search.toString()}`
+    }
+    return url
+  }
+
   private getParams(
     _params: MatrixRequestParams<any>
   ): { [key: string]: string | number | boolean } | undefined {
@@ -159,11 +151,9 @@ export class MatrixHttpClient {
    * Construct API URL
    */
   private apiUrl(...parts: string[]): string {
-    const apiBase = this.baseUrl.endsWith('/')
-      ? this.baseUrl.substr(0, this.baseUrl.length - 1)
-      : this.baseUrl
+    const apiBase = this.baseUrl.endsWith('/') ? this.baseUrl.slice(0, -1) : this.baseUrl
 
-    const apiParts = parts.map((path) => (path.startsWith('/') ? path.substr(1) : path))
+    const apiParts = parts.map((path) => (path.startsWith('/') ? path.slice(1) : path))
 
     return [apiBase, ...apiParts].join('/')
   }

@@ -1,7 +1,6 @@
 // __tests__/communication-client/P2PCommunicationClient.test.ts
 
 // Mock external dependencies
-jest.mock('axios')
 jest.mock('@ecadlabs/beacon-utils', () => {
   const actual = jest.requireActual('@ecadlabs/beacon-utils')
 
@@ -55,7 +54,6 @@ jest.mock('../../src/matrix-client/MatrixClient', () => ({
 }))
 
 // Imports
-import axios from 'axios'
 import {
   ExposedPromise,
   generateGUID,
@@ -149,19 +147,29 @@ describe('P2PCommunicationClient', () => {
   })
 
   describe('getBeaconInfo', () => {
+    const originalFetch = global.fetch
+
+    afterEach(() => {
+      global.fetch = originalFetch
+    })
+
     it('fetches /_synapse/client/beacon/info and maps the response', async () => {
-      const axiosGetMock = axios.get as jest.Mock
-      axiosGetMock.mockResolvedValue({
-        data: {
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
           region: 'eu',
           known_servers: ['a', 'b'],
           timestamp: 9876
-        }
+        })
       })
+      global.fetch = fetchMock as unknown as typeof fetch
+
       const info = await client.getBeaconInfo('relay.test')
-      expect(axios.get).toHaveBeenCalledWith(
+      expect(fetchMock).toHaveBeenCalledWith(
         'https://relay.test/_synapse/client/beacon/info',
-        { timeout: 10_000 }
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       )
       expect(info).toEqual({
         region: 'eu',
@@ -254,11 +262,10 @@ describe('P2PCommunicationClient', () => {
       mockStorage.set.mockResolvedValue(undefined)
 
       // First call (stored node) rejects, second call (discovery probe) succeeds
-      ;(axios.get as jest.Mock)
+      jest
+        .spyOn(freshClient, 'getBeaconInfo')
         .mockRejectedValueOnce(new Error('ECONNREFUSED'))
-        .mockResolvedValue({
-          data: { region: 'eu', known_servers: ['a'], timestamp: 5000 }
-        })
+        .mockResolvedValue({ region: 'eu', known_servers: ['a'], timestamp: 5000 })
 
       const result = await freshClient.getRelayServer()
 
@@ -273,9 +280,9 @@ describe('P2PCommunicationClient', () => {
     it('uses stored node when it is reachable', async () => {
       mockStorage.get.mockResolvedValue('healthy-node.papers.tech')
 
-      ;(axios.get as jest.Mock).mockResolvedValue({
-        data: { region: 'eu', known_servers: ['a'], timestamp: 7777 }
-      })
+      jest
+        .spyOn(freshClient, 'getBeaconInfo')
+        .mockResolvedValue({ region: 'eu', known_servers: ['a'], timestamp: 7777 })
 
       const result = await freshClient.getRelayServer()
 
@@ -290,7 +297,7 @@ describe('P2PCommunicationClient', () => {
       mockStorage.delete.mockResolvedValue(undefined)
 
       // All discovery probes fail
-      ;(axios.get as jest.Mock).mockRejectedValue(new Error('ECONNREFUSED'))
+      jest.spyOn(freshClient, 'getBeaconInfo').mockRejectedValue(new Error('ECONNREFUSED'))
 
       await expect(freshClient.getRelayServer()).rejects.toThrow()
 

@@ -1,12 +1,29 @@
 // __tests__/client/WalletClient.test.ts
 
-import axios from 'axios'
 import { Client, LocalStorage } from '@ecadlabs/beacon-core'
 import { StorageKey } from '@ecadlabs/beacon-types'
 import { WalletClient } from '../../src/client/WalletClient'
 import { WalletP2PTransport } from '../../src/transports/WalletP2PTransport'
 
-jest.mock('axios')
+const fetchMock = jest.fn()
+const originalFetch = global.fetch
+beforeAll(() => {
+  global.fetch = fetchMock as unknown as typeof fetch
+})
+afterAll(() => {
+  global.fetch = originalFetch
+})
+beforeEach(() => {
+  fetchMock.mockReset()
+})
+
+const jsonResponse = <T>(data: T): Response =>
+  ({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    json: async () => data
+  } as unknown as Response)
 
 // Stub out all of beacon-utils, including generateGUID
 jest.mock('@ecadlabs/beacon-utils', () => ({
@@ -95,9 +112,9 @@ describe('WalletClient', () => {
 
   describe('getRegisterPushChallenge()', () => {
     beforeEach(() => {
-      ;(axios.get as jest.Mock).mockResolvedValue({
-        data: { id: 'challenge-id', timestamp: '2025-04-24T12:00:00Z' }
-      })
+      fetchMock.mockResolvedValue(
+        jsonResponse({ id: 'challenge-id', timestamp: '2025-04-24T12:00:00Z' })
+      )
     })
 
     it('fetches a challenge and builds payload correctly', async () => {
@@ -107,7 +124,7 @@ describe('WalletClient', () => {
         oracleUrl
       )
 
-      expect(axios.get).toHaveBeenCalledWith(`${oracleUrl}/challenge`)
+      expect(fetchMock).toHaveBeenCalledWith(`${oracleUrl}/challenge`)
       expect(challenge).toEqual({ id: 'challenge-id', timestamp: '2025-04-24T12:00:00Z' })
       // toHex is mocked to 'abcd'
       expect(payloadToSign).toBe('050100000004abcd')
@@ -141,19 +158,19 @@ describe('WalletClient', () => {
 
       expect(storage.get).toHaveBeenCalledWith(StorageKey.PUSH_TOKENS)
       expect(result).toBe(existing)
-      expect(axios.post).not.toHaveBeenCalled()
+      expect(fetchMock).not.toHaveBeenCalled()
     })
 
     it('registers new token when none exists', async () => {
       storage.get.mockResolvedValue([])
-      ;(axios.post as jest.Mock).mockResolvedValue({
-        data: {
+      fetchMock.mockResolvedValue(
+        jsonResponse({
           accessToken: 'newA',
           managementToken: 'newM',
           message: 'ok',
           success: true
-        }
-      })
+        })
+      )
 
       const result = await client.registerPush(
         challenge,
@@ -165,14 +182,18 @@ describe('WalletClient', () => {
         oracleUrl
       )
 
-      expect(axios.post).toHaveBeenCalledWith(`${oracleUrl}/register`, {
-        name: 'test-client',
-        challenge,
-        accountPublicKey: accountKey,
-        signature,
-        backendUrl,
-        protocolIdentifier: protocol,
-        deviceId
+      expect(fetchMock).toHaveBeenCalledWith(`${oracleUrl}/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'test-client',
+          challenge,
+          accountPublicKey: accountKey,
+          signature,
+          backendUrl,
+          protocolIdentifier: protocol,
+          deviceId
+        })
       })
       expect(storage.set).toHaveBeenCalledWith(StorageKey.PUSH_TOKENS, [
         {
