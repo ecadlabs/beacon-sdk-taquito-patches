@@ -131,7 +131,7 @@ try {
 }
 ```
 
-For a more complete example, see `example-dapp.html`.
+For a more complete example, see [`examples/dapp.html`](./examples/dapp.html).
 
 ## Example wallet integration
 
@@ -163,12 +163,12 @@ client
   .catch((error) => console.error('connect error', error))
 ```
 
-For a more complete example, see `example-wallet.html`.
+For a more complete example, see [`examples/wallet.html`](./examples/wallet.html).
 
 ## Adding a wallet to Beacon SDK
 
 Please create a PR and add your wallet in
-[`scripts/generate-wallet-list.ts`](./scripts/generate-wallet-list.ts).
+[`scripts/blockchains/tezos.ts`](./scripts/blockchains/tezos.ts).
 
 For iOS wallets, the wallet needs to define a custom URL scheme to support same-device functionality.
 
@@ -182,6 +182,7 @@ npm run test
 npm run e2e
 ```
 
-Once the SDK is built, you can open `dapp.html` or `wallet.html` in your
+Once the SDK is built, you can open [`examples/dapp.html`](./examples/dapp.html) or
+[`examples/wallet.html`](./examples/wallet.html) in your
 browser and try the basic functionality. To support browser extensions, the
 examples should be served over HTTP rather than opened directly from disk.

@@ -67,19 +67,21 @@ const useWallets = (networkType?: NetworkType, featuredWallets?: string[]) => {
       })),
 
       // Web wallets (networkType sensitive)
-      ...webList.map((w) => {
-        const link = w.links[networkType ?? NetworkType.MAINNET]
-        return {
-          id: w.key,
-          key: w.key,
-          name: w.shortName,
-          image: w.logo,
-          description: 'Web App',
-          supportedInteractionStandards: w.supportedInteractionStandards,
-          type: 'web' as const,
-          link: link ?? w.links.mainnet
-        }
-      }),
+      ...webList
+        .map((w) => {
+          const link = w.links[networkType ?? NetworkType.MAINNET]
+          return {
+            id: w.key,
+            key: w.key,
+            name: w.shortName,
+            image: w.logo,
+            description: 'Web App',
+            supportedInteractionStandards: w.supportedInteractionStandards,
+            type: 'web' as const,
+            link: link ?? w.links.mainnet
+          }
+        })
+        .filter((w) => Boolean(w.link)),
 
       // Additional detected extensions
       ...availableExtensions
