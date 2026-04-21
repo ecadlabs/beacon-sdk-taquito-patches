@@ -18,6 +18,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v6
         with:
@@ -29,6 +31,15 @@ jobs:
 
       - name: Install dependencies
         run: ./scripts/npm11.sh ci --include=optional
+
+      - name: Gate new lint findings
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ -n "$PR_BASE_REF" ]; then
+            export LINT_BASE_REF="origin/$PR_BASE_REF"
+          fi
+          ./scripts/npm11.sh run lint:new
 
       - name: Check workspace versions
         run: ./scripts/npm11.sh run check:versions
