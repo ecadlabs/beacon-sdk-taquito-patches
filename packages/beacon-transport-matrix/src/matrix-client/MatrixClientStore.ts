@@ -1,6 +1,9 @@
 import { keys } from '@ecadlabs/beacon-utils'
+import { Logger } from '@ecadlabs/beacon-core'
 import { MatrixRoom, MatrixRoomStatus } from './models/MatrixRoom'
 import { Storage, StorageKey } from '@ecadlabs/beacon-types'
+
+const logger = new Logger('MatrixClientStore')
 
 type OnStateChangedListener = (
   oldState: MatrixStateStore,
@@ -178,7 +181,10 @@ export class MatrixClientStore {
         filteredState[key] = this.state[key]
       })
 
-      this.storage.set(StorageKey.MATRIX_PRESERVED_STATE, this.prepareData(filteredState))
+      // sync method, latest-wins write — observe rejection so it surfaces in logs.
+      this.storage
+        .set(StorageKey.MATRIX_PRESERVED_STATE, this.prepareData(filteredState))
+        .catch((error) => logger.error('updateStorage', 'failed to persist matrix state', error))
     }
   }
 
