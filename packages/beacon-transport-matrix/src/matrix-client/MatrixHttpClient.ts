@@ -1,6 +1,6 @@
 import { keys } from '@ecadlabs/beacon-utils'
-import { MatrixRequest, MatrixRequestParams } from './models/api/MatrixRequest'
 import { Logger } from '@ecadlabs/beacon-core'
+import { MatrixRequest, MatrixRequestParams } from './models/api/MatrixRequest'
 
 const logger = new Logger('MatrixHttpClient')
 
@@ -76,7 +76,7 @@ export class MatrixHttpClient {
       headers['Content-Type'] = 'application/json'
     }
     if (config?.accessToken) {
-      headers['Authorization'] = `Bearer ${config.accessToken}`
+      headers.Authorization = `Bearer ${config.accessToken}`
     }
 
     const params = requestParams ? this.getParams(requestParams) : undefined
@@ -131,6 +131,7 @@ export class MatrixHttpClient {
       }
       url += `?${search.toString()}`
     }
+
     return url
   }
 

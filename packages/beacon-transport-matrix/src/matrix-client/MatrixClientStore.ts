@@ -1,7 +1,7 @@
 import { keys } from '@ecadlabs/beacon-utils'
 import { Logger } from '@ecadlabs/beacon-core'
-import { MatrixRoom, MatrixRoomStatus } from './models/MatrixRoom'
 import { Storage, StorageKey } from '@ecadlabs/beacon-types'
+import { MatrixRoom, MatrixRoomStatus } from './models/MatrixRoom'
 
 const logger = new Logger('MatrixClientStore')
 
@@ -61,7 +61,7 @@ export class MatrixClientStore {
   /**
    * A promise that resolves once the client is ready
    */
-  private waitReadyPromise: Promise<void>
+  private readonly waitReadyPromise: Promise<void>
 
   constructor(private readonly storage: Storage) {
     this.waitReadyPromise = new Promise<void>(async (resolve, reject) => {

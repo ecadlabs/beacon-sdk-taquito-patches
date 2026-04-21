@@ -1,5 +1,5 @@
-import { EventEmitter } from './EventEmitter'
 import { keys } from '@ecadlabs/beacon-utils'
+import { EventEmitter } from './EventEmitter'
 import { MatrixStateStore, MatrixStateUpdate } from './MatrixClientStore'
 import { MatrixRoomStatus } from './models/MatrixRoom'
 import { MatrixMessage } from './models/MatrixMessage'
@@ -97,7 +97,7 @@ export class MatrixClientEventEmitter extends EventEmitter {
       .forEach(([id, members]) => {
         this.emitClientEvent(eventType, {
           roomId: id,
-          members: members
+          members
         })
       })
   }

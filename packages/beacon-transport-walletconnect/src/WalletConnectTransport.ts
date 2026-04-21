@@ -1,4 +1,3 @@
-import { WalletConnectCommunicationClient } from './communication-client/WalletConnectCommunicationClient'
 import {
   ConnectionContext,
   Origin,
@@ -13,6 +12,7 @@ import {
 import { Transport, PeerManager } from '@ecadlabs/beacon-core'
 import { SignClientTypes } from '@walletconnect/types'
 import { ExposedPromise, KeyPair } from '@ecadlabs/beacon-utils'
+import { WalletConnectCommunicationClient } from './communication-client/WalletConnectCommunicationClient'
 
 /**
  * @internalapi
@@ -33,8 +33,8 @@ export class WalletConnectTransport<
     _keyPair: KeyPair,
     storage: Storage,
     storageKey: K,
-    private wcOptions: { network: NetworkType; opts: SignClientTypes.Options },
-    private isLeader: Function
+    private readonly wcOptions: { network: NetworkType; opts: SignClientTypes.Options },
+    private readonly isLeader: Function
   ) {
     super(
       name,
@@ -84,7 +84,7 @@ export class WalletConnectTransport<
   }
 
   wasDisconnectedByWallet() {
-    return !!this.client.disconnectionEvents.size
+    return Boolean(this.client.disconnectionEvents.size)
   }
 
   closeClient() {
@@ -94,13 +94,13 @@ export class WalletConnectTransport<
   public async hasPairings() {
     return (await this.client.storage.hasPairings())
       ? true
-      : !!this.client.signClient?.pairing.getAll()?.length
+      : Boolean(this.client.signClient?.pairing.getAll()?.length)
   }
 
   public async hasSessions() {
     return (await this.client.storage.hasSessions())
       ? true
-      : !!this.client.signClient?.session.getAll()?.length
+      : Boolean(this.client.signClient?.session.getAll()?.length)
   }
 
   /**
@@ -118,6 +118,7 @@ export class WalletConnectTransport<
     if (!session) {
       return []
     }
+
     return [
       {
         senderId: session.peer.publicKey,

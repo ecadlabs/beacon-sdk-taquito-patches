@@ -60,7 +60,7 @@ export interface Baker {
   baker: string
 }
 
-export type BondId = {
+export interface BondId {
   smart_rollup: string
 }
 

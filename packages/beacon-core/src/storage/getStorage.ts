@@ -1,5 +1,5 @@
-import { Logger } from '../utils/Logger'
 import { Storage } from '@ecadlabs/beacon-types'
+import { Logger } from '../utils/Logger'
 import { ChromeStorage } from './ChromeStorage'
 import { LocalStorage } from './LocalStorage'
 

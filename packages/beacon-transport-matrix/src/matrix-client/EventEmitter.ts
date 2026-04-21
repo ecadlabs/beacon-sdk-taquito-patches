@@ -14,6 +14,7 @@ export class EventEmitter {
     }
 
     this.events[event].push(listener)
+
     return () => this.removeListener(event, listener)
   }
 
@@ -24,6 +25,7 @@ export class EventEmitter {
 
     if (!listener) {
       this.events[event] = []
+
       return
     }
 

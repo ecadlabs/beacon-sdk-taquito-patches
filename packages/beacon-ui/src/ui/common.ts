@@ -8,7 +8,7 @@ export enum AlertState {
   WALLETS = 'wallets',
   INSTALL = 'install',
   BUG_REPORT = 'bug-report',
-  QR = 'qr',
+  QR = 'qr'
 }
 
 export interface AlertButton {

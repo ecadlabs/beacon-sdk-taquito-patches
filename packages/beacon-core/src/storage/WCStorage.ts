@@ -5,7 +5,7 @@ import { IndexedDBStorage } from './IndexedDBStorage'
 export class WCStorage {
   private readonly localStorage = new LocalStorage()
   private readonly indexedDB = new IndexedDBStorage()
-  private channel: BroadcastChannel = new BroadcastChannel('WALLET_CONNECT_V2_INDEXED_DB')
+  private readonly channel: BroadcastChannel = new BroadcastChannel('WALLET_CONNECT_V2_INDEXED_DB')
   onMessageHandler: ((type: string) => void) | undefined
   onErrorHandler: ((data: any) => void) | undefined
 

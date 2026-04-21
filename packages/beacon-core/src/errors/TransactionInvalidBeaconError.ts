@@ -1,6 +1,5 @@
 import { BeaconErrorType } from '@ecadlabs/beacon-types'
-import { BeaconError } from './BeaconError';
-
+import { BeaconError } from './BeaconError'
 
 /**
  * @category Error

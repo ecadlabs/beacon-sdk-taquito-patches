@@ -29,6 +29,7 @@ export class Serializer {
 
     const decodedBytes = bs58check.decode(encoded)
     const jsonString = Buffer.from(decodedBytes).toString('utf8')
+
     return JSON.parse(jsonString)
   }
 }

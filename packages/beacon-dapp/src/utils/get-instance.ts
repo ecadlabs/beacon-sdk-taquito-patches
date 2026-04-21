@@ -7,7 +7,9 @@ let _instance: DAppClient | undefined
 export const getDAppClientInstance = (config: DAppClientOptions, reset?: boolean): DAppClient => {
   if (_instance && reset) {
     // sync API — kick off cleanup but surface failures rather than swallow.
-    _instance.disconnect().catch((error) => console.error('[DAppClient] disconnect on reset failed', error))
+    _instance
+      .disconnect()
+      .catch((error) => console.error('[DAppClient] disconnect on reset failed', error))
     _instance = undefined
   }
 

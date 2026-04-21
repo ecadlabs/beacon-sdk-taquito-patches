@@ -19,7 +19,9 @@ export class StorageValidator {
     return Array.isArray(param)
   }
   private objHasProperty(obj: any, path: string) {
-    if (!obj) return false // Return false if the object is null or undefined
+    if (!obj) {
+      return false
+    } // Return false if the object is null or undefined
 
     const properties = path.split('.') // Split the path into individual properties
 
@@ -32,6 +34,7 @@ export class StorageValidator {
       // Move to the next level in the path
       current = current[property]
     }
+
     return true
   }
 

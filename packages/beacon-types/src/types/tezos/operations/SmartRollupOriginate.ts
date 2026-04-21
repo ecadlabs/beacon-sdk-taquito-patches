@@ -1,9 +1,7 @@
 import { MichelineMichelsonV1Expression } from '../MichelineMichelsonV1Expression'
 import { TezosOperationType } from '../OperationTypes'
 import { TezosBaseOperation } from '../TezosBaseOperation'
-import {
-  PvmKind,
-} from '../common'
+import { PvmKind } from '../common'
 
 export interface TezosSmartRollupOriginateOperation extends TezosBaseOperation {
   kind: TezosOperationType.SMART_ROLLUP_ORIGINATE

@@ -1,4 +1,3 @@
-import { Logger } from '../utils/Logger'
 import {
   TransportType,
   TransportStatus,
@@ -7,6 +6,7 @@ import {
   StorageKeyReturnType,
   ConnectionContext
 } from '@ecadlabs/beacon-types'
+import { Logger } from '../utils/Logger'
 import { PeerManager } from '../managers/PeerManager'
 import { ArrayElem } from '../managers/StorageManager'
 import { CommunicationClient } from './clients/CommunicationClient'

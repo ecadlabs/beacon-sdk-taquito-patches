@@ -1,5 +1,3 @@
-import { BeaconEvent, BeaconEventType, BeaconEventHandlerFunction } from '../events'
-import { BlockExplorer } from '../utils/block-explorer'
 import {
   Storage,
   NetworkType,
@@ -8,6 +6,8 @@ import {
   AnalyticsInterface,
   Network
 } from '@ecadlabs/beacon-types'
+import { BeaconEvent, BeaconEventType, BeaconEventHandlerFunction } from '../events'
+import { BlockExplorer } from '../utils/block-explorer'
 
 type RequireAtLeastOne<T, Keys extends keyof T = keyof T> = Pick<T, Exclude<keyof T, Keys>> &
   {

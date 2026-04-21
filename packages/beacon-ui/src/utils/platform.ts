@@ -58,8 +58,8 @@ export const isMobileOS = (win: Window): boolean =>
   )
 
 export const currentOS = () => {
-  var ua = navigator.userAgent
-  var osMap = new Map([
+  const ua = navigator.userAgent
+  const osMap = new Map([
     ['Windows', 'Windows'],
     ['Mac', 'Mac OS'],
     ['Linux', 'Linux'],
@@ -68,17 +68,18 @@ export const currentOS = () => {
     ['Android', 'Android']
   ])
 
-  for (let [key, value] of osMap) {
+  for (const [key, value] of osMap) {
     if (ua.indexOf(key) !== -1) {
       return value
     }
   }
+
   return 'UNKNOWN'
 }
 
 export const currentBrowser = () => {
-  var ua = navigator.userAgent
-  var browserMap = new Map([
+  const ua = navigator.userAgent
+  const browserMap = new Map([
     ['Firefox', 'Firefox'],
     ['Opera', 'Opera'],
     ['OPR', 'Opera'],
@@ -88,10 +89,11 @@ export const currentBrowser = () => {
     ['Safari', 'Safari']
   ])
 
-  for (let [key, value] of browserMap) {
+  for (const [key, value] of browserMap) {
     if (ua.indexOf(key) !== -1) {
       return value
     }
   }
+
   return 'UNKNOWN'
 }

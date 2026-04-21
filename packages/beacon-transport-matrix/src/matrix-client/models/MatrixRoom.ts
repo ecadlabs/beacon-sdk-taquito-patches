@@ -50,8 +50,8 @@ export class MatrixRoom {
     return typeof roomOrId === 'string'
       ? new MatrixRoom(roomOrId, status || MatrixRoomStatus.UNKNOWN)
       : status !== undefined
-      ? new MatrixRoom(roomOrId.id, status, roomOrId.members, roomOrId.messages)
-      : roomOrId
+        ? new MatrixRoom(roomOrId.id, status, roomOrId.members, roomOrId.messages)
+        : roomOrId
   }
 
   /**

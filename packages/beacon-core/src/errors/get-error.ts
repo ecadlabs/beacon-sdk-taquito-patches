@@ -1,9 +1,9 @@
 // src/errors/index.ts
+import { BeaconErrorType } from '@ecadlabs/beacon-types'
+import { assertNever } from '../utils/assert-never'
 import { BeaconError } from './BeaconError'
 import { BroadcastBeaconError } from './BroadcastBeaconError'
 import { NetworkNotSupportedBeaconError } from './NetworkNotSupportedBeaconError'
-import { BeaconErrorType } from '@ecadlabs/beacon-types'
-import { assertNever } from '../utils/assert-never'
 import { AbortedBeaconError } from './AbortedBeaconError'
 import { NoAddressBeaconError } from './NoAddressBeaconError'
 import { NoPrivateKeyBeaconError } from './NoPrivateKeyBeaconError'
