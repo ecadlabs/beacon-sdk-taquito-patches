@@ -193,46 +193,48 @@ const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
                 ]}
               />
             )}
-            {!isMobile && wallet?.types.includes('extension') && (() => {
-              const isExtensionInstalled = props.substratePairing
-                ? false
-                : availableExtensions.some(
-                    (ext) => ext.id === wallet.id || ext.id === wallet.firefoxId
-                  )
+            {!isMobile &&
+              wallet?.types.includes('extension') &&
+              (() => {
+                const isExtensionInstalled = props.substratePairing
+                  ? false
+                  : availableExtensions.some(
+                      (ext) => ext.id === wallet.id || ext.id === wallet.firefoxId
+                    )
 
-              return (
-                <Info
-                  border
-                  title={
-                    isExtensionInstalled
-                      ? `Connect with ${wallet?.name} Browser Extension`
-                      : `Install ${wallet?.name} Wallet`
-                  }
-                  description={
-                    isExtensionInstalled
-                      ? `Please connect below to use your ${wallet?.name} Wallet browser extension.`
-                      : `To connect your ${wallet?.name} Wallet, install the browser extension.`
-                  }
-                  buttons={
-                    isExtensionInstalled
-                      ? [
-                          {
-                            label: 'Use Extension',
-                            type: 'primary',
-                            onClick: () => handleClickConnectExtension()
-                          }
-                        ]
-                      : [
-                          {
-                            label: 'Install extension',
-                            type: 'primary',
-                            onClick: () => handleClickInstallExtension()
-                          }
-                        ]
-                  }
-                />
-              )
-            })()}
+                return (
+                  <Info
+                    border
+                    title={
+                      isExtensionInstalled
+                        ? `Connect with ${wallet?.name} Browser Extension`
+                        : `Install ${wallet?.name} Wallet`
+                    }
+                    description={
+                      isExtensionInstalled
+                        ? `Please connect below to use your ${wallet?.name} Wallet browser extension.`
+                        : `To connect your ${wallet?.name} Wallet, install the browser extension.`
+                    }
+                    buttons={
+                      isExtensionInstalled
+                        ? [
+                            {
+                              label: 'Use Extension',
+                              type: 'primary',
+                              onClick: () => handleClickConnectExtension()
+                            }
+                          ]
+                        : [
+                            {
+                              label: 'Install extension',
+                              type: 'primary',
+                              onClick: () => handleClickInstallExtension()
+                            }
+                          ]
+                    }
+                  />
+                )
+              })()}
             {!isMobileOS(window) && wallet?.types.includes('desktop') && (
               <Info
                 border

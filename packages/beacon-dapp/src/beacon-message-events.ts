@@ -1,5 +1,5 @@
-import { BeaconEvent } from './events'
 import { BeaconMessageType } from '@ecadlabs/beacon-types'
+import { BeaconEvent } from './events'
 
 export const messageEvents: {
   [key in BeaconMessageType]: { sent: BeaconEvent; success: BeaconEvent; error: BeaconEvent }

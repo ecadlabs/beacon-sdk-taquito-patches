@@ -27,7 +27,7 @@ export class ChromeStorage implements Storage {
           if (typeof defaultValue === 'object') {
             resolve(JSON.parse(JSON.stringify(defaultValue)) as StorageKeyReturnType[K])
           } else {
-            resolve(defaultValue as StorageKeyReturnType[K])
+            resolve(defaultValue)
           }
         }
       })

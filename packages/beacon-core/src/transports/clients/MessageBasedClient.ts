@@ -1,4 +1,3 @@
-import { BEACON_VERSION } from '../../constants'
 import {
   decryptCryptoboxPayload,
   encryptCryptoboxPayload,
@@ -7,8 +6,9 @@ import {
   secretbox_NONCEBYTES,
   secretbox_MACBYTES
 } from '@ecadlabs/beacon-utils'
-import { CommunicationClient } from './CommunicationClient'
 import { PostMessagePairingRequest, PostMessagePairingResponse } from '@ecadlabs/beacon-types'
+import { BEACON_VERSION } from '../../constants'
+import { CommunicationClient } from './CommunicationClient'
 
 /**
  * @internalapi

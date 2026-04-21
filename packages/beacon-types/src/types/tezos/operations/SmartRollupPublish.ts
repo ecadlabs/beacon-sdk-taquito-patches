@@ -1,8 +1,6 @@
 import { TezosOperationType } from '../OperationTypes'
 import { TezosBaseOperation } from '../TezosBaseOperation'
-import {
-  SmartRollupPublishCommitment,
-} from '../common'
+import { SmartRollupPublishCommitment } from '../common'
 
 export interface TezosSmartRollupPublishOperation extends TezosBaseOperation {
   kind: TezosOperationType.SMART_ROLLUP_PUBLISH

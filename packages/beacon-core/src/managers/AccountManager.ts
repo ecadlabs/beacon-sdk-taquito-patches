@@ -35,7 +35,9 @@ export class AccountManager {
   ): Promise<AccountInfo | undefined> {
     const account = await this.getAccount(accountIdentifier)
 
-    if (!account) return undefined
+    if (!account) {
+      return undefined
+    }
 
     const newAccount = { ...account, ...accountInfo }
     await this.storageManager.addOne(

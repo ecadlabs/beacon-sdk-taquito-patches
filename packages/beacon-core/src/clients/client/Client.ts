@@ -17,9 +17,9 @@ import { BeaconClient } from '../beacon-client/BeaconClient'
 import { AccountManager } from '../../managers/AccountManager'
 import { getSenderId } from '../../utils/get-sender-id'
 import { Logger } from '../../utils/Logger'
-import { ClientOptions } from './ClientOptions'
 import { Transport } from '../../transports/Transport'
 import { Serializer } from '../../Serializer'
+import { ClientOptions } from './ClientOptions'
 
 const logger = new Logger('Client')
 
@@ -53,7 +53,7 @@ export abstract class Client extends BeaconClient {
 
   protected readonly matrixNodes: NodeDistributions
 
-  private transportListeners: Map<
+  private readonly transportListeners: Map<
     TransportType,
     (message: any, connectionInfo: ConnectionContext) => Promise<void>
   > = new Map()

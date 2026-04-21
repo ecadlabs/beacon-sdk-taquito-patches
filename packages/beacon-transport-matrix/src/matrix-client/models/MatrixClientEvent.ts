@@ -8,8 +8,8 @@ export enum MatrixClientEventType {
 export type MatrixClientEventContent<T> = T extends MatrixClientEventType.INVITE
   ? MatrixClientEventInviteContent
   : T extends MatrixClientEventType.MESSAGE
-  ? MatrixClientEventMessageContent<unknown>
-  : never
+    ? MatrixClientEventMessageContent<unknown>
+    : never
 
 export interface MatrixClientEventInviteContent {
   roomId: string

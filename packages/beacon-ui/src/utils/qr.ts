@@ -22,9 +22,10 @@ export const getQrData = (payload: string, height?: number, width?: number): str
       content: payload,
       join: true, // Join adjacent modules into a single path element
       ecl: 'L', // Error correction level,
-      height: height,
-      width: width
+      height,
+      width
     })
+
     return qrcode.svg()
   } catch (qrError) {
     console.error('error', qrError)

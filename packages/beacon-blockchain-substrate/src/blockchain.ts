@@ -33,10 +33,10 @@ export class SubstrateBlockchain implements Blockchain {
     iOSList: App[]
   }> {
     return {
-      extensionList: extensionList,
-      desktopList: desktopList,
-      webList: webList,
-      iOSList: iOSList
+      extensionList,
+      desktopList,
+      webList,
+      iOSList
     }
   }
 

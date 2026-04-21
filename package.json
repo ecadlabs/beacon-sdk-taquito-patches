@@ -37,7 +37,6 @@
     "prettier": "prettier --write 'src/**/*' '**/src/**/*' 'docs/**/*.md' 'example-dapp.html' 'example-wallet.html'",
     "lint": "eslint 'packages/*/src/**/*.ts'",
     "lint:fix": "eslint 'packages/*/src/**/*.ts' --fix",
-    "lint-ci": "eslint 'packages/*/src/**/*.ts' -f json -o lintReport.json || true",
     "test": "node scripts/run-workspaces.mjs test",
     "test-ci": "nyc --reporter=lcov npm test",
     "e2e": "playwright test e2e",

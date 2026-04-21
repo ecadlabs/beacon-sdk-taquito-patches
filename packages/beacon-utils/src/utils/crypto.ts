@@ -253,9 +253,8 @@ const toBuffer = async (message: string): Promise<Uint8Array> => {
   return encode(message)
 }
 
-const coinlibhash = async (message: Uint8Array, size: number = 32): Promise<Uint8Array> => {
-  return hash(message, size)
-}
+const coinlibhash = async (message: Uint8Array, size: number = 32): Promise<Uint8Array> =>
+  hash(message, size)
 
 export const signMessage = async (
   message: string,

@@ -13,14 +13,6 @@ import {
   sign,
   toHex
 } from '@ecadlabs/beacon-utils'
-import { MatrixClient } from '../matrix-client/MatrixClient'
-import {
-  MatrixClientEvent,
-  MatrixClientEventType,
-  MatrixClientEventMessageContent
-} from '../matrix-client/models/MatrixClientEvent'
-import { MatrixMessageType } from '../matrix-client/models/MatrixMessage'
-import { MatrixRoom } from '../matrix-client/models/MatrixRoom'
 import {
   Storage,
   P2PPairingRequest,
@@ -39,6 +31,14 @@ import {
 } from '@ecadlabs/beacon-core'
 import { hash } from '@stablelib/blake2b'
 import { encode } from '@stablelib/utf8'
+import { MatrixClient } from '../matrix-client/MatrixClient'
+import {
+  MatrixClientEvent,
+  MatrixClientEventType,
+  MatrixClientEventMessageContent
+} from '../matrix-client/models/MatrixClientEvent'
+import { MatrixMessageType } from '../matrix-client/models/MatrixMessage'
+import { MatrixRoom } from '../matrix-client/models/MatrixRoom'
 
 const logger = new Logger('P2PCommunicationClient')
 
@@ -63,9 +63,7 @@ interface BeaconInfoResponse {
   timestamp: number
 }
 
-const sleep = (time: number) => {
-  return new Promise((resolve) => setTimeout(resolve, time))
-}
+const sleep = (time: number) => new Promise((resolve) => setTimeout(resolve, time))
 
 /**
  * @internalapi
@@ -163,15 +161,23 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
 
     // 1) Flatten out [region, server] pairs and shuffle for randomness
-    type Probe = { server: string; region: Regions }
-    const probes: Probe[] = Object.entries(this.ENABLED_RELAY_SERVERS as Record<string, string[]>)
+    interface Probe {
+      server: string
+      region: Regions
+    }
+    const probes: Probe[] = Object.entries(this.ENABLED_RELAY_SERVERS)
       .flatMap(([region, servers]) =>
         servers.map((server) => ({ server, region: region as Regions }))
       )
       .sort(() => Math.random() - 0.5)
 
     // 2) Fire off all probes in parallel, each catching its own errors
-    type Result = { server: string; region: Regions; time: number; timestamp: number }
+    interface Result {
+      server: string
+      region: Regions
+      time: number
+      timestamp: number
+    }
     const results: Result[] = []
 
     const probePromises = probes.map(({ server, region }) =>
@@ -206,6 +212,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     const best = results.reduce((a, b) => (b.time < a.time ? b : a))
 
     this.selectedRegion = best.region
+
     return { server: best.server, timestamp: best.timestamp }
   }
 
@@ -233,7 +240,10 @@ export class P2PCommunicationClient extends CommunicationClient {
 
         return { server: relayServer.server, timestamp: info.timestamp }
       } catch (error) {
-        logger.log('getRelayServer', `cached server ${relayServer.server} is unreachable, resetting`)
+        logger.log(
+          'getRelayServer',
+          `cached server ${relayServer.server} is unreachable, resetting`
+        )
         await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
         const replacementRelayPromise = this.relayServer
         if (replacementRelayPromise === currentPromise) {
@@ -241,6 +251,7 @@ export class P2PCommunicationClient extends CommunicationClient {
           this.selectedRegion = undefined
         } else if (replacementRelayPromise) {
           const latestRelayServer = await replacementRelayPromise.promise
+
           return { server: latestRelayServer.server, timestamp: latestRelayServer.timestamp }
         }
         // Fall through to discovery below
@@ -249,6 +260,7 @@ export class P2PCommunicationClient extends CommunicationClient {
 
     if (this.relayServer) {
       const relayServer = await this.relayServer.promise
+
       return { server: relayServer.server, timestamp: relayServer.timestamp }
     }
 
@@ -271,9 +283,13 @@ export class P2PCommunicationClient extends CommunicationClient {
             timestamp: info.timestamp,
             localTimestamp: new Date().getTime()
           })
+
           return { server: node, timestamp: info.timestamp }
         } catch (error) {
-          logger.log('getRelayServer', `stored node ${node} is unreachable, falling through to discovery`)
+          logger.log(
+            'getRelayServer',
+            `stored node ${node} is unreachable, falling through to discovery`
+          )
           await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
         }
       }
@@ -314,6 +330,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       throw new Error(`getBeaconInfo ${server} failed: ${response.status} ${response.statusText}`)
     }
     const data = (await response.json()) as BeaconInfoResponse
+
     return {
       region: data.region,
       known_servers: data.known_servers,
@@ -419,6 +436,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       if (this.loginCounter <= (this.ENABLED_RELAY_SERVERS[this.selectedRegion] ?? []).length) {
         this.loginCounter++
         this.start()
+
         return
       } else {
         logger.error(

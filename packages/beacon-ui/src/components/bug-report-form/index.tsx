@@ -60,7 +60,7 @@ const BugReportForm: React.FC<{ onSubmit: () => void }> = (props) => {
     }
 
     const key = Object.keys(localStorage).find((key) => key.includes('user-id'))
-    return key && key.length ? localStorage.getItem(key) ?? 'UNKNOWN' : 'UNKNOWN'
+    return key && key.length ? (localStorage.getItem(key) ?? 'UNKNOWN') : 'UNKNOWN'
   }
 
   useEffect(() => {

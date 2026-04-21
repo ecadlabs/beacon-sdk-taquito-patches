@@ -66,11 +66,10 @@ export class OutgoingResponseInterceptor {
     }: OutgoingResponseInterceptorOptions = config
 
     const wrappedMessage:
-      | BeaconMessageWrapper<PermissionResponseV3<string>>
-      | BeaconMessageWrapper<BlockchainResponseV3<string>> = msg as any
+      | BeaconMessageWrapper<PermissionResponseV3>
+      | BeaconMessageWrapper<BlockchainResponseV3> = msg as any
 
-    const v3Message: PermissionResponseV3<string> | BlockchainResponseV3<string> =
-      wrappedMessage.message
+    const v3Message: PermissionResponseV3 | BlockchainResponseV3 = wrappedMessage.message
 
     logger.log('LOGGING OUTGOING V3', v3Message, appMetadataManager)
 

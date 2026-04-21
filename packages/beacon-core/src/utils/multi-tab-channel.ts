@@ -1,20 +1,20 @@
 import { createLeaderElection, BroadcastChannel, LeaderElector } from 'broadcast-channel'
 
-type Message = {
+interface Message {
   type: string
   id: string
   data: any
 }
 
 export class MultiTabChannel {
-  private channel: BroadcastChannel
-  private elector: LeaderElector
-  private eventListeners = [
+  private readonly channel: BroadcastChannel
+  private readonly elector: LeaderElector
+  private readonly eventListeners = [
     () => this.onBeforeUnloadHandler(),
     (message: any) => this.onMessageHandler(message)
   ]
-  private onBCMessageHandler: Function
-  private onElectedLeaderHandler: Function
+  private readonly onBCMessageHandler: Function
+  private readonly onElectedLeaderHandler: Function
   // Auxiliary variable needed for handling beforeUnload.
   // Closing a tab causes the elector to be killed immediately
   private wasLeader: boolean = false
@@ -64,6 +64,7 @@ export class MultiTabChannel {
       if (this.isLeader()) {
         this.onElectedLeaderHandler()
       }
+
       return
     }
 

@@ -37,14 +37,14 @@ import {
   // EncryptPayloadResponseOutput,
   // EncryptionOperation
 } from '@ecadlabs/beacon-core'
-import { shortenString } from './utils/shorten-string'
 import { isMobile, isMobileOS } from '@ecadlabs/beacon-ui'
+import { shortenString } from './utils/shorten-string'
 
 const logger = new Logger('BeaconEvents')
 
 const SUCCESS_TIMER: number = 5 * 1000
 
-type RPCError = {
+interface RPCError {
   kind: string
   id: string
   contract_handle?: string

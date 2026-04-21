@@ -197,11 +197,10 @@ export class IncomingRequestInterceptor {
     }: IncomingRequestInterceptorOptionsV3 = config
 
     const wrappedMessage:
-      | BeaconMessageWrapper<PermissionRequestV3<string>>
-      | BeaconMessageWrapper<BlockchainRequestV3<string>> = msg as any /* TODO: Remove any */
+      | BeaconMessageWrapper<PermissionRequestV3>
+      | BeaconMessageWrapper<BlockchainRequestV3> = msg as any /* TODO: Remove any */
 
-    const v3Message: PermissionRequestV3<string> | BlockchainRequestV3<string> =
-      wrappedMessage.message
+    const v3Message: PermissionRequestV3 | BlockchainRequestV3 = wrappedMessage.message
 
     switch (v3Message.type) {
       case BeaconMessageType.PermissionRequest:

@@ -1,4 +1,4 @@
-import { ExtensionMessageTarget } from "./ExtensionMessageTarget"
+import { ExtensionMessageTarget } from './ExtensionMessageTarget'
 
 /**
  * @internalapi
