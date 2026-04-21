@@ -1,13 +1,11 @@
-import { Optional } from '@ecadlabs/beacon-types'
-import {
-  PermissionRequest,
-  OperationRequest,
-  SignPayloadRequest,
-  ProofOfEventChallengeRequest,
-  SimulatedProofOfEventChallengeRequest,
-  // EncryptPayloadRequest,
-  BroadcastRequest
-} from '@ecadlabs/beacon-types'
+import { Optional } from '../../utils/Optional'
+import { PermissionRequest } from './PermissionRequest'
+import { OperationRequest } from './OperationRequest'
+import { SignPayloadRequest } from './SignPayloadRequest'
+import { ProofOfEventChallengeRequest } from './ProofOfEventChallengeRequest'
+import { SimulatedProofOfEventChallengeRequest } from './SimulatedProofOfEventChallengeRequest'
+import { BroadcastRequest } from './BroadcastRequest'
+// EncryptPayloadRequest,
 
 /**
  * @internalapi

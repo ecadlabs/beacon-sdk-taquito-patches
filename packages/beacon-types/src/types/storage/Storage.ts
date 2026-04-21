@@ -1,4 +1,5 @@
-import { StorageKey, StorageKeyReturnType } from '@ecadlabs/beacon-types'
+import { StorageKey } from './StorageKey'
+import { StorageKeyReturnType } from './StorageKeyReturnType'
 
 /**
  * @internalapi

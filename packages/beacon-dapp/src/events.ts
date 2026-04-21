@@ -1,5 +1,4 @@
 import {
-  BlockExplorer,
   closeAlert,
   openAlert,
   openBugReport,
@@ -8,7 +7,7 @@ import {
   closeToast,
   openToast,
   ToastAction
-} from '@ecadlabs/beacon-dapp'
+} from '@ecadlabs/beacon-ui'
 import {
   BeaconErrorType,
   ExtendedPostMessagePairingResponse,
@@ -38,6 +37,7 @@ import {
   // EncryptionOperation
 } from '@ecadlabs/beacon-core'
 import { isMobile, isMobileOS } from '@ecadlabs/beacon-ui'
+import { BlockExplorer } from './utils/block-explorer'
 import { shortenString } from './utils/shorten-string'
 
 const logger = new Logger('BeaconEvents')

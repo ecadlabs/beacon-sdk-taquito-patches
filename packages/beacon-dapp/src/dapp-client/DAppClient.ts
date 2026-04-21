@@ -104,7 +104,6 @@ import {
   getKeypairFromSeed
 } from '@ecadlabs/beacon-utils'
 
-import { BeaconEventHandler } from '@ecadlabs/beacon-dapp'
 import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
 import {
   AlertButton,
@@ -126,6 +125,7 @@ import {
   currentOS
 } from '@ecadlabs/beacon-ui'
 import { WalletConnectTransport } from '@ecadlabs/beacon-transport-walletconnect'
+import { BeaconEventHandler } from '../events'
 import { DappPostMessageTransport } from '../transports/DappPostMessageTransport'
 import { DappP2PTransport } from '../transports/DappP2PTransport'
 import { DappWalletConnectTransport } from '../transports/DappWalletConnectTransport'

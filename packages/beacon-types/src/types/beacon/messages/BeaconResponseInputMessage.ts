@@ -1,17 +1,13 @@
-import {
-  Optional,
-  ProofOfEventChallengeResponse,
-  SimulatedProofOfEventChallengeResponse
-} from '@ecadlabs/beacon-types'
-import {
-  PermissionResponse,
-  OperationResponse,
-  SignPayloadResponse,
-  // EncryptPayloadResponse,
-  BroadcastResponse,
-  AcknowledgeResponse,
-  ErrorResponse
-} from '@ecadlabs/beacon-types'
+import { Optional } from '../../utils/Optional'
+import { ProofOfEventChallengeResponse } from './ProofOfEventChallengeResponse'
+import { SimulatedProofOfEventChallengeResponse } from './SimulatedProofOfEventChallengeResponse'
+import { PermissionResponse } from './PermissionResponse'
+import { OperationResponse } from './OperationResponse'
+import { SignPayloadResponse } from './SignPayloadResponse'
+import { BroadcastResponse } from './BroadcastResponse'
+import { AcknowledgeResponse } from './AcknowledgeResponse'
+import { ErrorResponse } from './ErrorResponse'
+// EncryptPayloadResponse,
 
 /**
  * @category Wallet

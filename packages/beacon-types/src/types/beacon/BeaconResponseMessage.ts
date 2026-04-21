@@ -1,10 +1,8 @@
-import {
-  PermissionResponse,
-  OperationResponse,
-  SignPayloadResponse,
-  BroadcastResponse
-  // EncryptPayloadResponse
-} from '@ecadlabs/beacon-types'
+import { PermissionResponse } from './messages/PermissionResponse'
+import { OperationResponse } from './messages/OperationResponse'
+import { SignPayloadResponse } from './messages/SignPayloadResponse'
+import { BroadcastResponse } from './messages/BroadcastResponse'
+// EncryptPayloadResponse
 import { ErrorResponse } from './messages/ErrorResponse'
 
 /**

@@ -1,10 +1,8 @@
-import {
-  BeaconBaseMessage,
-  BeaconMessageType,
-  PermissionScope,
-  AppMetadata,
-  Network
-} from '@ecadlabs/beacon-types'
+import { BeaconBaseMessage } from '../BeaconBaseMessage'
+import { BeaconMessageType } from '../BeaconMessageType'
+import { PermissionScope } from '../PermissionScope'
+import { AppMetadata } from '../AppMetadata'
+import { Network } from '../Network'
 
 /**
  * @category Message

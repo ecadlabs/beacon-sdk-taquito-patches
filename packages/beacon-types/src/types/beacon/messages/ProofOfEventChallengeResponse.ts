@@ -1,4 +1,5 @@
-import { BeaconBaseMessage, BeaconMessageType } from '@ecadlabs/beacon-types'
+import { BeaconBaseMessage } from '../BeaconBaseMessage'
+import { BeaconMessageType } from '../BeaconMessageType'
 
 export interface ProofOfEventChallengeResponse extends BeaconBaseMessage {
   type: BeaconMessageType.ProofOfEventChallengeResponse

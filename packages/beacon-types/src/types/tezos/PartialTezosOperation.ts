@@ -1,28 +1,26 @@
-import {
-  Optional,
-  TezosAttestationOperation,
-  TezosAttestationWithDalOperation,
-  TezosDoubleAttestationEvidenceOperation,
-  TezosDoublePreAttestationEvidenceOperation,
-  TezosDoublePreEndorsementEvidenceOperation,
-  TezosDrainDelegateOperation,
-  TezosEndorsementWithDalOperation,
-  TezosFailingNoopOperation,
-  TezosIncreasePaidStorageOperation,
-  TezosPreAttestationOperation,
-  TezosRegisterGlobalConstantOperation,
-  TezosSetDepositsLimitOperation,
-  TezosSmartRollupAddMessagesOperation,
-  TezosSmartRollupCementOperation,
-  TezosSmartRollupExecuteOutboxMessageOperation,
-  TezosSmartRollupOriginateOperation,
-  TezosSmartRollupPublishOperation,
-  TezosSmartRollupRecoverBondOperation,
-  TezosSmartRollupRefuteOperation,
-  TezosTransferTicketOperation,
-  TezosUpdateConsensusKeyOperation,
-  TezosVdfRevelationOperation
-} from '@ecadlabs/beacon-types'
+import { Optional } from '../utils/Optional'
+import { TezosAttestationOperation } from './operations/Attestation'
+import { TezosAttestationWithDalOperation } from './operations/AttestationWithDal'
+import { TezosDoubleAttestationEvidenceOperation } from './operations/DoubleAttestationEvidence'
+import { TezosDoublePreAttestationEvidenceOperation } from './operations/DoublePreAttestationEvidence'
+import { TezosDoublePreEndorsementEvidenceOperation } from './operations/DoublePreEndorsementEvidence'
+import { TezosDrainDelegateOperation } from './operations/DrainDelegate'
+import { TezosEndorsementWithDalOperation } from './operations/EndorsementWithDal'
+import { TezosFailingNoopOperation } from './operations/FailingNoop'
+import { TezosIncreasePaidStorageOperation } from './operations/IncreasePaidStorage'
+import { TezosPreAttestationOperation } from './operations/PreAttestation'
+import { TezosRegisterGlobalConstantOperation } from './operations/RegisterGlobalConstant'
+import { TezosSetDepositsLimitOperation } from './operations/SetDepositsLimit'
+import { TezosSmartRollupAddMessagesOperation } from './operations/SmartRollupAddMessages'
+import { TezosSmartRollupCementOperation } from './operations/SmartRollupCement'
+import { TezosSmartRollupExecuteOutboxMessageOperation } from './operations/SmartRollupExecuteOutboxMessage'
+import { TezosSmartRollupOriginateOperation } from './operations/SmartRollupOriginate'
+import { TezosSmartRollupPublishOperation } from './operations/SmartRollupPublish'
+import { TezosSmartRollupRecoverBondOperation } from './operations/SmartRollupRecoverBond'
+import { TezosSmartRollupRefuteOperation } from './operations/SmartRollupRefute'
+import { TezosTransferTicketOperation } from './operations/TransferTicket'
+import { TezosUpdateConsensusKeyOperation } from './operations/UpdateCompanionKey'
+import { TezosVdfRevelationOperation } from './operations/VdfRevelation'
 import { TezosActivateAccountOperation } from './operations/ActivateAccount'
 import { TezosBallotOperation } from './operations/Ballot'
 import { TezosDelegationOperation } from './operations/Delegation'
