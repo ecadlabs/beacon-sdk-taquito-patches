@@ -35,6 +35,7 @@
     "@ecadlabs/beacon-core": "4.8.1-ecad.7",
     "@ecadlabs/beacon-transport-matrix": "4.8.1-ecad.7",
     "@ecadlabs/beacon-transport-postmessage": "4.8.1-ecad.7",
+    "@ecadlabs/beacon-types": "4.8.1-ecad.7",
     "@ecadlabs/beacon-utils": "4.8.1-ecad.7"
   },
   "publishConfig": {
