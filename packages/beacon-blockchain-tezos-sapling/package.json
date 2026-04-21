@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-blockchain-tezos-sapling",
-  "version": "4.8.1-ecad.6",
+  "version": "4.8.1-ecad.7",
   "description": "Tezos Sapling support package for the Beacon SDK.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
@@ -30,8 +30,8 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-types": "4.8.1-ecad.6",
-    "@ecadlabs/beacon-ui": "4.8.1-ecad.6"
+    "@ecadlabs/beacon-types": "4.8.1-ecad.7",
+    "@ecadlabs/beacon-ui": "4.8.1-ecad.7"
   },
   "publishConfig": {
     "access": "public"
