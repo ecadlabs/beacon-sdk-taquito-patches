@@ -1,16 +1,12 @@
-import {
-  Optional,
-  ProofOfEventChallengeRequest,
-  SimulatedProofOfEventChallengeRequest
-} from '@ecadlabs/beacon-types'
-import {
-  AppMetadata,
-  PermissionRequest,
-  OperationRequest,
-  SignPayloadRequest,
-  // EncryptPayloadRequest,
-  BroadcastRequest
-} from '@ecadlabs/beacon-types'
+import { Optional } from '../../utils/Optional'
+import { AppMetadata } from '../AppMetadata'
+import { ProofOfEventChallengeRequest } from './ProofOfEventChallengeRequest'
+import { SimulatedProofOfEventChallengeRequest } from './SimulatedProofOfEventChallengeRequest'
+import { PermissionRequest } from './PermissionRequest'
+import { OperationRequest } from './OperationRequest'
+import { SignPayloadRequest } from './SignPayloadRequest'
+import { BroadcastRequest } from './BroadcastRequest'
+// EncryptPayloadRequest,
 
 /**
  * @category Wallet

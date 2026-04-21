@@ -1,4 +1,6 @@
-import { BeaconBaseMessage, BeaconMessageType, SigningType } from '@ecadlabs/beacon-types'
+import { BeaconBaseMessage } from '../BeaconBaseMessage'
+import { BeaconMessageType } from '../BeaconMessageType'
+import { SigningType } from '../SigningType'
 
 /**
  * @category Message

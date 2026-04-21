@@ -1,4 +1,4 @@
-import { BeaconMessageType } from '@ecadlabs/beacon-types'
+import { BeaconMessageType } from './BeaconMessageType'
 
 /**
  * @category Message

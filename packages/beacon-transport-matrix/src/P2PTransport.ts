@@ -10,8 +10,8 @@ import {
   P2PPairingRequest,
   NodeDistributions
 } from '@ecadlabs/beacon-types'
-import { P2PCommunicationClient } from '@ecadlabs/beacon-transport-matrix'
 import { KeyPair } from '@ecadlabs/beacon-utils'
+import { P2PCommunicationClient } from './communication-client/P2PCommunicationClient'
 
 const logger = new Logger('P2PTransport')
 

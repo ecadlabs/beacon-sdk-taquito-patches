@@ -1,4 +1,6 @@
-import { BeaconBaseMessage, BeaconErrorType, BeaconMessageType } from '@ecadlabs/beacon-types'
+import { BeaconBaseMessage } from '../BeaconBaseMessage'
+import { BeaconErrorType } from '../../BeaconErrorType'
+import { BeaconMessageType } from '../BeaconMessageType'
 
 /**
  * @category Message

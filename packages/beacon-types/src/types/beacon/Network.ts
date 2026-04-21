@@ -1,4 +1,4 @@
-import { NetworkType } from '@ecadlabs/beacon-types'
+import { NetworkType } from './NetworkType'
 
 export interface Network {
   type: NetworkType

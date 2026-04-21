@@ -1,13 +1,11 @@
-import {
-  PermissionResponse,
-  OperationResponse,
-  SignPayloadResponse,
-  // EncryptPayloadResponse,
-  BroadcastResponse,
-  AccountInfo,
-  ProofOfEventChallengeResponse,
-  SimulatedProofOfEventChallengeResponse
-} from '@ecadlabs/beacon-types'
+import { AccountInfo } from '../../AccountInfo'
+import { PermissionResponse } from './PermissionResponse'
+import { OperationResponse } from './OperationResponse'
+import { SignPayloadResponse } from './SignPayloadResponse'
+import { BroadcastResponse } from './BroadcastResponse'
+import { ProofOfEventChallengeResponse } from './ProofOfEventChallengeResponse'
+import { SimulatedProofOfEventChallengeResponse } from './SimulatedProofOfEventChallengeResponse'
+// EncryptPayloadResponse,
 
 /**
  * @category DApp

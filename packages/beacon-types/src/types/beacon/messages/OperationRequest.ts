@@ -1,4 +1,6 @@
-import { BeaconBaseMessage, BeaconMessageType, Network } from '@ecadlabs/beacon-types'
+import { BeaconBaseMessage } from '../BeaconBaseMessage'
+import { BeaconMessageType } from '../BeaconMessageType'
+import { Network } from '../Network'
 import { PartialTezosOperation } from '../../tezos/PartialTezosOperation'
 
 /**
