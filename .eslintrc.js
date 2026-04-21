@@ -10,13 +10,11 @@ module.exports = {
     sourceType: 'module'
   },
   plugins: ['@typescript-eslint', 'prefer-arrow', 'import'],
-  extends: ['plugin:@typescript-eslint/recommended', 'prettier', 'prettier/@typescript-eslint'],
+  extends: ['plugin:@typescript-eslint/recommended', 'prettier'],
   rules: {
     '@typescript-eslint/adjacent-overload-signatures': 'error',
     '@typescript-eslint/array-type': 'error',
     '@typescript-eslint/await-thenable': 'error',
-    '@typescript-eslint/ban-types': 'error',
-    '@typescript-eslint/class-name-casing': 'error',
     '@typescript-eslint/consistent-type-assertions': 'error',
     '@typescript-eslint/consistent-type-definitions': 'error',
     '@typescript-eslint/explicit-member-accessibility': [
@@ -25,21 +23,6 @@ module.exports = {
         accessibility: 'explicit',
         overrides: {
           constructors: 'no-public'
-        }
-      }
-    ],
-    '@typescript-eslint/indent': 'off',
-    '@typescript-eslint/interface-name-prefix': 'error',
-    '@typescript-eslint/member-delimiter-style': [
-      'error',
-      {
-        multiline: {
-          delimiter: 'none',
-          requireLast: true
-        },
-        singleline: {
-          delimiter: 'semi',
-          requireLast: false
         }
       }
     ],
@@ -67,18 +50,13 @@ module.exports = {
     '@typescript-eslint/prefer-function-type': 'error',
     '@typescript-eslint/prefer-namespace-keyword': 'error',
     '@typescript-eslint/promise-function-async': 'off',
-    '@typescript-eslint/quotes': 'off',
     '@typescript-eslint/restrict-plus-operands': 'error',
-    '@typescript-eslint/semi': ['error', 'never'],
-    '@typescript-eslint/space-within-parens': ['off', 'never'],
     '@typescript-eslint/strict-boolean-expressions': 'off',
     '@typescript-eslint/triple-slash-reference': 'error',
-    '@typescript-eslint/type-annotation-spacing': 'off',
     '@typescript-eslint/unbound-method': 'error',
     '@typescript-eslint/unified-signatures': 'error',
     'arrow-body-style': ['error', 'as-needed'],
     'arrow-parens': ['off', 'as-needed'],
-    '@typescript-eslint/camelcase': 'warn',
     'class-methods-use-this': 'off',
     'comma-dangle': 'off',
     complexity: 'error',
