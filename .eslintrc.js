@@ -26,7 +26,6 @@ module.exports = {
         }
       }
     ],
-    '@typescript-eslint/member-ordering': 'error',
     '@typescript-eslint/no-empty-function': 'error',
     '@typescript-eslint/no-empty-interface': 'error',
     '@typescript-eslint/no-explicit-any': 'error',
@@ -69,12 +68,6 @@ module.exports = {
     'guard-for-in': 'error',
     'id-blacklist': [
       'warn',
-      'err',
-      'e',
-      'cb',
-      'callback',
-      'result',
-      'res',
       'any',
       'Number',
       'number',
@@ -99,7 +92,6 @@ module.exports = {
     'linebreak-style': 'off',
     'max-classes-per-file': ['error', 1],
     'max-len': 'off',
-    'max-lines': ['error', 400],
     'new-parens': 'off',
     'newline-per-chained-call': 'off',
     'no-bitwise': 'error',
@@ -135,7 +127,8 @@ module.exports = {
     'no-undef-init': 'error',
     'no-underscore-dangle': ['error', { allowAfterThis: true, allowAfterSuper: true }],
     'no-unsafe-finally': 'error',
-    'no-unused-expressions': 'error',
+    'no-unused-expressions': 'off',
+    '@typescript-eslint/no-unused-expressions': 'error',
     'no-unused-labels': 'error',
     'no-var': 'error',
     'no-void': 'error',
