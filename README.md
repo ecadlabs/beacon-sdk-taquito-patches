@@ -85,8 +85,6 @@ That decision should be made explicitly and separately from routine patch work.
 
 ---
 
-[![code style: prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg?style=flat-square)](https://github.com/prettier/prettier)
-
 > Connect wallets with dApps on Tezos
 
 [Beacon](https://walletbeacon.io) is the implementation of the wallet interaction standard [TZIP-10](https://gitlab.com/tzip/tzip/blob/master/proposals/tzip-10/tzip-10.md), which describes communication between a dApp and a wallet.
