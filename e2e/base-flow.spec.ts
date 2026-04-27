@@ -174,10 +174,13 @@ test('should show "No active account" error alert', async () => {
   await dapp.click('#sendToSelf')
   await dapp.waitForSelector('div.alert-wrapper-show', { state: 'visible', timeout: 30_000 })
 
-  await dapp.waitForSelector('div:has-text("No active account")', {
-    state: 'visible',
-    timeout: 30_000
-  })
+  // Scope the message-text assertion to the alert UI specifically. The dapp
+  // page can have other visible divs containing "No active account"
+  // (e.g. legacy unhandled-rejection logger output) that vary by setup;
+  // we only care that the SDK alert renders the message.
+  await expect(
+    dapp.locator('div.alert-wrapper-show div.info-description')
+  ).toContainText('No active account', { timeout: 30_000 })
 
   await dapp.click('button:has-text("Close")')
 

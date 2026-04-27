@@ -49,6 +49,26 @@
       <span id="activeAccountNetwork"></span>
       <span id="activeAccountTransport"></span>
     </span>
+    <br />
+    <span>
+      Last permission error:
+      <span id="lastPermissionError"></span>
+    </span>
+    <br />
+    <span>
+      Last permission error payload (JSON):
+      <span id="permissionErrorPayload"></span>
+    </span>
+    <br />
+    <span>
+      Permission error event count:
+      <span id="permissionErrorCount">0</span>
+    </span>
+    <br />
+    <span>
+      Last operation error:
+      <span id="lastOperationError"></span>
+    </span>
     <br /><br />
     <button id="requestPermission">Request Permission</button>
     <br /><br />
@@ -288,6 +308,28 @@
         updateActiveAccount()
       })
 
+      // Surface PERMISSION_REQUEST_ERROR payload to the DOM so e2e tests can
+      // assert the event shape and timing (locked in by the rejection-flow
+      // spec). Pre-fix the event was emitted twice on WC rejection (once
+      // from wcToastHandler with a sparse payload, once from
+      // handleRequestError with the full ErrorResponse). The fix removes the
+      // duplicate so callers see a single event with the full shape.
+      client.subscribeToEvent(beacon.BeaconEvent.PERMISSION_REQUEST_ERROR, (data) => {
+        const payloadEl = document.getElementById('permissionErrorPayload')
+        const countEl = document.getElementById('permissionErrorCount')
+        if (payloadEl) {
+          try {
+            const errorResponse = data && data.errorResponse
+            payloadEl.textContent = JSON.stringify(errorResponse ?? null)
+          } catch (e) {
+            payloadEl.textContent = String(e)
+          }
+        }
+        if (countEl) {
+          countEl.textContent = String((parseInt(countEl.textContent, 10) || 0) + 1)
+        }
+      })
+
       // Display the active account in the UI
       const updateColorMode = () => {
         client.getColorMode().then((colorMode) => {
@@ -357,6 +399,8 @@
 
       // Initiate a permission request
       const requestPermission = (callback) => {
+        const errorEl = document.getElementById('lastPermissionError')
+        if (errorEl) errorEl.textContent = ''
         client
           .requestPermissions()
           .then((permissions) => {
@@ -368,6 +412,12 @@
           })
           .catch((error) => {
             console.log('error during permission request', error)
+            // Surface the error type for e2e assertions. The thrown shape
+            // varies (BeaconError instance, raw ErrorResponse object, plain
+            // Error) so probe both errorType and name.
+            const errorType =
+              (error && error.errorType) || (error && error.name) || String(error)
+            if (errorEl) errorEl.textContent = errorType
           })
       }
 
@@ -662,7 +712,16 @@
 
       // Add event listener to the button
       document.getElementById('sendToSelf').addEventListener('click', () => {
-        sendToSelf()
+        const errorEl = document.getElementById('lastOperationError')
+        if (errorEl) errorEl.textContent = ''
+        sendToSelf().catch((error) => {
+          // Mirror the requestPermissions catch so e2e tests can assert on a
+          // post-pairing rejection without depending on toast UI internals.
+          const errorType =
+            (error && error.errorType) || (error && error.name) || String(error)
+          if (errorEl) errorEl.textContent = errorType
+          console.log('error during sendToSelf', error)
+        })
       })
 
       // Add event listener to the button
