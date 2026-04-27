@@ -57,7 +57,71 @@ export const pairWithBeaconWallet = async (browser: Browser) => {
   return [dapp, dappCtx, wallet, walletCtx] as const
 }
 
-export const pairWithWCWallet = async (browser: Browser) => {
+/**
+ * Drive the dapp -> wallet pairing flow up to (and including) the WC wallet
+ * rejecting the session proposal. The wallet's "Reject Next Proposal" button
+ * arms a one-shot flag that fires `signClient.reject()` on the next incoming
+ * session_proposal.
+ *
+ * `options.beforeDappLoad` runs after the dapp Page is created but before
+ * `dapp.goto(...)`, so callers can install init scripts (e.g. an
+ * unhandledrejection sentinel) that need to be present before the dapp
+ * bundle executes.
+ *
+ * Returns the dapp + wallet contexts/pages so callers can assert on dapp-side
+ * state (e.g. `#lastPermissionError`) and exercise recovery paths.
+ */
+export const pairWithWCWalletExpectRejection = async (
+  browser: Browser,
+  options: { beforeDappLoad?: (page: import('@playwright/test').Page) => Promise<void> } = {}
+) => {
+  const dappCtx = await browser.newContext()
+  const walletCtx = await browser.newContext()
+
+  await dappCtx.grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: 'http://localhost:1234'
+  })
+  await walletCtx.grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: 'http://localhost:1234'
+  })
+
+  const dapp = await dappCtx.newPage()
+  const wallet = await walletCtx.newPage()
+
+  if (options.beforeDappLoad) {
+    await options.beforeDappLoad(dapp)
+  }
+
+  await dapp.goto('http://localhost:1234/dapp.html')
+  await wallet.goto('http://localhost:1234/wallet-wc.html')
+
+  // Arm the wallet to reject the next session proposal.
+  await wallet.click('#rejectNextProposal')
+
+  // Trigger the dapp pairing flow.
+  await dapp.click('#requestPermission')
+  await dapp.waitForSelector('div.alert-wrapper-show', { state: 'visible', timeout: 30_000 })
+
+  await dapp.click('div.alert-footer')
+  await dapp.click('button:has-text("Show QR code")')
+  await dapp.waitForSelector('span.pair-other-info', { state: 'visible', timeout: 30_000 })
+
+  await dapp.click('button:has-text("WalletConnect")')
+  await dapp.waitForSelector('div.qr-right', { state: 'visible', timeout: 30_000 })
+  await dapp.click('div.qr-right')
+
+  const pairingCode = await dapp.evaluate(async () => navigator.clipboard.readText())
+  expect(pairingCode).toBeTruthy()
+
+  await wallet.click('#paste')
+
+  return [dapp, dappCtx, wallet, walletCtx] as const
+}
+
+export const pairWithWCWallet = async (
+  browser: Browser,
+  options: { beforeDappLoad?: (page: import('@playwright/test').Page) => Promise<void> } = {}
+) => {
   // --- setup context + grant clipboard permissions ---
   const dappCtx = await browser.newContext()
   const walletCtx = await browser.newContext()
@@ -71,6 +135,10 @@ export const pairWithWCWallet = async (browser: Browser) => {
 
   const dapp = await dappCtx.newPage()
   const wallet = await walletCtx.newPage()
+
+  if (options.beforeDappLoad) {
+    await options.beforeDappLoad(dapp)
+  }
 
   await dapp.goto('http://localhost:1234/dapp.html')
   await wallet.goto('http://localhost:1234/wallet-wc.html')

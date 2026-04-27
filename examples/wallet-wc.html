@@ -22,6 +22,8 @@
     <button id="disconnect">Disconnect Session</button>
     <button id="reset">Reset and Refresh</button>
     <button id="update">Update Session</button>
+    <button id="rejectNextProposal">Reject Next Proposal</button>
+    <button id="rejectNextOperation">Reject Next Operation</button>
 
     <br /><br />
     <div id="sessions">
@@ -31,6 +33,14 @@
 
     <script>
       let signClient = null
+      // When true, the next incoming session_proposal is rejected with USER_REJECTED
+      // and the flag is cleared. Used by e2e tests to drive the dapp-side rejection
+      // path without depending on a real wallet user clicking "Reject".
+      let rejectNextProposal = false
+      // Same idea but for tezos_send / tezos_sign session requests. Lets e2e tests
+      // exercise the post-pairing rejection paths (requestOperation /
+      // requestSignPayload) without changes to wallet-side approval UX.
+      let rejectNextOperation = false
       const projectId = '97f804b46f0db632c52af0556586a5f3' // ← your WalletConnect Project ID
 
       // Mock Tezos wallet data
@@ -116,6 +126,18 @@
         const { id, params } = event
         const { requiredNamespaces, optionalNamespaces, relays } = params
 
+        if (rejectNextProposal) {
+          rejectNextProposal = false
+          console.log('Rejecting session proposal (rejectNextProposal flag set)')
+          setStatus('Rejecting session proposal...')
+          await signClient.reject({
+            id,
+            reason: { code: 5000, message: 'User rejected.' }
+          })
+          setStatus('Session proposal rejected')
+          return
+        }
+
         try {
           // Build the namespaces object so the dApp knows what methods/events/chains we support
           const namespaces = {}
@@ -184,6 +206,22 @@
 
         const { topic, params, id } = event
         const { request } = params
+
+        if (rejectNextOperation) {
+          rejectNextOperation = false
+          console.log('Rejecting session request (rejectNextOperation flag set)')
+          setStatus('Rejecting operation request...')
+          await signClient.respond({
+            topic,
+            response: {
+              id,
+              error: { code: 5000, message: 'User rejected.' },
+              jsonrpc: '2.0'
+            }
+          })
+          setStatus('Operation request rejected')
+          return
+        }
 
         try {
           let result
@@ -338,6 +376,16 @@
           console.error('Reset failed:', error)
           window.location.reload()
         }
+      })
+
+      document.getElementById('rejectNextProposal').addEventListener('click', () => {
+        rejectNextProposal = true
+        setStatus('Will reject next session proposal')
+      })
+
+      document.getElementById('rejectNextOperation').addEventListener('click', () => {
+        rejectNextOperation = true
+        setStatus('Will reject next operation request')
       })
 
       document.getElementById('update').addEventListener('click', async () => {
