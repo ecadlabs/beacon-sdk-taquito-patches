@@ -383,16 +383,23 @@
 
       document.getElementById('externalInit').addEventListener('click', () => {
         console.log('This method has to be called directly after page load to reproduce the error')
-        client.init().then(() => {
-          console.log('init done')
-          client.requestPermissions().then((permissions) => {
-            console.log('permissions', permissions)
-            if (callback) {
-              callback(permissions)
-            }
-            updateActiveAccount()
+        // init() can now reject (e.g. when an abort path settles _initPromise),
+        // so handle the rejection to avoid an UnhandledPromiseRejection.
+        client
+          .init()
+          .then(() => {
+            console.log('init done')
+            return client.requestPermissions().then((permissions) => {
+              console.log('permissions', permissions)
+              if (callback) {
+                callback(permissions)
+              }
+              updateActiveAccount()
+            })
           })
-        })
+          .catch((error) => {
+            console.log('externalInit chain failed', error)
+          })
       })
 
       // Add event listener to the button

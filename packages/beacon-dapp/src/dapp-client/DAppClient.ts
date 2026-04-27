@@ -209,6 +209,16 @@ export class DAppClient extends Client {
 
   private _initPromise: Promise<TransportType> | undefined
 
+  /**
+   * Rejector for the in-flight {@link _initPromise}. Populated while init is
+   * awaiting a peer pairing; cleared automatically when {@link _initPromise}
+   * settles. Abort paths (modal close, WC session-proposal rejection,
+   * transport-level connection failure) call this to unwedge any
+   * `await this.init()` caller, surfacing the error to handleRequestError
+   * instead of hanging.
+   */
+  private _initReject: ((reason: ErrorResponse) => void) | undefined
+
   private isInitPending: boolean = false
 
   private readonly activeAccountLoaded: Promise<AccountInfo | undefined>
@@ -472,7 +482,12 @@ export class DAppClient extends Client {
         }
 
         if (account && account.origin.type !== 'p2p') {
-          this.init()
+          // Fire-and-forget eager init for stored sessions. init() can now
+          // reject (e.g. when an abort path settles _initPromise), so swallow
+          // here; downstream callers of init() handle rejection on their own.
+          this.init().catch((initError) =>
+            logger.error('eager init failed', (initError as Error)?.message ?? initError)
+          )
         }
       })
       .catch((err) => logger.error(err.message))
@@ -703,9 +718,18 @@ export class DAppClient extends Client {
         walletInfo
       })
     } else {
-      this.events.emit(BeaconEvent.PERMISSION_REQUEST_ERROR, {
-        errorResponse: { errorType: BeaconErrorType.ABORTED_ERROR } as any,
-        walletInfo
+      // The WC transport reports session-proposal rejection through this event
+      // when there are no active listeners yet (no peer paired). Reject the
+      // in-flight init promise so `await dapp.requestPermissions()` unwinds
+      // through requestPermissions' catch -> handleRequestError, which both
+      // emits PERMISSION_REQUEST_ERROR and resets transport state. Without
+      // this, the dapp wedges with `_initPromise: true, isInitPending: true`.
+      this._initReject?.({
+        type: BeaconMessageType.Error,
+        id: '',
+        senderId: '',
+        version: '2',
+        errorType: BeaconErrorType.ABORTED_ERROR
       })
     }
   }
@@ -747,34 +771,62 @@ export class DAppClient extends Client {
       //
     }
 
-    this._initPromise = new Promise(async (resolve) => {
-      if (transport) {
-        await this.addListener(transport)
+    this._initPromise = new Promise(async (resolve, reject) => {
+      // Capture reject so abort paths (modal close, transport-level rejection)
+      // can unwedge a pending `await this.init()`. _initReject is cleared by
+      // the .finally below whether the promise resolves or rejects, so the
+      // field accurately means "currently rejectable" rather than "most recent
+      // rejector".
+      this._initReject = (reason) => {
+        this._initPromise = undefined
+        reject(reason)
+      }
+      // The body uses `new Promise(async ...)` (an anti-pattern: unhandled
+      // throws are swallowed). Wrap it so any unexpected throw rejects the
+      // promise instead of stranding `await this.init()` callers forever.
+      // A proper structural fix would replace the async-executor entirely
+      // with chained promises; left as follow-up to keep this PR focused.
+      try {
+        if (transport) {
+          await this.addListener(transport)
 
-        resolve(await super.init(transport))
-      } else if (this._transport.isSettled()) {
-        await (await this.transport).connect()
+          resolve(await super.init(transport))
+        } else if (this._transport.isSettled()) {
+          await (await this.transport).connect()
 
-        resolve(await super.init(await this.transport))
-      } else {
-        const activeAccount = await this.getActiveAccount()
-        const stopListening = () => {
-          if (this.postMessageTransport) {
-            this.postMessageTransport.stopListeningForNewPeers().catch(console.error)
+          resolve(await super.init(await this.transport))
+        } else {
+          const activeAccount = await this.getActiveAccount()
+          const stopListening = () => {
+            const onError = (err: unknown) => logger.error('stopListeningForNewPeers', err)
+            if (this.postMessageTransport) {
+              this.postMessageTransport.stopListeningForNewPeers().catch(onError)
+            }
+            if (this.p2pTransport) {
+              this.p2pTransport.stopListeningForNewPeers().catch(onError)
+            }
+            if (this.walletConnectTransport) {
+              this.walletConnectTransport.stopListeningForNewPeers().catch(onError)
+            }
           }
-          if (this.p2pTransport) {
-            this.p2pTransport.stopListeningForNewPeers().catch(console.error)
-          }
-          if (this.walletConnectTransport) {
-            this.walletConnectTransport.stopListeningForNewPeers().catch(console.error)
-          }
-        }
 
-        await this.initInternalTransports()
+          await this.initInternalTransports()
 
-        if (!this.postMessageTransport || !this.p2pTransport || !this.walletConnectTransport) {
-          return
-        }
+          if (!this.postMessageTransport || !this.p2pTransport || !this.walletConnectTransport) {
+            // Bare return here used to strand the promise forever -- no UI is
+            // emitted, no peer ever pairs, no abort path fires. Reject explicitly
+            // so callers see a deterministic error.
+            const noTransportError: ErrorResponse = {
+              type: BeaconMessageType.Error,
+              id: '',
+              senderId: '',
+              version: '2',
+              errorType: BeaconErrorType.UNKNOWN_ERROR
+            }
+            reject(noTransportError)
+
+            return
+          }
 
         this.postMessageTransport.connect().then().catch(console.error)
 
@@ -866,7 +918,16 @@ export class DAppClient extends Client {
             ])
             this.postMessageTransport = this.walletConnectTransport = this.p2pTransport = undefined
             this._activeAccount.isResolved() && this.clearActiveAccount()
-            this._initPromise = undefined
+            // Reject _initPromise so any awaiter (makeRequest -> requestPermissions)
+            // unwinds via handleRequestError instead of hanging. _initReject
+            // also clears _initPromise as a side effect.
+            this._initReject?.({
+              type: BeaconMessageType.Error,
+              id: '',
+              senderId: '',
+              version: '2',
+              errorType: BeaconErrorType.ABORTED_ERROR
+            })
           }
 
           const serializer = new Serializer()
@@ -908,9 +969,35 @@ export class DAppClient extends Client {
             .catch((emitError) => console.warn(emitError))
         }
       }
+      } catch (err) {
+        // An async-executor throw would otherwise be silently swallowed,
+        // leaving _initPromise pending and every awaiter stranded.
+        reject(err)
+      }
     })
 
+    // Drop the _initReject reference whether init resolved or rejected, so the
+    // field is never stale. Using an explicit helper keeps the dangling
+    // observer chain out of statement position (which the lint rules forbid).
+    this.clearInitRejectOnSettle(this._initPromise)
+
     return this._initPromise
+  }
+
+  /**
+   * Attach a settle observer to {@link _initPromise} that drops
+   * {@link _initReject} once the promise settles (resolved or rejected).
+   * Errors on the observer chain are swallowed; only the original
+   * {@link _initPromise} surfaces them to its awaiters.
+   */
+  private clearInitRejectOnSettle(initPromise: Promise<TransportType>): void {
+    initPromise
+      .finally(() => {
+        this._initReject = undefined
+      })
+      .catch(() => {
+        // observer-only; original promise's rejection is delivered to awaiters
+      })
   }
 
   /**
@@ -1391,16 +1478,20 @@ export class DAppClient extends Client {
 
     const logId = `makeRequestV3 ${Date.now()}`
     logger.time(true, logId)
-    const { message: response, connectionInfo } = await this.makeRequestV3<
-      PermissionRequestV3,
-      BeaconMessageWrapper<PermissionResponseV3>
-    >(request).catch(async (requestError: ErrorResponse) => {
-      requestError.errorType === BeaconErrorType.ABORTED_ERROR
-        ? this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'abort'))
-        : this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'error'))
-      logger.time(false, logId)
-      throw await this.handleRequestError(request as any, requestError)
-    })
+    let resolved: {
+      message: BeaconMessageWrapper<PermissionResponseV3>
+      connectionInfo: ConnectionContext
+    }
+    try {
+      resolved = await this.makeRequestV3<
+        PermissionRequestV3,
+        BeaconMessageWrapper<PermissionResponseV3>
+      >(request)
+    } catch (requestError) {
+      await this.runRequestErrorSideEffects(request, requestError, logId)
+      throw requestError
+    }
+    const { message: response, connectionInfo } = resolved
     logger.time(false, logId)
 
     this.sendMetrics('performance-metrics/save', await this.buildPayload('connect', 'start'))
@@ -1481,15 +1572,17 @@ export class DAppClient extends Client {
       ? this.makeRequestV3<BlockchainRequestV3, BeaconMessageWrapper<BlockchainResponseV3>>(request)
       : this.makeRequestBC<any, any>(request)
 
-    res.catch(async (requestError: ErrorResponse) => {
-      requestError.errorType === BeaconErrorType.ABORTED_ERROR
-        ? this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'abort'))
-        : this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'error'))
-      logger.time(false, logId)
-      throw await this.handleRequestError(request as any, requestError)
-    })
-
-    const { message: response, connectionInfo } = (await res)!
+    let resolved
+    try {
+      resolved = await res
+    } catch (requestError) {
+      await this.runRequestErrorSideEffects(request, requestError, logId)
+      throw requestError
+    }
+    if (!resolved) {
+      throw new Error('Internal error: makeRequest returned no result')
+    }
+    const { message: response, connectionInfo } = resolved
 
     logger.time(false, logId)
     this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'success'))
@@ -1551,15 +1644,21 @@ export class DAppClient extends Client {
         ? this.makeRequest<PermissionRequest, PermissionResponse>(request, undefined, undefined)
         : this.makeRequestBC<PermissionRequest, PermissionResponse>(request)
 
-    res.catch(async (requestError: ErrorResponse) => {
-      requestError.errorType === BeaconErrorType.ABORTED_ERROR
-        ? this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'abort'))
-        : this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'error'))
-      logger.time(false, logId)
-      throw await this.handleRequestError(request, requestError)
-    })
-
-    const { message, connectionInfo } = (await res)!
+    let resolved
+    try {
+      resolved = await res
+    } catch (requestError) {
+      await this.runRequestErrorSideEffects(
+        request,
+        requestError,
+        logId
+      )
+      throw requestError
+    }
+    if (!resolved) {
+      throw new Error('Internal error: makeRequest returned no result')
+    }
+    const { message, connectionInfo } = resolved
     logger.time(false, logId)
     this.sendMetrics('performance-metrics/save', await this.buildPayload('connect', 'success'))
 
@@ -1631,15 +1730,21 @@ export class DAppClient extends Client {
       ? this.makeRequest<ProofOfEventChallengeRequest, ProofOfEventChallengeResponse>(request)
       : this.makeRequestBC<ProofOfEventChallengeRequest, ProofOfEventChallengeResponse>(request)
 
-    res.catch(async (requestError: ErrorResponse) => {
-      requestError.errorType === BeaconErrorType.ABORTED_ERROR
-        ? this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'abort'))
-        : this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'error'))
-      logger.time(false, logId)
-      throw await this.handleRequestError(request, requestError)
-    })
-
-    const { message, connectionInfo } = (await res)!
+    let resolved
+    try {
+      resolved = await res
+    } catch (requestError) {
+      await this.runRequestErrorSideEffects(
+        request,
+        requestError,
+        logId
+      )
+      throw requestError
+    }
+    if (!resolved) {
+      throw new Error('Internal error: makeRequest returned no result')
+    }
+    const { message, connectionInfo } = resolved
 
     logger.time(false, logId)
     this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'success'))
@@ -1705,15 +1810,21 @@ export class DAppClient extends Client {
           SimulatedProofOfEventChallengeResponse
         >(request)
 
-    res.catch(async (requestError: ErrorResponse) => {
-      requestError.errorType === BeaconErrorType.ABORTED_ERROR
-        ? this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'abort'))
-        : this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'error'))
-      logger.time(false, logId)
-      throw await this.handleRequestError(request, requestError)
-    })
-
-    const { message, connectionInfo } = (await res)!
+    let resolved
+    try {
+      resolved = await res
+    } catch (requestError) {
+      await this.runRequestErrorSideEffects(
+        request,
+        requestError,
+        logId
+      )
+      throw requestError
+    }
+    if (!resolved) {
+      throw new Error('Internal error: makeRequest returned no result')
+    }
+    const { message, connectionInfo } = resolved
 
     logger.time(false, logId)
     this.analytics.track(
@@ -1799,15 +1910,21 @@ export class DAppClient extends Client {
       ? this.makeRequest<SignPayloadRequest, SignPayloadResponse>(request)
       : this.makeRequestBC<SignPayloadRequest, SignPayloadResponse>(request)
 
-    res.catch(async (requestError: ErrorResponse) => {
-      requestError.errorType === BeaconErrorType.ABORTED_ERROR
-        ? this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'abort'))
-        : this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'error'))
-      logger.time(false, logId)
-      throw await this.handleRequestError(request, requestError)
-    })
-
-    const { message, connectionInfo } = (await res)!
+    let resolved
+    try {
+      resolved = await res
+    } catch (requestError) {
+      await this.runRequestErrorSideEffects(
+        request,
+        requestError,
+        logId
+      )
+      throw requestError
+    }
+    if (!resolved) {
+      throw new Error('Internal error: makeRequest returned no result')
+    }
+    const { message, connectionInfo } = resolved
 
     logger.time(false, logId)
     this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'success'))
@@ -1915,15 +2032,21 @@ export class DAppClient extends Client {
       ? this.makeRequest<OperationRequest, OperationResponse>(request)
       : this.makeRequestBC<OperationRequest, OperationResponse>(request)
 
-    res.catch(async (requestError: ErrorResponse) => {
-      requestError.errorType === BeaconErrorType.ABORTED_ERROR
-        ? this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'abort'))
-        : this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'error'))
-      logger.time(false, logId)
-      throw await this.handleRequestError(request, requestError)
-    })
-
-    const { message, connectionInfo } = (await res)!
+    let resolved
+    try {
+      resolved = await res
+    } catch (requestError) {
+      await this.runRequestErrorSideEffects(
+        request,
+        requestError,
+        logId
+      )
+      throw requestError
+    }
+    if (!resolved) {
+      throw new Error('Internal error: makeRequest returned no result')
+    }
+    const { message, connectionInfo } = resolved
 
     logger.time(false, logId)
     this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'success'))
@@ -1975,15 +2098,21 @@ export class DAppClient extends Client {
       ? this.makeRequest<BroadcastRequest, BroadcastResponse>(request)
       : this.makeRequestBC<BroadcastRequest, BroadcastResponse>(request)
 
-    res.catch(async (requestError: ErrorResponse) => {
-      requestError.errorType === BeaconErrorType.ABORTED_ERROR
-        ? this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'abort'))
-        : this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'error'))
-      logger.time(false, logId)
-      throw await this.handleRequestError(request, requestError)
-    })
-
-    const { message, connectionInfo } = (await res)!
+    let resolved
+    try {
+      resolved = await res
+    } catch (requestError) {
+      await this.runRequestErrorSideEffects(
+        request,
+        requestError,
+        logId
+      )
+      throw requestError
+    }
+    if (!resolved) {
+      throw new Error('Internal error: makeRequest returned no result')
+    }
+    const { message, connectionInfo } = resolved
 
     logger.time(false, logId)
     this.sendMetrics('performance-metrics/save', await this.buildPayload('message', 'success'))
@@ -2086,6 +2215,54 @@ export class DAppClient extends Client {
         await this.setActiveAccount(undefined)
       }
     }
+  }
+
+  /**
+   * Run the standard request-error side effects (abort/error metric,
+   * timer stop, {@link handleRequestError}) on a single awaited control
+   * flow so callers can re-throw the original {@link ErrorResponse} without
+   * leaking an UnhandledPromiseRejection.
+   *
+   * Why this exists: every request method historically used a fire-and-
+   * forget `res.catch(handler)` whose handler did `throw await
+   * this.handleRequestError(...)`. The catch returned a detached promise
+   * nobody awaited; `handleRequestError`'s thrown wrapped error became an
+   * unhandled rejection. The bug rarely surfaced before the dapp-init
+   * promise was made rejectable, because pre-pairing rejection paths used
+   * to hang instead of routing through these handlers. Once init started
+   * rejecting reliably, the unhandled rejection started firing on every
+   * WC session-proposal rejection. We swallow the wrapped throw here so
+   * callers can re-throw the original `ErrorResponse`, matching the
+   * post-pairing rejection contract at the openRequest path.
+   *
+   * @param request The request we sent
+   * @param requestError The error we received
+   * @param logId The {@link logger.time} label opened for this request
+   */
+  private async runRequestErrorSideEffects(
+    request: unknown,
+    rawError: unknown,
+    logId: string
+  ): Promise<void> {
+    // V3 request shapes (PermissionRequestV3, BlockchainRequestV3) flow through
+    // here too. They aren't part of BeaconRequestInputMessage, but
+    // handleRequestError only inspects `.type` plus optional fields it already
+    // guards on. Catch params are `unknown` under strict TS, same story.
+    const typedRequest = request as BeaconRequestInputMessage
+    const requestError = rawError as ErrorResponse
+    if (requestError.errorType === BeaconErrorType.ABORTED_ERROR) {
+      this.sendMetrics(
+        'performance-metrics/save',
+        await this.buildPayload('message', 'abort')
+      )
+    } else {
+      this.sendMetrics(
+        'performance-metrics/save',
+        await this.buildPayload('message', 'error')
+      )
+    }
+    logger.time(false, logId)
+    await this.handleRequestError(typedRequest, requestError).catch(() => undefined)
   }
 
   /**
@@ -2406,8 +2583,11 @@ export class DAppClient extends Client {
 
     logger.log('makeRequest', 'starting')
     this.isInitPending = true
-    await this.init()
-    this.isInitPending = false
+    try {
+      await this.init()
+    } finally {
+      this.isInitPending = false
+    }
     logger.log('makeRequest', 'after init')
 
     if (await this.addRequestAndCheckIfRateLimited()) {
@@ -2533,8 +2713,11 @@ export class DAppClient extends Client {
     const messageId = otherTabMessageId ?? (await generateGUID())
     logger.log('makeRequest', 'starting')
     this.isInitPending = true
-    await this.init(undefined, true)
-    this.isInitPending = false
+    try {
+      await this.init(undefined, true)
+    } finally {
+      this.isInitPending = false
+    }
     logger.log('makeRequest', 'after init')
 
     if (await this.addRequestAndCheckIfRateLimited()) {
