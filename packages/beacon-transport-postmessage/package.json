@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-transport-postmessage",
-  "version": "4.8.1-ecad.7",
+  "version": "4.8.2-ecad",
   "description": "PostMessage transport for Beacon communication with browser extensions.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
@@ -31,9 +31,9 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-core": "4.8.1-ecad.7",
-    "@ecadlabs/beacon-types": "4.8.1-ecad.7",
-    "@ecadlabs/beacon-utils": "4.8.1-ecad.7"
+    "@ecadlabs/beacon-core": "4.8.2-ecad",
+    "@ecadlabs/beacon-types": "4.8.2-ecad",
+    "@ecadlabs/beacon-utils": "4.8.2-ecad"
   },
   "publishConfig": {
     "access": "public"
