@@ -44,6 +44,8 @@ import { WalletClientOptions } from './WalletClientOptions'
 
 const logger = new Logger('WalletClient')
 
+type DisconnectListener = (senderId: string) => void | Promise<void>
+
 /**
  * @publicapi
  *
@@ -71,6 +73,7 @@ export class WalletClient extends Client {
     BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage>,
     ConnectionContext
   ][] = []
+  private readonly disconnectListeners: Set<DisconnectListener> = new Set()
 
   constructor(config: WalletClientOptions) {
     super({
@@ -113,9 +116,10 @@ export class WalletClient extends Client {
     ): Promise<void> => {
       if (message.version === '3') {
         const typedMessage = message as BeaconMessageWrapper<BeaconBaseMessage>
+        const disconnectSenderId = this.getDisconnectSenderId(message)
 
-        if (typedMessage.message.type === BeaconMessageType.Disconnect) {
-          return this.disconnect(typedMessage.senderId)
+        if (disconnectSenderId) {
+          return this.disconnect(disconnectSenderId)
         }
 
         if (!this.pendingRequests.some((request) => request[0].id === message.id)) {
@@ -155,6 +159,23 @@ export class WalletClient extends Client {
     }
 
     return this._connect()
+  }
+
+  /**
+   * Subscribe to inbound disconnects from known peers. Duplicate listener identities are ignored.
+   *
+   * Listeners are notified after local peer cleanup is attempted. Listener failures are logged and do
+   * not prevent other listeners from running.
+   */
+  public subscribeToDisconnect(listener: DisconnectListener): void {
+    this.disconnectListeners.add(listener)
+  }
+
+  /**
+   * Unsubscribe a disconnect listener by identity.
+   */
+  public unsubscribeFromDisconnect(listener: DisconnectListener): void {
+    this.disconnectListeners.delete(listener)
   }
 
   public async getRegisterPushChallenge(
@@ -482,12 +503,48 @@ export class WalletClient extends Client {
     const peers: ExtendedPeerInfo[] = await transport.getPeers()
     const peer: ExtendedPeerInfo | undefined = peers.find((peerEl) => peerEl.senderId === senderId)
 
-    if (peer) {
-      await this.removePeer(peer as any)
+    if (!peer) {
+      return
     }
 
-    await transport.disconnect()
+    let removePeerError: unknown
+    try {
+      await this.removePeer(peer as any)
+    } catch (error) {
+      removePeerError = error
+    }
 
-    return
+    this.notifyDisconnectListeners(senderId)
+
+    if (removePeerError) {
+      throw removePeerError
+    }
+  }
+
+  private notifyDisconnectListeners(senderId: string): void {
+    for (const listener of Array.from(this.disconnectListeners)) {
+      try {
+        Promise.resolve(listener(senderId)).catch((error) => {
+          logger.error('disconnect listener', error)
+        })
+      } catch (error) {
+        logger.error('disconnect listener', error)
+      }
+    }
+  }
+
+  private getDisconnectSenderId(
+    message: BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage> | DisconnectMessage
+  ): string | undefined {
+    if (message.version === '3') {
+      const wrappedMessage = message as BeaconMessageWrapper<BeaconBaseMessage>
+      if (wrappedMessage.message?.type === BeaconMessageType.Disconnect) {
+        return wrappedMessage.senderId
+      }
+    }
+
+    const typedMessage = message as DisconnectMessage
+
+    return typedMessage.type === BeaconMessageType.Disconnect ? typedMessage.senderId : undefined
   }
 }

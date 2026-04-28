@@ -1,7 +1,7 @@
 // __tests__/client/WalletClient.test.ts
 
 import { Client, LocalStorage } from '@ecadlabs/beacon-core'
-import { StorageKey } from '@ecadlabs/beacon-types'
+import { BeaconMessageType, StorageKey, TransportStatus } from '@ecadlabs/beacon-types'
 import { WalletClient } from '../../src/client/WalletClient'
 import { WalletP2PTransport } from '../../src/transports/WalletP2PTransport'
 
@@ -45,7 +45,7 @@ jest.mock('@ecadlabs/beacon-core', () => {
       set: jest.fn().mockResolvedValue(undefined)
     })),
     PermissionManager: jest.fn().mockImplementation(() => ({
-      getPermissions: jest.fn(),
+      getPermissions: jest.fn().mockResolvedValue([]),
       getPermission: jest.fn(),
       removePermissions: jest.fn(),
       removePermission: jest.fn(),
@@ -58,7 +58,11 @@ jest.mock('@ecadlabs/beacon-core', () => {
       removeAllAppMetadata: jest.fn()
     })),
     getSenderId: jest.fn().mockResolvedValue('sender-id'),
-    Logger: jest.fn().mockImplementation(() => ({ log: jest.fn(), warn: jest.fn() }))
+    Logger: jest.fn().mockImplementation(() => ({
+      log: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn()
+    }))
   }
 })
 
@@ -233,6 +237,254 @@ describe('WalletClient', () => {
 
       await client.addPeer(fakePeer)
       expect(transportMock.addPeer).toHaveBeenCalledWith(extended, true)
+    })
+  })
+
+  describe('connect()', () => {
+    const createConnectedTransport = () => {
+      const peerA = {
+        id: 'peer-a',
+        name: 'Peer A',
+        publicKey: 'public-key-a',
+        version: '2',
+        senderId: 'sender-a'
+      } as any
+      const peerB = {
+        id: 'peer-b',
+        name: 'Peer B',
+        publicKey: 'public-key-b',
+        version: '2',
+        senderId: 'sender-b'
+      } as any
+      let peers = [peerA, peerB]
+
+      const transportMock = {
+        connectionStatus: TransportStatus.CONNECTED,
+        getPeers: jest.fn().mockImplementation(async () => peers),
+        removePeer: jest.fn().mockImplementation(async (peer) => {
+          peers = peers.filter((existingPeer) => existingPeer.publicKey !== peer.publicKey)
+        }),
+        disconnect: jest.fn()
+      }
+
+      jest
+        .spyOn(client as any, 'transport', 'get')
+        .mockReturnValue(Promise.resolve(transportMock as any))
+      jest.spyOn(client as any, '_connect').mockResolvedValue(undefined)
+
+      return { peerA, peerB, transportMock }
+    }
+
+    it('handles inbound disconnect for one peer without tearing down the transport', async () => {
+      const { peerA, peerB, transportMock } = createConnectedTransport()
+      const disconnectListener = jest.fn()
+      const newMessageCallback = jest.fn()
+
+      client.subscribeToDisconnect(disconnectListener)
+
+      await client.connect(newMessageCallback)
+      await (client as any).handleResponse(
+        {
+          id: 'disconnect-message',
+          type: BeaconMessageType.Disconnect,
+          version: '2',
+          senderId: 'sender-a'
+        },
+        { id: peerA.publicKey } as any
+      )
+
+      expect(await client.getPeers()).toEqual([peerB])
+      expect(transportMock.removePeer).toHaveBeenCalledWith(peerA)
+      expect(transportMock.disconnect).not.toHaveBeenCalled()
+      expect(transportMock.connectionStatus).toBe(TransportStatus.CONNECTED)
+      expect(disconnectListener).toHaveBeenCalledWith('sender-a')
+      expect(newMessageCallback).not.toHaveBeenCalled()
+    })
+
+    it('handles flat v3 disconnect messages', async () => {
+      const { peerA, peerB, transportMock } = createConnectedTransport()
+      const disconnectListener = jest.fn()
+
+      client.subscribeToDisconnect(disconnectListener)
+
+      await client.connect(jest.fn())
+      await (client as any).handleResponse(
+        {
+          id: 'disconnect-message',
+          type: BeaconMessageType.Disconnect,
+          version: '3',
+          senderId: 'sender-a'
+        },
+        { id: peerA.publicKey } as any
+      )
+
+      expect(await client.getPeers()).toEqual([peerB])
+      expect(transportMock.removePeer).toHaveBeenCalledWith(peerA)
+      expect(transportMock.disconnect).not.toHaveBeenCalled()
+      expect(disconnectListener).toHaveBeenCalledWith('sender-a')
+    })
+
+    it('handles wrapped v3 disconnect messages', async () => {
+      const { peerA, peerB, transportMock } = createConnectedTransport()
+      const disconnectListener = jest.fn()
+
+      client.subscribeToDisconnect(disconnectListener)
+
+      await client.connect(jest.fn())
+      await (client as any).handleResponse(
+        {
+          id: 'disconnect-message',
+          version: '3',
+          senderId: 'sender-a',
+          message: {
+            type: BeaconMessageType.Disconnect
+          }
+        },
+        { id: peerA.publicKey } as any
+      )
+
+      expect(await client.getPeers()).toEqual([peerB])
+      expect(transportMock.removePeer).toHaveBeenCalledWith(peerA)
+      expect(transportMock.disconnect).not.toHaveBeenCalled()
+      expect(disconnectListener).toHaveBeenCalledWith('sender-a')
+    })
+
+    it('does not notify disconnect listeners for an unknown sender', async () => {
+      const { peerA, peerB, transportMock } = createConnectedTransport()
+      const disconnectListener = jest.fn()
+
+      client.subscribeToDisconnect(disconnectListener)
+
+      await client.connect(jest.fn())
+      await (client as any).handleResponse(
+        {
+          id: 'disconnect-message',
+          type: BeaconMessageType.Disconnect,
+          version: '2',
+          senderId: 'unknown-sender'
+        },
+        { id: peerA.publicKey } as any
+      )
+
+      expect(await client.getPeers()).toEqual([peerA, peerB])
+      expect(transportMock.removePeer).not.toHaveBeenCalled()
+      expect(transportMock.disconnect).not.toHaveBeenCalled()
+      expect(disconnectListener).not.toHaveBeenCalled()
+    })
+
+    it('notifies disconnect listeners even if peer cleanup fails', async () => {
+      const { peerA, transportMock } = createConnectedTransport()
+      const disconnectListener = jest.fn()
+      const cleanupError = new Error('cleanup failed')
+
+      transportMock.removePeer.mockRejectedValueOnce(cleanupError)
+      client.subscribeToDisconnect(disconnectListener)
+
+      await client.connect(jest.fn())
+      await expect(
+        (client as any).handleResponse(
+          {
+            id: 'disconnect-message',
+            type: BeaconMessageType.Disconnect,
+            version: '2',
+            senderId: 'sender-a'
+          },
+          { id: peerA.publicKey } as any
+        )
+      ).rejects.toThrow(cleanupError)
+
+      expect(disconnectListener).toHaveBeenCalledWith('sender-a')
+      expect(transportMock.disconnect).not.toHaveBeenCalled()
+    })
+
+    it('continues notifying disconnect listeners after an async listener rejects', async () => {
+      const { peerA } = createConnectedTransport()
+      const rejectedListener = jest.fn().mockRejectedValue(new Error('listener failed'))
+      const nextListener = jest.fn().mockResolvedValue(undefined)
+
+      client.subscribeToDisconnect(rejectedListener)
+      client.subscribeToDisconnect(nextListener)
+
+      await client.connect(jest.fn())
+      await (client as any).handleResponse(
+        {
+          id: 'disconnect-message',
+          type: BeaconMessageType.Disconnect,
+          version: '2',
+          senderId: 'sender-a'
+        },
+        { id: peerA.publicKey } as any
+      )
+
+      expect(rejectedListener).toHaveBeenCalledWith('sender-a')
+      expect(nextListener).toHaveBeenCalledWith('sender-a')
+    })
+
+    it('continues notifying disconnect listeners after a sync listener throws', async () => {
+      const { peerA } = createConnectedTransport()
+      const throwingListener = jest.fn(() => {
+        throw new Error('listener failed')
+      })
+      const nextListener = jest.fn()
+
+      client.subscribeToDisconnect(throwingListener)
+      client.subscribeToDisconnect(nextListener)
+
+      await client.connect(jest.fn())
+      await (client as any).handleResponse(
+        {
+          id: 'disconnect-message',
+          type: BeaconMessageType.Disconnect,
+          version: '2',
+          senderId: 'sender-a'
+        },
+        { id: peerA.publicKey } as any
+      )
+
+      expect(throwingListener).toHaveBeenCalledWith('sender-a')
+      expect(nextListener).toHaveBeenCalledWith('sender-a')
+    })
+
+    it('deduplicates disconnect subscriptions by listener identity', async () => {
+      const { peerA } = createConnectedTransport()
+      const disconnectListener = jest.fn()
+
+      client.subscribeToDisconnect(disconnectListener)
+      client.subscribeToDisconnect(disconnectListener)
+
+      await client.connect(jest.fn())
+      await (client as any).handleResponse(
+        {
+          id: 'disconnect-message',
+          type: BeaconMessageType.Disconnect,
+          version: '2',
+          senderId: 'sender-a'
+        },
+        { id: peerA.publicKey } as any
+      )
+
+      expect(disconnectListener).toHaveBeenCalledTimes(1)
+    })
+
+    it('unsubscribes disconnect listeners by identity', async () => {
+      const { peerA } = createConnectedTransport()
+      const disconnectListener = jest.fn()
+
+      client.subscribeToDisconnect(disconnectListener)
+      client.unsubscribeFromDisconnect(disconnectListener)
+
+      await client.connect(jest.fn())
+      await (client as any).handleResponse(
+        {
+          id: 'disconnect-message',
+          type: BeaconMessageType.Disconnect,
+          version: '2',
+          senderId: 'sender-a'
+        },
+        { id: peerA.publicKey } as any
+      )
+
+      expect(disconnectListener).not.toHaveBeenCalled()
     })
   })
 })
