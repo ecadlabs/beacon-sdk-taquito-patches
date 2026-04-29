@@ -1,6 +1,12 @@
 // __tests__/DAppClient.test.ts
 import { DAppClient } from '../../src/dapp-client/DAppClient'
-import { BeaconMessageType, NetworkType, Origin, StorageKey } from '@ecadlabs/beacon-types'
+import {
+  BeaconMessageType,
+  NetworkType,
+  Origin,
+  PermissionScope,
+  StorageKey
+} from '@ecadlabs/beacon-types'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { LocalStorage } from '@ecadlabs/beacon-core'
 import { BeaconEvent } from '../../src/events'
@@ -281,6 +287,192 @@ describe('DAppClient — basic unit tests', () => {
     expect(acknowledgeHandler).toHaveBeenCalledTimes(1)
 
     getWalletInfo.mockRestore()
+  })
+
+  it('coalesces concurrent permission requests onto one in-flight request', async () => {
+    const permissionResponse = {
+      id: 'permission-response-id',
+      version: '2',
+      senderId: 'wallet-sender-id',
+      type: BeaconMessageType.PermissionResponse,
+      publicKey: 'edpk',
+      network: {
+        type: NetworkType.MAINNET
+      },
+      scopes: []
+    }
+    const deferredRequest = new ExposedPromise<
+      {
+        message: typeof permissionResponse
+        connectionInfo: {
+          origin: Origin.P2P
+          id: string
+        }
+      },
+      Error
+    >()
+    const output = {
+      ...permissionResponse,
+      walletKey: 'wallet-key',
+      address: 'tz1-address',
+      accountInfo: {
+        address: 'tz1-address',
+        walletKey: 'wallet-key'
+      }
+    }
+    const makeRequest = jest
+      .spyOn(client as any, 'makeRequest')
+      .mockReturnValue(deferredRequest.promise)
+    jest.spyOn(client as any, 'checkMakeRequest').mockResolvedValue(true)
+    jest.spyOn(client as any, 'getOwnAppMetadata').mockResolvedValue({
+      senderId: 'dapp-sender-id',
+      name: 'TestApp'
+    })
+    jest.spyOn(client as any, 'buildPayload').mockResolvedValue({})
+    jest.spyOn(client as any, 'sendMetrics').mockResolvedValue(undefined)
+    jest.spyOn(client as any, 'onNewAccount').mockResolvedValue(output.accountInfo)
+    jest.spyOn(client as any, 'notifySuccess').mockResolvedValue(undefined)
+    jest.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
+    jest.spyOn((client as any).accountManager, 'addAccount').mockResolvedValue(undefined)
+
+    const firstRequest = client.requestPermissions()
+    const secondRequest = client.requestPermissions()
+
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve()
+    }
+
+    expect(makeRequest).toHaveBeenCalledTimes(1)
+
+    deferredRequest.resolve({
+      message: permissionResponse,
+      connectionInfo: {
+        origin: Origin.P2P,
+        id: 'wallet-public-key'
+      }
+    })
+
+    await expect(firstRequest).resolves.toEqual(output)
+    await expect(secondRequest).resolves.toEqual(output)
+  })
+
+  it('rejects concurrent permission requests with different scopes', async () => {
+    jest.spyOn(client as any, 'getOwnAppMetadata').mockReturnValue(new Promise(() => {}))
+
+    const firstRequest = client.requestPermissions({
+      scopes: [PermissionScope.SIGN]
+    })
+    const secondRequest = client.requestPermissions({
+      scopes: [PermissionScope.OPERATION_REQUEST]
+    })
+
+    await expect(secondRequest).rejects.toThrow(
+      'Cannot start a permission request with different scopes while another permission request is pending'
+    )
+    firstRequest.catch(() => undefined)
+  })
+
+  it('validates concurrent permission request input before coalescing', async () => {
+    jest.spyOn(client as any, 'getOwnAppMetadata').mockReturnValue(new Promise(() => {}))
+
+    const firstRequest = client.requestPermissions()
+    const invalidRequest = client.requestPermissions({
+      network: {
+        type: NetworkType.MAINNET
+      }
+    } as any)
+
+    await expect(invalidRequest).rejects.toThrow(
+      '[BEACON] the "network" property is no longer accepted in input. Please provide it when instantiating DAppClient.'
+    )
+    firstRequest.catch(() => undefined)
+  })
+
+  it('clears the in-flight permission request after rejection', async () => {
+    const permissionResponse = {
+      id: 'permission-response-id',
+      version: '2',
+      senderId: 'wallet-sender-id',
+      type: BeaconMessageType.PermissionResponse,
+      publicKey: 'edpk',
+      network: {
+        type: NetworkType.MAINNET
+      },
+      scopes: []
+    }
+    const rejectedRequest = new ExposedPromise<unknown, Error>()
+    const successfulRequest = new ExposedPromise<
+      {
+        message: typeof permissionResponse
+        connectionInfo: {
+          origin: Origin.P2P
+          id: string
+        }
+      },
+      Error
+    >()
+    const output = {
+      ...permissionResponse,
+      walletKey: 'wallet-key',
+      address: 'tz1-address',
+      accountInfo: {
+        address: 'tz1-address',
+        walletKey: 'wallet-key'
+      }
+    }
+    const makeRequest = jest
+      .spyOn(client as any, 'makeRequest')
+      .mockReturnValueOnce(rejectedRequest.promise)
+      .mockReturnValueOnce(successfulRequest.promise)
+    jest.spyOn(client as any, 'checkMakeRequest').mockResolvedValue(true)
+    jest.spyOn(client as any, 'getOwnAppMetadata').mockResolvedValue({
+      senderId: 'dapp-sender-id',
+      name: 'TestApp'
+    })
+    jest.spyOn(client as any, 'buildPayload').mockResolvedValue({})
+    jest.spyOn(client as any, 'sendMetrics').mockResolvedValue(undefined)
+    jest.spyOn(client as any, 'runRequestErrorSideEffects').mockResolvedValue(undefined)
+    jest.spyOn(client as any, 'onNewAccount').mockResolvedValue(output.accountInfo)
+    jest.spyOn(client as any, 'notifySuccess').mockResolvedValue(undefined)
+    jest.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
+    jest.spyOn((client as any).accountManager, 'addAccount').mockResolvedValue(undefined)
+
+    const firstRequest = client.requestPermissions()
+
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve()
+    }
+
+    rejectedRequest.reject(new Error('rejected'))
+    await expect(firstRequest).rejects.toThrow('rejected')
+
+    const retryRequest = client.requestPermissions()
+
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve()
+    }
+
+    expect(makeRequest).toHaveBeenCalledTimes(2)
+
+    successfulRequest.resolve({
+      message: permissionResponse,
+      connectionInfo: {
+        origin: Origin.P2P,
+        id: 'wallet-public-key'
+      }
+    })
+
+    await expect(retryRequest).resolves.toEqual(output)
+  })
+
+  it('rejects a pending init with different pairing options', async () => {
+    ;(client as any)._initPromise = new Promise(() => {})
+    ;(client as any)._initReject = jest.fn()
+    ;(client as any)._initSubstratePairing = false
+
+    await expect((client as any).init(undefined, true)).rejects.toThrow(
+      'Cannot start a permission request with different pairing options while another pairing is pending'
+    )
   })
 
   it('cleans up v3 wrapped responses by the outer request id', async () => {
