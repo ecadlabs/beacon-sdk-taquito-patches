@@ -1,6 +1,6 @@
 // __tests__/DAppClient.test.ts
 import { DAppClient } from '../../src/dapp-client/DAppClient'
-import { NetworkType } from '@ecadlabs/beacon-types'
+import { BeaconMessageType, NetworkType, Origin, StorageKey } from '@ecadlabs/beacon-types'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { LocalStorage } from '@ecadlabs/beacon-core'
 import { BeaconEvent } from '../../src/events'
@@ -135,7 +135,8 @@ jest.mock('@walletconnect/utils', () => ({ getSdkError: jest.fn() }))
 describe('DAppClient — basic unit tests', () => {
   let client: DAppClient
 
-  beforeAll(() => {
+  beforeEach(() => {
+    ;(window as any).beaconCreatedClientInstance = false
     client = new DAppClient({
       name: 'TestApp',
       storage: new LocalStorage(),
@@ -143,6 +144,12 @@ describe('DAppClient — basic unit tests', () => {
     })
     client.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
   })
+
+  const seedPeerStorage = async () => {
+    await (client as any).storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [])
+    await (client as any).storage.set(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP, [])
+    await (client as any).storage.set(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP, [])
+  }
 
   it('addQueryParam returns "key=value"', () => {
     // addQueryParam is private — cast to any to reach it
@@ -173,5 +180,134 @@ describe('DAppClient — basic unit tests', () => {
 
     client.removeBlockchain('chain-1')
     expect((client as any).blockchains.has('chain-1')).toBe(false)
+  })
+
+  it('handles raw v3 disconnect messages without a nested message wrapper', async () => {
+    const channelClosedHandler = jest.fn()
+    const removeAccountsForPeerIds = jest
+      .spyOn(client as any, 'removeAccountsForPeerIds')
+      .mockResolvedValue(undefined)
+
+    ;(client as any).p2pTransport = {
+      getPeers: jest.fn().mockResolvedValue([]),
+      removePeer: jest.fn()
+    }
+
+    client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+
+    await expect(
+      (client as any).handleResponse(
+        {
+          id: 'disconnect-id',
+          version: '3',
+          senderId: 'wallet-sender-id',
+          type: BeaconMessageType.Disconnect
+        },
+        {
+          origin: Origin.P2P,
+          id: 'wallet-public-key'
+        }
+      )
+    ).resolves.toBeUndefined()
+
+    expect(removeAccountsForPeerIds).toHaveBeenCalledWith(['wallet-sender-id'])
+    expect(channelClosedHandler).toHaveBeenCalled()
+
+    removeAccountsForPeerIds.mockRestore()
+  })
+
+  it('emits one acknowledge event for duplicate acknowledge messages on an open request', async () => {
+    const acknowledgeHandler = jest.fn()
+    const getWalletInfo = jest.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
+
+    ;(client as any).openRequests.set(
+      'request-id',
+      new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
+    )
+
+    client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
+
+    const acknowledge = {
+      id: 'request-id',
+      version: '2',
+      senderId: 'wallet-sender-id',
+      type: BeaconMessageType.Acknowledge
+    }
+    const connectionInfo = {
+      origin: Origin.P2P,
+      id: 'wallet-public-key'
+    }
+
+    await (client as any).handleResponse(acknowledge, connectionInfo)
+    await (client as any).handleResponse(acknowledge, connectionInfo)
+
+    expect(acknowledgeHandler).toHaveBeenCalledTimes(1)
+
+    getWalletInfo.mockRestore()
+  })
+
+  it('emits one acknowledge event for duplicate v3 wrapped acknowledge messages', async () => {
+    await seedPeerStorage()
+
+    const acknowledgeHandler = jest.fn()
+    const getWalletInfo = jest.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
+
+    ;(client as any).openRequests.set(
+      'wrapper-request-id',
+      new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
+    )
+
+    client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
+
+    const acknowledge = {
+      id: 'wrapper-request-id',
+      version: '3',
+      senderId: 'wallet-sender-id',
+      message: {
+        id: 'inner-acknowledge-id',
+        version: '3',
+        senderId: 'wallet-sender-id',
+        type: BeaconMessageType.Acknowledge
+      }
+    }
+    const connectionInfo = {
+      origin: Origin.P2P,
+      id: 'wallet-public-key'
+    }
+
+    await (client as any).handleResponse(acknowledge, connectionInfo)
+    await (client as any).handleResponse(acknowledge, connectionInfo)
+
+    expect(acknowledgeHandler).toHaveBeenCalledTimes(1)
+
+    getWalletInfo.mockRestore()
+  })
+
+  it('cleans up v3 wrapped responses by the outer request id', async () => {
+    await seedPeerStorage()
+
+    const request = new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
+    ;(client as any).openRequests.set('wrapper-request-id', request)
+
+    await (client as any).handleResponse(
+      {
+        id: 'wrapper-request-id',
+        version: '3',
+        senderId: 'wallet-sender-id',
+        message: {
+          id: 'inner-response-id',
+          version: '3',
+          senderId: 'wallet-sender-id',
+          type: BeaconMessageType.SignPayloadResponse,
+          signature: 'edsigt...'
+        }
+      },
+      {
+        origin: Origin.P2P,
+        id: 'wallet-public-key'
+      }
+    )
+
+    expect((client as any).openRequests.has('wrapper-request-id')).toBe(false)
   })
 })

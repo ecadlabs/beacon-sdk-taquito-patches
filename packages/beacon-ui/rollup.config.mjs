@@ -37,6 +37,7 @@ export default [
       babel({
         extensions,
         babelHelpers: 'bundled',
+        compact: false,
         include: ['src/**/*'],
         presets: [['@babel/preset-react', { runtime: 'automatic' }]]
       }),
@@ -81,6 +82,7 @@ export default [
       babel({
         extensions,
         babelHelpers: 'bundled',
+        compact: false,
         include: ['src/**/*'],
         presets: [['@babel/preset-react', { runtime: 'automatic' }]]
       }),

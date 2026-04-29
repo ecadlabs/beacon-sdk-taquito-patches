@@ -19,15 +19,6 @@ export enum NetworkType {
 
 export const tezosExtensionList: ExtensionApp[] = [
   {
-    key: 'spire_chrome',
-    id: 'gpfndedineagiepkpinficbcbbgjoenn',
-    name: 'Spire',
-    shortName: 'Spire',
-    color: '',
-    logo: 'extension-spire.png',
-    link: 'https://spirewallet.com/'
-  },
-  {
     key: 'temple_chrome',
     id: 'ookjlbkiijinhpmnjffcofjonbfbgaoc',
     name: 'Temple Wallet Chrome',
@@ -129,15 +120,6 @@ export const tezosDesktopList: DesktopApp[] = [
     downloadLink: 'https://infinitywallet.io/download'
   },
   {
-    key: 'galleon_desktop',
-    name: 'Galleon',
-    shortName: 'Galleon',
-    color: '',
-    logo: 'desktop-galleon.png',
-    deepLink: 'galleon://',
-    downloadLink: 'https://cryptonomic.tech/galleon.html'
-  },
-  {
     key: 'umami_desktop',
     name: 'Umami',
     shortName: 'Umami',
@@ -166,15 +148,6 @@ export const tezosIosList: App[] = [
     logo: 'ios-airgap.png',
     universalLink: 'https://wallet.airgap.it',
     deepLink: 'airgap-wallet://'
-  },
-  {
-    key: 'plenty_wallet_ios',
-    name: 'Plenty Wallet - your portal to web3 ',
-    shortName: 'Plenty Wallet',
-    color: '',
-    logo: 'ios-plenty-wallet.png',
-    universalLink: 'https://www.naan.app/',
-    deepLink: 'naan://'
   },
   {
     key: 'altme_wallet',
