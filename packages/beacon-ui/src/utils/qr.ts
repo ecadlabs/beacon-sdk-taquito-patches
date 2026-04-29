@@ -1,5 +1,7 @@
-import QRCode from 'qrcode-svg'
 import { Logger } from '@ecadlabs/beacon-core'
+// Use browser-safe synchronous SVG internals; the public async entrypoint can load Node renderers.
+import { create } from 'qrcode/lib/core/qrcode'
+import { render } from 'qrcode/lib/renderer/svg-tag'
 
 const logger = new Logger('QR')
 
@@ -7,7 +9,8 @@ const logger = new Logger('QR')
  * Convert data to a QR code
  *
  * @param payload The data to be encoded as a QR code
- * @param type How the QR code will be encoded
+ * @param height Fallback square size when width is not provided
+ * @param width Square size of the generated QR SVG
  */
 export const getQrData = (payload: string, height?: number, width?: number): string => {
   if (payload.length > 500) {
@@ -17,16 +20,13 @@ export const getQrData = (payload: string, height?: number, width?: number): str
     )
   }
   try {
-    const qrcode = new QRCode({
-      color: 'black',
-      content: payload,
-      join: true, // Join adjacent modules into a single path element
-      ecl: 'L', // Error correction level,
-      height,
-      width
+    return render(create(payload, { errorCorrectionLevel: 'L' }), {
+      width: width ?? height,
+      color: {
+        dark: '#000000ff',
+        light: '#ffffffff'
+      }
     })
-
-    return qrcode.svg()
   } catch (qrError) {
     console.error('error', qrError)
     throw qrError

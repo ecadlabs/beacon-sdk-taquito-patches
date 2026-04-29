@@ -5,8 +5,8 @@ import { getTzip10Link } from '../../../utils/get-tzip10-link'
 import { isTwBrowser, isAndroid, isMobileOS, isIOS } from '../../../utils/platform'
 import { MergedWallet, OSLink } from '../../../utils/wallets'
 import getDefaultLogo from '../getDefautlLogo'
-import { parseUri } from '@walletconnect/utils'
 import { AlertConfig, AlertState } from '../../common'
+import { hasWalletConnectSymKey } from '../../../utils/walletconnect'
 
 const logger = new Logger('useConnect')
 
@@ -64,7 +64,7 @@ const useConnect = (
       selectedWallet &&
       selectedWallet.supportedInteractionStandards?.includes('wallet_connect')
     ) {
-      const isValid = !!parseUri(await wcPayload).symKey
+      const isValid = hasWalletConnectSymKey(await wcPayload)
       setIsWCWorking(isValid)
 
       if (!isValid && selectedWallet?.name.toLowerCase().includes('kukai')) {
@@ -158,7 +158,7 @@ const useConnect = (
       wallet.supportedInteractionStandards?.includes('wallet_connect') &&
       !wallet.name.toLowerCase().includes('kukai')
     ) {
-      const isValid = !!parseUri(await wcPayload).symKey
+      const isValid = hasWalletConnectSymKey(await wcPayload)
       setIsWCWorking(isValid)
 
       if (!isValid) {

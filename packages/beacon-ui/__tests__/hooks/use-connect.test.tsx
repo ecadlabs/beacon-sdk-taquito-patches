@@ -10,11 +10,6 @@ jest.mock('../../src/utils/get-tzip10-link', () => ({
   getTzip10Link: jest.fn().mockReturnValue('https://example.com/tzip10')
 }))
 
-const mockParseUri = jest.fn()
-jest.mock('@walletconnect/utils', () => ({
-  parseUri: (...args: any[]) => mockParseUri(...args)
-}))
-
 jest.mock('../../src/utils/platform', () => ({
   isTwBrowser: jest.fn().mockReturnValue(false),
   isAndroid: jest.fn().mockReturnValue(false),
@@ -31,7 +26,6 @@ const windowOpenMock = jest.fn()
 beforeEach(() => {
   window.open = windowOpenMock
   localStorage.clear()
-  mockParseUri.mockReset()
 })
 
 afterEach(() => {
@@ -394,12 +388,10 @@ describe('useConnect hook', () => {
       image: 'https://wcwallet.com/icon.png'
     }
     wallets.set('wallet-wc-valid', wcWallet)
-    mockParseUri.mockReturnValue({ symKey: 'abc' })
-
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
+        Promise.resolve('wc:topic@2?symKey=abc&relay-protocol=irn'),
         Promise.resolve('p2p-payload'),
         Promise.resolve('post-payload'),
         wallets,
@@ -419,7 +411,7 @@ describe('useConnect hook', () => {
       })
     })
 
-    expect(result.current[2]).toBe('wc-payload')
+    expect(result.current[2]).toBe('wc:topic@2?symKey=abc&relay-protocol=irn')
     expect(result.current[3]).toBe('install')
     expect(result.current[1]).toBe(false)
   })
@@ -437,8 +429,6 @@ describe('useConnect hook', () => {
       image: 'https://kukaiexample.com/icon.png'
     }
     wallets.set('wallet-wc-invalid', wcWalletInvalid)
-    mockParseUri.mockReturnValue({})
-
     const { result } = renderHook(() =>
       useConnect(
         false,
@@ -521,8 +511,6 @@ describe('useConnect hook', () => {
       descriptions: ['test']
     }
     wallets.set('wallet-newtab-invalid', newTabWallet)
-    mockParseUri.mockReturnValue({})
-
     const newTabMock = { opener: {}, location: { href: '' } }
     const windowOpenMock = jest.fn().mockReturnValue(newTabMock)
     window.open = windowOpenMock

@@ -32,11 +32,8 @@
   },
   "dependencies": {
     "@ecadlabs/beacon-core": "4.8.2-ecad",
-    "@ecadlabs/beacon-transport-postmessage": "4.8.2-ecad",
     "@ecadlabs/beacon-types": "4.8.2-ecad",
-    "@ecadlabs/beacon-utils": "4.8.2-ecad",
-    "@walletconnect/utils": "^2.23.9",
-    "qrcode-svg": "^1.1.0",
+    "qrcode": "^1.5.3",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
@@ -52,7 +49,6 @@
     "@testing-library/react": "^16.3.2",
     "@types/chrome": "^0.1.40",
     "@types/node": "^22.19.17",
-    "@types/qrcode-svg": "^1.1.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
