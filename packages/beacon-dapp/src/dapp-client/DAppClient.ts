@@ -221,7 +221,11 @@ export class DAppClient extends Client {
    */
   private _initReject: ((reason: ErrorResponse) => void) | undefined
 
-  private isInitPending: boolean = false
+  private _initSubstratePairing: boolean | undefined
+
+  private _requestPermissionsPromise: Promise<PermissionResponseOutput> | undefined
+
+  private _requestPermissionsKey: string | undefined
 
   private readonly activeAccountLoaded: Promise<AccountInfo | undefined>
 
@@ -730,7 +734,7 @@ export class DAppClient extends Client {
       // in-flight init promise so `await dapp.requestPermissions()` unwinds
       // through requestPermissions' catch -> handleRequestError, which both
       // emits PERMISSION_REQUEST_ERROR and resets transport state. Without
-      // this, the dapp wedges with `_initPromise: true, isInitPending: true`.
+      // this, the dapp wedges with a pending `_initPromise`.
       this._initReject?.({
         type: BeaconMessageType.Error,
         id: '',
@@ -768,7 +772,19 @@ export class DAppClient extends Client {
     transport?: Transport<any>,
     substratePairing?: boolean
   ): Promise<TransportType> {
+    const requestedSubstratePairing = substratePairing === true
+
     if (this._initPromise) {
+      if (
+        !transport &&
+        this._initReject &&
+        this._initSubstratePairing !== requestedSubstratePairing
+      ) {
+        throw new Error(
+          'Cannot start a permission request with different pairing options while another pairing is pending'
+        )
+      }
+
       return this._initPromise
     }
 
@@ -779,6 +795,7 @@ export class DAppClient extends Client {
     }
 
     this._initPromise = new Promise(async (resolve, reject) => {
+      this._initSubstratePairing = requestedSubstratePairing
       // Capture reject so abort paths (modal close, transport-level rejection)
       // can unwedge a pending `await this.init()`. _initReject is cleared by
       // the .finally below whether the promise resolves or rejects, so the
@@ -1001,6 +1018,7 @@ export class DAppClient extends Client {
     initPromise
       .finally(() => {
         this._initReject = undefined
+        this._initSubstratePairing = undefined
       })
       .catch(() => {
         // observer-only; original promise's rejection is delivered to awaiters
@@ -1624,20 +1642,41 @@ export class DAppClient extends Client {
   public async requestPermissions(
     input?: RequestPermissionInput
   ): Promise<PermissionResponseOutput> {
-    if ((input as any)?.network) {
-      throw new Error(
-        '[BEACON] the "network" property is no longer accepted in input. Please provide it when instantiating DAppClient.'
-      )
+    const scopes = this.getPermissionRequestScopes(input)
+    const requestPermissionsKey = this.getPermissionRequestKey(scopes)
+
+    if (this._requestPermissionsPromise) {
+      if (this._requestPermissionsKey !== requestPermissionsKey) {
+        throw new Error(
+          'Cannot start a permission request with different scopes while another permission request is pending'
+        )
+      }
+
+      return this._requestPermissionsPromise
     }
 
+    const requestPermissionsPromise = this.requestPermissionsInternal(scopes)
+    this._requestPermissionsPromise = requestPermissionsPromise
+    this._requestPermissionsKey = requestPermissionsKey
+
+    try {
+      return await requestPermissionsPromise
+    } finally {
+      if (this._requestPermissionsPromise === requestPermissionsPromise) {
+        this._requestPermissionsPromise = undefined
+        this._requestPermissionsKey = undefined
+      }
+    }
+  }
+
+  private async requestPermissionsInternal(
+    scopes: PermissionScope[]
+  ): Promise<PermissionResponseOutput> {
     const request: PermissionRequestInput = {
       appMetadata: await this.getOwnAppMetadata(),
       type: BeaconMessageType.PermissionRequest,
       network: this.network,
-      scopes:
-        input && input.scopes
-          ? input.scopes
-          : [PermissionScope.OPERATION_REQUEST, PermissionScope.SIGN]
+      scopes
     }
 
     this.analytics.track('event', 'DAppClient', 'Permission requested')
@@ -1700,6 +1739,22 @@ export class DAppClient extends Client {
     })
 
     return output
+  }
+
+  private getPermissionRequestScopes(input?: RequestPermissionInput): PermissionScope[] {
+    if (input && 'network' in input) {
+      throw new Error(
+        '[BEACON] the "network" property is no longer accepted in input. Please provide it when instantiating DAppClient.'
+      )
+    }
+
+    return input && input.scopes
+      ? input.scopes
+      : [PermissionScope.OPERATION_REQUEST, PermissionScope.SIGN]
+  }
+
+  private getPermissionRequestKey(scopes: PermissionScope[]): string {
+    return [...scopes].sort().join('|')
   }
 
   /**
@@ -2580,22 +2635,8 @@ export class DAppClient extends Client {
   ) {
     const messageId = otherTabMessageId ?? (await generateGUID())
 
-    if (this._initPromise && this.isInitPending) {
-      await Promise.all([
-        this.postMessageTransport?.disconnect(),
-        this.walletConnectTransport?.disconnect()
-      ])
-      this._initPromise = undefined
-      this.hideUI(['toast'])
-    }
-
     logger.log('makeRequest', 'starting')
-    this.isInitPending = true
-    try {
-      await this.init()
-    } finally {
-      this.isInitPending = false
-    }
+    await this.init()
     logger.log('makeRequest', 'after init')
 
     if (await this.addRequestAndCheckIfRateLimited()) {
@@ -2709,23 +2750,9 @@ export class DAppClient extends Client {
     message: U
     connectionInfo: ConnectionContext
   }> {
-    if (this._initPromise && this.isInitPending) {
-      await Promise.all([
-        this.postMessageTransport?.disconnect(),
-        this.walletConnectTransport?.disconnect()
-      ])
-      this._initPromise = undefined
-      this.hideUI(['toast'])
-    }
-
     const messageId = otherTabMessageId ?? (await generateGUID())
     logger.log('makeRequest', 'starting')
-    this.isInitPending = true
-    try {
-      await this.init(undefined, true)
-    } finally {
-      this.isInitPending = false
-    }
+    await this.init(undefined, true)
     logger.log('makeRequest', 'after init')
 
     if (await this.addRequestAndCheckIfRateLimited()) {
