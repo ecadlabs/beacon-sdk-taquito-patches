@@ -6,7 +6,9 @@ import {
   AlertConfig,
   closeToast,
   openToast,
-  ToastAction
+  ToastAction,
+  isMobile,
+  isMobileOS
 } from '@ecadlabs/beacon-ui'
 import {
   BeaconErrorType,
@@ -36,7 +38,6 @@ import {
   // EncryptPayloadResponseOutput,
   // EncryptionOperation
 } from '@ecadlabs/beacon-core'
-import { isMobile, isMobileOS } from '@ecadlabs/beacon-ui'
 import { BlockExplorer } from './utils/block-explorer'
 import { shortenString } from './utils/shorten-string'
 
@@ -108,6 +109,36 @@ export enum BeaconEvent {
 
 export interface ExtraInfo {
   resetCallback?(): Promise<void>
+}
+
+/**
+ * Reason Beacon deactivated invalid persisted active-account state during dApp
+ * startup.
+ *
+ * - `missing_active_account`: `beacon:active-account` pointed at an account
+ *   identifier that was not present in Beacon's persisted account list.
+ * - `invalid_active_account_storage`: Beacon could not read or parse the
+ *   persisted active-account/account storage needed to restore the account.
+ * - `storage_validation_failed`: Beacon restored an active account, but a later
+ *   storage validation pass still found invalid persisted session state.
+ */
+export type InvalidAccountDeactivatedReason =
+  | 'missing_active_account'
+  | 'invalid_active_account_storage'
+  | 'storage_validation_failed'
+
+/**
+ * Payload emitted with {@link BeaconEvent.INVALID_ACCOUNT_DEACTIVATED}.
+ *
+ * Beacon emits this object when it deactivates invalid active-account state.
+ * The event type also accepts `undefined` so listeners and direct emitters
+ * written against earlier Beacon versions remain source-compatible.
+ */
+export interface InvalidAccountDeactivatedEvent {
+  /**
+   * Machine-readable reason for the deactivation.
+   */
+  reason: InvalidAccountDeactivatedReason
 }
 
 interface RequestSentInfo {
@@ -201,7 +232,7 @@ export interface BeaconEventType {
   [BeaconEvent.ACTIVE_TRANSPORT_SET]: Transport
   [BeaconEvent.INVALID_ACTIVE_ACCOUNT_STATE]: undefined
   [BeaconEvent.GENERIC_ERROR]: string
-  [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: undefined
+  [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: InvalidAccountDeactivatedEvent | undefined
   [BeaconEvent.SHOW_PREPARE]: { walletInfo?: WalletInfo }
   [BeaconEvent.HIDE_UI]: ('alert' | 'toast')[] | undefined
   [BeaconEvent.PAIR_INIT]: {
@@ -341,7 +372,10 @@ const showInvalidActiveAccountState = async (): Promise<void> => {
 /**
  * Show an "account deactivated" error alert
  */
-const showInvalidAccountDeactivated = async (): Promise<void> => {
+const showInvalidAccountDeactivated = async (
+  data?: InvalidAccountDeactivatedEvent
+): Promise<void> => {
+  logger.log('showInvalidAccountDeactivated', data?.reason ?? 'unknown')
   await openAlert({
     title: 'Error',
     body: `Your session has expired. Please pair with your wallet again.`
