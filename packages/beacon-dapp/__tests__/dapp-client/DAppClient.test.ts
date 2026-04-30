@@ -1065,6 +1065,7 @@ describe('DAppClient — basic unit tests', () => {
 
   it('emits account deactivated and clears state when the stored active account is missing', async () => {
     const invalidAccountHandler = jest.fn()
+    const legacyInvalidAccountHandler = jest.fn()
     const activeAccountHandler = jest.fn()
     const storage = new LocalStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'missing-account-id',
@@ -1086,6 +1087,10 @@ describe('DAppClient — basic unit tests', () => {
         }
       }
     })
+    await storedStateClient.subscribeToEvent(
+      BeaconEvent.INVALID_ACCOUNT_DEACTIVATED,
+      legacyInvalidAccountHandler
+    )
 
     await (storedStateClient as any).storageValidated
 
@@ -1093,7 +1098,11 @@ describe('DAppClient — basic unit tests', () => {
     await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
     await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toBeUndefined()
     expect(activeAccountHandler).not.toHaveBeenCalled()
-    expect(invalidAccountHandler).toHaveBeenCalledWith(undefined, undefined)
+    expect(invalidAccountHandler).toHaveBeenCalledWith(
+      { reason: 'missing_active_account' },
+      undefined
+    )
+    expect(legacyInvalidAccountHandler).toHaveBeenCalled()
   })
 
   it('emits account deactivated and clears state when stored accounts are malformed', async () => {
@@ -1123,7 +1132,10 @@ describe('DAppClient — basic unit tests', () => {
     await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
     await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
     await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toBeUndefined()
-    expect(invalidAccountHandler).toHaveBeenCalledWith(undefined, undefined)
+    expect(invalidAccountHandler).toHaveBeenCalledWith(
+      { reason: 'invalid_active_account_storage' },
+      undefined
+    )
   })
 
   it('clears invalid storage without account deactivated event when validation fails with no active account', async () => {
@@ -1182,6 +1194,83 @@ describe('DAppClient — basic unit tests', () => {
     await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
     await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toBeUndefined()
     expect(invalidAccountHandler).toHaveBeenCalledTimes(1)
+    expect(invalidAccountHandler).toHaveBeenCalledWith(
+      { reason: 'missing_active_account' },
+      undefined
+    )
+  })
+
+  it('emits account deactivated with storage validation reason when restored storage stays invalid', async () => {
+    const invalidAccountHandler = jest.fn()
+    const storedAccount = createStoredAccount()
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
+      [StorageKey.ACCOUNTS]: [storedAccount]
+    })
+    const firstValidation = new ExposedPromise<boolean>()
+    ;(storage as any).validateResults = [firstValidation.promise, false]
+    const p2pPeer = createV480P2PPeer()
+    const initInternalTransports = jest
+      .spyOn(DAppClient.prototype as any, 'initInternalTransports')
+      .mockImplementation(async function (this: any) {
+        this.p2pTransport = {
+          connectionStatus: TransportStatus.CONNECTED,
+          getPeers: jest.fn().mockResolvedValue([p2pPeer])
+        }
+      })
+    const getWalletInfo = jest
+      .spyOn(DAppClient.prototype as any, 'getWalletInfo')
+      .mockResolvedValue({ name: 'Wallet', type: 'web' })
+
+    try {
+      ;(window as any).beaconCreatedClientInstance = false
+      const storedStateClient = new DAppClient({
+        name: 'StorageValidationFailedApp',
+        storage,
+        preferredNetwork: NetworkType.MAINNET,
+        disableDefaultEvents: true,
+        eventHandlers: {
+          [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: {
+            handler: invalidAccountHandler
+          }
+        }
+      })
+
+      await expect(storedStateClient.getActiveAccount()).resolves.toEqual(storedAccount)
+      firstValidation.resolve(false)
+      await (storedStateClient as any).storageValidated
+
+      await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+      await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+      await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toBeUndefined()
+      expect(invalidAccountHandler).toHaveBeenCalledWith(
+        { reason: 'storage_validation_failed' },
+        undefined
+      )
+    } finally {
+      initInternalTransports.mockRestore()
+      getWalletInfo.mockRestore()
+    }
+  })
+
+  it('keeps legacy no-payload account deactivated event emission compatible', async () => {
+    ;(window as any).beaconCreatedClientInstance = false
+    const storedStateClient = new DAppClient({
+      name: 'LegacyAccountDeactivatedEventApp',
+      storage: new LocalStorage(),
+      preferredNetwork: NetworkType.MAINNET,
+      disableDefaultEvents: true
+    })
+    const invalidAccountHandler = jest.fn()
+    await storedStateClient.subscribeToEvent(
+      BeaconEvent.INVALID_ACCOUNT_DEACTIVATED,
+      invalidAccountHandler
+    )
+
+    await expect(
+      (storedStateClient as any).events.emit(BeaconEvent.INVALID_ACCOUNT_DEACTIVATED)
+    ).resolves.toBeUndefined()
+    expect(invalidAccountHandler).toHaveBeenCalledWith(undefined, undefined)
   })
 
   it('clears v3 open requests when transport send rejects asynchronously', async () => {
