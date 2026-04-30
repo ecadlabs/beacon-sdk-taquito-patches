@@ -9,6 +9,7 @@ import { NoAddressBeaconError } from './NoAddressBeaconError'
 import { NoPrivateKeyBeaconError } from './NoPrivateKeyBeaconError'
 import { NotGrantedBeaconError } from './NotGrantedBeaconError'
 import { ParametersInvalidBeaconError } from './ParametersInvalidBeaconError'
+import { PeerUnreachableBeaconError } from './PeerUnreachableBeaconError'
 import { SignatureTypeNotSupportedBeaconError } from './SignatureTypeNotSupportedBeaconError'
 import { TooManyOperationsBeaconError } from './TooManyOperationsBeaconError'
 import { TransactionInvalidBeaconError } from './TransactionInvalidBeaconError'
@@ -41,6 +42,8 @@ const getError = (errorType: BeaconErrorType, errorData: unknown): BeaconError =
     //   return new EncryptionTypeNotSupportedBeaconError()
     case BeaconErrorType.ABORTED_ERROR:
       return new AbortedBeaconError()
+    case BeaconErrorType.PEER_UNREACHABLE:
+      return new PeerUnreachableBeaconError()
     case BeaconErrorType.UNKNOWN_ERROR:
       return new UnknownBeaconError()
     default:

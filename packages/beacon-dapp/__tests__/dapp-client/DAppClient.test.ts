@@ -2,10 +2,13 @@
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import {
   BeaconMessageType,
+  BeaconErrorType,
   NetworkType,
   Origin,
   PermissionScope,
-  StorageKey
+  StorageKey,
+  TransportStatus,
+  TransportType
 } from '@ecadlabs/beacon-types'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { LocalStorage } from '@ecadlabs/beacon-core'
@@ -501,5 +504,412 @@ describe('DAppClient — basic unit tests', () => {
     )
 
     expect((client as any).openRequests.has('wrapper-request-id')).toBe(false)
+  })
+
+  it('rejects open requests when the wallet peer never answers', async () => {
+    jest.useFakeTimers()
+    ;(window as any).beaconCreatedClientInstance = false
+    const timeoutClient = new DAppClient({
+      name: 'TimeoutApp',
+      storage: new LocalStorage(),
+      preferredNetwork: NetworkType.MAINNET,
+      requestTimeoutMs: 10
+    })
+    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    const channelClosedHandler = jest.fn()
+    timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+
+    const operationRequest = new ExposedPromise<unknown, unknown>()
+    const rejection = jest.fn()
+    void operationRequest.promise.catch(rejection)
+
+    try {
+      ;(timeoutClient as any).addOpenRequest('ghost-request-id', operationRequest)
+
+      jest.advanceTimersByTime(10)
+      await Promise.resolve()
+
+      expect(rejection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: BeaconMessageType.Error,
+          errorType: BeaconErrorType.PEER_UNREACHABLE,
+          id: 'ghost-request-id'
+        })
+      )
+      expect((timeoutClient as any).openRequests.has('ghost-request-id')).toBe(false)
+      expect(channelClosedHandler).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('clears delegated open requests when another tab receives the wallet response', async () => {
+    jest.useFakeTimers()
+    ;(window as any).beaconCreatedClientInstance = false
+    const timeoutClient = new DAppClient({
+      name: 'TimeoutApp',
+      storage: new LocalStorage(),
+      preferredNetwork: NetworkType.MAINNET,
+      requestTimeoutMs: 10
+    })
+    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    const channelClosedHandler = jest.fn()
+    timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+    const postMessage = jest.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
+
+    try {
+      ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-request-id')
+      ;(timeoutClient as any).addOpenRequest(
+        'delegated-request-id',
+        new ExposedPromise<unknown, unknown>()
+      )
+
+      expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(true)
+
+      await (timeoutClient as any).handleResponse(
+        {
+          id: 'delegated-request-id',
+          version: '2',
+          senderId: 'wallet-sender-id',
+          type: BeaconMessageType.SignPayloadResponse,
+          signature: 'edsigt...'
+        },
+        {
+          origin: Origin.P2P,
+          id: 'wallet-public-key'
+        }
+      )
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'delegated-request-id',
+          type: 'RESPONSE'
+        })
+      )
+      expect((timeoutClient as any).openRequests.has('delegated-request-id')).toBe(false)
+      expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(false)
+
+      jest.advanceTimersByTime(10)
+      await Promise.resolve()
+
+      expect(channelClosedHandler).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('keeps delegated acknowledged requests open without timing them out', async () => {
+    jest.useFakeTimers()
+    ;(window as any).beaconCreatedClientInstance = false
+    const timeoutClient = new DAppClient({
+      name: 'TimeoutApp',
+      storage: new LocalStorage(),
+      preferredNetwork: NetworkType.MAINNET,
+      requestTimeoutMs: 10
+    })
+    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    const channelClosedHandler = jest.fn()
+    timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+    const postMessage = jest.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
+
+    const operationRequest = new ExposedPromise<unknown, unknown>()
+    const rejection = jest.fn()
+    void operationRequest.promise.catch(rejection)
+
+    try {
+      ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-acknowledged-request-id')
+      ;(timeoutClient as any).addOpenRequest('delegated-acknowledged-request-id', operationRequest)
+
+      await (timeoutClient as any).handleResponse(
+        {
+          id: 'delegated-acknowledged-request-id',
+          version: '2',
+          senderId: 'wallet-sender-id',
+          type: BeaconMessageType.Acknowledge
+        },
+        {
+          origin: Origin.P2P,
+          id: 'wallet-public-key'
+        }
+      )
+
+      jest.advanceTimersByTime(10)
+      await Promise.resolve()
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'delegated-acknowledged-request-id',
+          type: 'RESPONSE'
+        })
+      )
+      expect(rejection).not.toHaveBeenCalled()
+      expect(channelClosedHandler).not.toHaveBeenCalled()
+      expect((timeoutClient as any).openRequests.has('delegated-acknowledged-request-id')).toBe(
+        true
+      )
+      expect(
+        (timeoutClient as any).openRequestsOtherTabs.has('delegated-acknowledged-request-id')
+      ).toBe(true)
+    } finally {
+      ;(timeoutClient as any).clearOpenRequest('delegated-acknowledged-request-id')
+      jest.useRealTimers()
+    }
+  })
+
+  it('forwards delegated send failures back to the requesting tab', async () => {
+    ;(window as any).beaconCreatedClientInstance = false
+    const timeoutClient = new DAppClient({
+      name: 'TimeoutApp',
+      storage: new LocalStorage(),
+      preferredNetwork: NetworkType.MAINNET,
+      requestTimeoutMs: 0
+    })
+    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+
+    const postMessage = jest.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
+    jest.spyOn((timeoutClient as any).multiTabChannel, 'isLeader').mockReturnValue(true)
+    ;(timeoutClient as any)._transport = ExposedPromise.resolve({
+      waitForResolution: jest.fn().mockResolvedValue(undefined)
+    })
+
+    const sendFailure: ErrorResponse = {
+      id: 'delegated-send-failure-id',
+      type: BeaconMessageType.Error,
+      errorType: BeaconErrorType.UNKNOWN_ERROR,
+      senderId: '',
+      version: '2'
+    }
+    jest.spyOn(timeoutClient as any, 'makeRequest').mockRejectedValue(sendFailure)
+
+    await (timeoutClient as any).prepareRequest({
+      id: 'delegated-send-failure-id',
+      type: BeaconMessageType.OperationRequest,
+      data: {
+        type: BeaconMessageType.OperationRequest,
+        network: {
+          type: NetworkType.MAINNET
+        },
+        operationDetails: [],
+        sourceAddress: 'tz1-address'
+      }
+    })
+    await Promise.resolve()
+
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'delegated-send-failure-id',
+        type: 'RESPONSE',
+        data: expect.objectContaining({
+          message: expect.objectContaining({
+            id: 'delegated-send-failure-id',
+            type: BeaconMessageType.Error,
+            errorType: BeaconErrorType.UNKNOWN_ERROR
+          })
+        })
+      })
+    )
+    expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-send-failure-id')).toBe(
+      false
+    )
+  })
+
+  it('clears open requests when transport send rejects asynchronously', async () => {
+    ;(window as any).beaconCreatedClientInstance = false
+    const timeoutClient = new DAppClient({
+      name: 'TimeoutApp',
+      storage: new LocalStorage(),
+      preferredNetwork: NetworkType.MAINNET,
+      requestTimeoutMs: 0
+    })
+    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+
+    const sendError = new Error('send failed')
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      send: jest.fn().mockRejectedValue(sendError)
+    }
+    const peer = {
+      type: 'p2p-pairing-response',
+      senderId: 'wallet-sender-id',
+      publicKey: 'wallet-public-key',
+      name: 'Wallet',
+      relayServer: 'matrix.example.com'
+    }
+    ;(timeoutClient as any)._beaconId = ExposedPromise.resolve('beacon-id')
+    ;(timeoutClient as any)._activePeer = ExposedPromise.resolve(peer)
+    ;(timeoutClient as any)._transport = ExposedPromise.resolve(transport)
+
+    jest.spyOn(timeoutClient as any, 'init').mockResolvedValue(TransportType.P2P)
+    jest.spyOn(timeoutClient as any, 'transport', 'get').mockReturnValue(Promise.resolve(transport))
+    jest.spyOn(timeoutClient as any, 'checkPermissions').mockResolvedValue(true)
+    jest.spyOn(timeoutClient as any, 'addRequestAndCheckIfRateLimited').mockResolvedValue(false)
+    jest.spyOn(timeoutClient as any, 'getActiveAccount').mockResolvedValue(undefined)
+    jest.spyOn(timeoutClient as any, 'getPeer').mockResolvedValue(peer)
+    jest.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
+
+    await expect(
+      (timeoutClient as any).makeRequest({
+        type: BeaconMessageType.OperationRequest,
+        network: {
+          type: NetworkType.MAINNET
+        },
+        operationDetails: [],
+        sourceAddress: 'tz1-address'
+      })
+    ).rejects.toBe(sendError)
+
+    expect((timeoutClient as any).openRequests.has('guid')).toBe(false)
+  })
+
+  it('clears v3 open requests when transport send rejects asynchronously', async () => {
+    ;(window as any).beaconCreatedClientInstance = false
+    const timeoutClient = new DAppClient({
+      name: 'TimeoutApp',
+      storage: new LocalStorage(),
+      preferredNetwork: NetworkType.MAINNET,
+      requestTimeoutMs: 0
+    })
+    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+
+    const sendError = new Error('send failed')
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      send: jest.fn().mockRejectedValue(sendError)
+    }
+    const peer = {
+      type: 'p2p-pairing-response',
+      senderId: 'wallet-sender-id',
+      publicKey: 'wallet-public-key',
+      name: 'Wallet',
+      relayServer: 'matrix.example.com'
+    }
+    ;(timeoutClient as any)._beaconId = ExposedPromise.resolve('beacon-id')
+    ;(timeoutClient as any)._activePeer = ExposedPromise.resolve(peer)
+    ;(timeoutClient as any)._transport = ExposedPromise.resolve(transport)
+
+    jest.spyOn(timeoutClient as any, 'init').mockResolvedValue(TransportType.P2P)
+    jest.spyOn(timeoutClient as any, 'transport', 'get').mockReturnValue(Promise.resolve(transport))
+    jest.spyOn(timeoutClient as any, 'addRequestAndCheckIfRateLimited').mockResolvedValue(false)
+    jest.spyOn(timeoutClient as any, 'getActiveAccount').mockResolvedValue(undefined)
+    jest.spyOn(timeoutClient as any, 'getPeer').mockResolvedValue(peer)
+    jest.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
+
+    await expect(
+      (timeoutClient as any).makeRequestV3({
+        type: BeaconMessageType.SignPayloadRequest,
+        signingType: 'raw',
+        payload: 'payload',
+        sourceAddress: 'tz1-address'
+      })
+    ).rejects.toBe(sendError)
+
+    expect((timeoutClient as any).openRequests.has('guid')).toBe(false)
+  })
+
+  it('clears delegated request markers when the delegated request times out', async () => {
+    jest.useFakeTimers()
+    ;(window as any).beaconCreatedClientInstance = false
+    const timeoutClient = new DAppClient({
+      name: 'TimeoutApp',
+      storage: new LocalStorage(),
+      preferredNetwork: NetworkType.MAINNET,
+      requestTimeoutMs: 10
+    })
+    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+
+    const operationRequest = new ExposedPromise<unknown, unknown>()
+    void operationRequest.promise.catch(() => undefined)
+
+    try {
+      ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-request-id')
+      ;(timeoutClient as any).addOpenRequest('delegated-request-id', operationRequest)
+
+      jest.advanceTimersByTime(10)
+      await Promise.resolve()
+
+      expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(false)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('keeps acknowledged requests open without timing them out', async () => {
+    jest.useFakeTimers()
+    ;(window as any).beaconCreatedClientInstance = false
+    const timeoutClient = new DAppClient({
+      name: 'TimeoutApp',
+      storage: new LocalStorage(),
+      preferredNetwork: NetworkType.MAINNET,
+      requestTimeoutMs: 10
+    })
+    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    const channelClosedHandler = jest.fn()
+    timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+    jest.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
+
+    const operationRequest = new ExposedPromise<unknown, unknown>()
+    const rejection = jest.fn()
+    void operationRequest.promise.catch(rejection)
+
+    try {
+      ;(timeoutClient as any).addOpenRequest('acknowledged-request-id', operationRequest)
+
+      await (timeoutClient as any).handleResponse(
+        {
+          id: 'acknowledged-request-id',
+          version: '2',
+          senderId: 'wallet-sender-id',
+          type: BeaconMessageType.Acknowledge
+        },
+        {
+          origin: Origin.P2P,
+          id: 'wallet-public-key'
+        }
+      )
+
+      jest.advanceTimersByTime(10)
+      await Promise.resolve()
+
+      expect(rejection).not.toHaveBeenCalled()
+      expect(channelClosedHandler).not.toHaveBeenCalled()
+      expect((timeoutClient as any).openRequests.has('acknowledged-request-id')).toBe(true)
+    } finally {
+      ;(timeoutClient as any).clearOpenRequest('acknowledged-request-id')
+      jest.useRealTimers()
+    }
+  })
+
+  it('does not time out the walletconnect session_update marker', async () => {
+    jest.useFakeTimers()
+    ;(window as any).beaconCreatedClientInstance = false
+    const timeoutClient = new DAppClient({
+      name: 'TimeoutApp',
+      storage: new LocalStorage(),
+      preferredNetwork: NetworkType.MAINNET,
+      requestTimeoutMs: 10
+    })
+    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+    const channelClosedHandler = jest.fn()
+    timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+
+    const sessionUpdate = new ExposedPromise<unknown, unknown>()
+    const rejection = jest.fn()
+    void sessionUpdate.promise.catch(rejection)
+
+    try {
+      ;(timeoutClient as any).addOpenRequest('session_update', sessionUpdate)
+
+      jest.advanceTimersByTime(10)
+      await Promise.resolve()
+
+      expect(rejection).not.toHaveBeenCalled()
+      expect(channelClosedHandler).not.toHaveBeenCalled()
+      expect((timeoutClient as any).openRequests.has('session_update')).toBe(true)
+    } finally {
+      ;(timeoutClient as any).clearOpenRequest('session_update')
+      jest.useRealTimers()
+    }
   })
 })

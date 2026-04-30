@@ -100,6 +100,15 @@ export enum BeaconErrorType {
   ABORTED_ERROR = 'ABORTED_ERROR',
 
   /**
+   * {@link PeerUnreachableBeaconError}
+   *
+   * Will be returned if the wallet peer does not acknowledge or answer a request before the request timeout.
+   *
+   * Returned by: Permission | Operation Request | Sign Request | Broadcast
+   */
+  PEER_UNREACHABLE = 'PEER_UNREACHABLE',
+
+  /**
    * {@link UnknownBeaconError}
    *
    * Used as a wildcard if an unexpected error occured.
