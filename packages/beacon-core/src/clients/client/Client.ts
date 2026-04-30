@@ -23,6 +23,13 @@ import { ClientOptions } from './ClientOptions'
 
 const logger = new Logger('Client')
 
+interface TransportCleanupTarget {
+  readonly type: TransportType
+  removeListener(
+    listener: (message: string, connectionInfo: ConnectionContext) => void
+  ): Promise<void>
+}
+
 /**
  * @internalapi
  *
@@ -92,20 +99,39 @@ export abstract class Client extends BeaconClient {
       )
     }
   }
-  protected async cleanup() {
+  protected async cleanup(transports?: TransportCleanupTarget[]) {
     if (!this.transportListeners.size) {
       return
     }
 
-    if (this._transport.isResolved()) {
-      const transport = await this.transport
-      await Promise.all(
-        Array.from(this.transportListeners.values()).map((listener) =>
-          transport.removeListener(listener)
+    if (!transports) {
+      if (this._transport.isResolved()) {
+        const transport = await this.transport
+        await Promise.all(
+          Array.from(this.transportListeners.values()).map((listener) =>
+            transport.removeListener(listener)
+          )
         )
-      )
+      }
       this.transportListeners.clear()
+
+      return
     }
+
+    // Explicit transport cleanup is scoped: callers tearing down secondary
+    // transports should not unregister listeners for transports left alive.
+    await Promise.all(
+      transports.map(async (transport) => {
+        const listener = this.transportListeners.get(transport.type)
+
+        if (!listener) {
+          return
+        }
+
+        await transport.removeListener(listener)
+        this.transportListeners.delete(transport.type)
+      })
+    )
   }
 
   /**

@@ -45,6 +45,20 @@ export class MultiTabChannel {
     this.initialized = true
   }
 
+  public async close() {
+    const wasLeader = this.wasLeader
+    window?.removeEventListener('beforeunload', this.eventListeners[0])
+    this.channel.removeEventListener('message', this.eventListeners[1])
+    this.channel.onmessage = null
+    await this.elector.die()
+    if (wasLeader) {
+      this.postMessage({ type: 'LEADER_DEAD' })
+    }
+    await this.channel.close()
+    this.initialized = false
+    this.wasLeader = false
+  }
+
   private async onBeforeUnloadHandler() {
     if (this.wasLeader) {
       await this.elector.die()

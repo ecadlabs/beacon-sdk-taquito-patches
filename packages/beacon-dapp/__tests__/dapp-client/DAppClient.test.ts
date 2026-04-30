@@ -13,6 +13,7 @@ import {
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { LocalStorage } from '@ecadlabs/beacon-core'
 import { BeaconEvent } from '../../src/events'
+import { getDAppClientInstance } from '../../src/utils/get-instance'
 
 //
 // 1) Mock out all the heavy @ecadlabs/beacon-core and @ecadlabs/beacon-ui dependencies,
@@ -138,6 +139,9 @@ jest.mock('@ecadlabs/beacon-core', () => {
         return Promise.resolve(true)
       }
       getLeadership() {
+        return Promise.resolve()
+      }
+      close() {
         return Promise.resolve()
       }
       postMessage(_msg: any) {}
@@ -520,6 +524,110 @@ describe('DAppClient — basic unit tests', () => {
     await expect(retryRequest).resolves.toEqual(output)
   })
 
+  it('does not return a destroyed singleton dApp client', async () => {
+    const config = {
+      name: 'TestApp',
+      storage: new LocalStorage(),
+      preferredNetwork: NetworkType.MAINNET
+    }
+    const firstClient = getDAppClientInstance(config, true)
+    const staleAccount = {
+      accountIdentifier: 'stale-account-id',
+      senderId: 'wallet-sender-id',
+      origin: {
+        type: Origin.P2P,
+        id: 'wallet-public-key'
+      },
+      address: 'tz1-stale-address',
+      network: {
+        type: NetworkType.MAINNET
+      },
+      scopes: [PermissionScope.SIGN],
+      connectedAt: Date.now(),
+      walletType: 'implicit'
+    } as const
+
+    ;(firstClient as any)._activeAccount = ExposedPromise.resolve(staleAccount)
+    await expect(firstClient.getActiveAccount()).resolves.toEqual(staleAccount)
+
+    const destroyPromise = firstClient.destroy()
+
+    const secondClient = getDAppClientInstance({
+      ...config,
+      storage: new LocalStorage()
+    })
+
+    expect(secondClient).not.toBe(firstClient)
+    await expect(firstClient.getActiveAccount()).rejects.toThrow(
+      'DAppClient has been destroyed and cannot be used again.'
+    )
+    await expect(firstClient.requestPermissions()).rejects.toThrow(
+      'DAppClient has been destroyed and cannot be used again.'
+    )
+    await expect(secondClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(destroyPromise).resolves.toBeUndefined()
+  })
+
+  it('destroys all internal transports, not only the selected transport', async () => {
+    const createTransport = (type: TransportType) => ({
+      type,
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    })
+    const postMessageTransport = createTransport(TransportType.POST_MESSAGE)
+    const p2pTransport = createTransport(TransportType.P2P)
+    const walletConnectTransport = {
+      ...createTransport(TransportType.WALLETCONNECT),
+      doClientCleanup: jest.fn().mockResolvedValue(undefined)
+    }
+    const closeMultiTabChannel = jest.fn().mockResolvedValue(undefined)
+    let rejectInit!: (reason: unknown) => void
+    const initPromise = new Promise<TransportType>((_resolve, reject) => {
+      rejectInit = reject
+    })
+    const initRejection = expect(initPromise).rejects.toMatchObject({
+      errorType: BeaconErrorType.ABORTED_ERROR
+    })
+
+    ;(client as any).postMessageTransport = postMessageTransport
+    ;(client as any).p2pTransport = p2pTransport
+    ;(client as any).walletConnectTransport = walletConnectTransport
+    ;(client as any).multiTabChannel = {
+      close: closeMultiTabChannel
+    }
+
+    await (client as any).addListener(postMessageTransport)
+    await (client as any).addListener(p2pTransport)
+    await (client as any).addListener(walletConnectTransport)
+    await (client as any).setTransport(p2pTransport)
+    ;(client as any)._initPromise = initPromise
+    ;(client as any)._initReject = rejectInit
+    ;(client as any)._initSubstratePairing = false
+    ;(client as any)._requestPermissionsPromise = initPromise
+    ;(client as any)._requestPermissionsKey = 'sign'
+
+    await client.destroy()
+    await initRejection
+
+    expect(postMessageTransport.removeListener).toHaveBeenCalledTimes(1)
+    expect(p2pTransport.removeListener).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.removeListener).toHaveBeenCalledTimes(1)
+    expect(postMessageTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(p2pTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.doClientCleanup).toHaveBeenCalledTimes(1)
+    expect(closeMultiTabChannel).toHaveBeenCalledTimes(1)
+    expect((client as any).postMessageTransport).toBeUndefined()
+    expect((client as any).p2pTransport).toBeUndefined()
+    expect((client as any).walletConnectTransport).toBeUndefined()
+    expect((client as any)._initPromise).toBeUndefined()
+    expect((client as any)._initReject).toBeUndefined()
+    expect((client as any)._initSubstratePairing).toBeUndefined()
+    expect((client as any)._requestPermissionsPromise).toBeUndefined()
+    expect((client as any)._requestPermissionsKey).toBeUndefined()
+  })
+
   it('rejects a pending init with different pairing options', async () => {
     ;(client as any)._initPromise = new Promise(() => {})
     ;(client as any)._initReject = jest.fn()
@@ -528,6 +636,49 @@ describe('DAppClient — basic unit tests', () => {
     await expect((client as any).init(undefined, true)).rejects.toThrow(
       'Cannot start a permission request with different pairing options while another pairing is pending'
     )
+  })
+
+  it('clears the in-memory active account even when storage and transport state are already gone', async () => {
+    const staleAccount = createStoredAccount()
+
+    ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
+    await (client as any).storage.delete(StorageKey.ACTIVE_ACCOUNT)
+
+    const clearResult = await Promise.race([
+      client.clearActiveAccount().then(() => 'resolved'),
+      new Promise((resolve) => setTimeout(() => resolve('pending'), 0))
+    ])
+
+    expect(clearResult).toBe('resolved')
+    await expect(client.getActiveAccount()).resolves.toBeUndefined()
+    await expect((client as any).storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+  })
+
+  it('disconnect clears pending in-memory requests for non-WalletConnect transports', async () => {
+    const staleAccount = createStoredAccount()
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+    const pendingRequest = new ExposedPromise<unknown, any>()
+    const pendingRejection = pendingRequest.promise.catch((error) => error)
+
+    ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
+    await (client as any).setTransport(transport)
+    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+
+    await client.disconnect()
+
+    expect((client as any).openRequests.size).toBe(0)
+    await expect(pendingRejection).resolves.toMatchObject({
+      id: 'pending-after-disconnect',
+      errorType: BeaconErrorType.ABORTED_ERROR
+    })
+    await expect(client.getActiveAccount()).resolves.toBeUndefined()
+    expect(transport.disconnect).toHaveBeenCalledTimes(1)
   })
 
   it('cleans up v3 wrapped responses by the outer request id', async () => {
