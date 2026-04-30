@@ -42,14 +42,21 @@ jest.mock('@ecadlabs/beacon-core', () => {
   const actual = jest.requireActual('@ecadlabs/beacon-core')
   return {
     ...actual,
-    // a minimal in-memory LocalStorage stub
+    // A minimal in-memory LocalStorage stub. The constructor is fixture-only;
+    // the real LocalStorage constructor takes an optional key prefix.
     LocalStorage: class {
       private store = new Map<string, any>()
+      constructor(initialValues?: Record<string, any>) {
+        Object.entries(initialValues ?? {}).forEach(([key, value]) => this.store.set(key, value))
+      }
       async get(key: string) {
         return this.store.get(key)
       }
       async set(key: string, value: any) {
         this.store.set(key, value)
+      }
+      async delete(key: string) {
+        this.store.delete(key)
       }
       subscribeToStorageChanged(_cb: any) {
         /* no op */
@@ -60,9 +67,12 @@ jest.mock('@ecadlabs/beacon-core', () => {
     },
     // StorageValidator always “valid”
     StorageValidator: class {
-      constructor(_s: any) {}
+      private mockStorage: any
+      constructor(mockStorage: any) {
+        this.mockStorage = mockStorage
+      }
       validate() {
-        return Promise.resolve(true)
+        return Promise.resolve(this.mockStorage.validateResults?.shift() ?? true)
       }
     },
     // Serializer just serializes to an empty string
@@ -159,6 +169,48 @@ describe('DAppClient — basic unit tests', () => {
     await (client as any).storage.set(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP, [])
     await (client as any).storage.set(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP, [])
   }
+
+  const createStoredAccount = () => ({
+    accountIdentifier: '2Hhz5SFLypkQAgwvMCX7',
+    senderId: 'wallet-sender-id',
+    origin: {
+      type: Origin.P2P,
+      id: 'wallet-public-key'
+    },
+    address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
+    network: {
+      type: NetworkType.MAINNET
+    },
+    scopes: [PermissionScope.OPERATION_REQUEST],
+    connectedAt: 1,
+    walletType: 'implicit'
+  })
+
+  const createV480P2PPeer = () => ({
+    type: 'p2p-pairing-request',
+    id: 'wallet-public-key',
+    senderId: 'wallet-sender-id',
+    name: 'v4.8.0 Wallet',
+    publicKey: 'wallet-public-key',
+    version: '4',
+    relayServer: 'matrix.example.com'
+  })
+
+  const createV480Permission = () => ({
+    accountIdentifier: '2Hhz5SFLypkQAgwvMCX7',
+    senderId: 'wallet-sender-id',
+    address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
+    network: {
+      type: NetworkType.MAINNET
+    },
+    scopes: [PermissionScope.OPERATION_REQUEST],
+    appMetadata: {
+      senderId: 'dapp-sender-id',
+      name: 'TestApp'
+    },
+    website: 'https://example.com',
+    connectedAt: 1
+  })
 
   it('addQueryParam returns "key=value"', () => {
     // addQueryParam is private — cast to any to reach it
@@ -760,6 +812,225 @@ describe('DAppClient — basic unit tests', () => {
     ).rejects.toBe(sendError)
 
     expect((timeoutClient as any).openRequests.has('guid')).toBe(false)
+  })
+
+  it('restores an upstream v4.8.0-style P2P persisted session without deactivating it', async () => {
+    const activeAccountHandler = jest.fn()
+    const invalidAccountHandler = jest.fn()
+    const storedAccount = createStoredAccount()
+    const p2pPeer = createV480P2PPeer()
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
+      [StorageKey.ACCOUNTS]: [storedAccount],
+      [StorageKey.PERMISSION_LIST]: [createV480Permission()],
+      [StorageKey.TRANSPORT_P2P_PEERS_DAPP]: [p2pPeer]
+    })
+    const initInternalTransports = jest
+      .spyOn(DAppClient.prototype as any, 'initInternalTransports')
+      .mockImplementation(async function (this: any) {
+        this.p2pTransport = {
+          connectionStatus: TransportStatus.CONNECTED,
+          getPeers: jest.fn().mockResolvedValue([p2pPeer])
+        }
+      })
+
+    try {
+      ;(window as any).beaconCreatedClientInstance = false
+      const storedStateClient = new DAppClient({
+        name: 'UpstreamV480StoredStateApp',
+        storage,
+        preferredNetwork: NetworkType.MAINNET,
+        disableDefaultEvents: true,
+        eventHandlers: {
+          [BeaconEvent.ACTIVE_ACCOUNT_SET]: {
+            handler: activeAccountHandler
+          },
+          [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: {
+            handler: invalidAccountHandler
+          }
+        }
+      })
+
+      await (storedStateClient as any).storageValidated
+
+      await expect(storedStateClient.getActiveAccount()).resolves.toEqual(storedAccount)
+      await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBe(
+        storedAccount.accountIdentifier
+      )
+      await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([storedAccount])
+      expect(activeAccountHandler).toHaveBeenCalledWith(storedAccount, undefined)
+      expect(invalidAccountHandler).not.toHaveBeenCalled()
+    } finally {
+      initInternalTransports.mockRestore()
+    }
+  })
+
+  it('recreates the SDK secret seed through transport init after storage was cleared', async () => {
+    await (client as any).storage.delete(StorageKey.BEACON_SDK_SECRET_SEED)
+    ;(client as any).postMessageTransport = {
+      type: TransportType.POST_MESSAGE
+    }
+
+    try {
+      await expect((client as any).initInternalTransports()).resolves.toBeUndefined()
+
+      const restoredSeed = await (client as any).storage.get(StorageKey.BEACON_SDK_SECRET_SEED)
+
+      expect(restoredSeed).toEqual(expect.any(String))
+      expect(restoredSeed).not.toHaveLength(0)
+      await expect(client.beaconId).resolves.toEqual(expect.any(String))
+      expect((client as any).postMessageTransport).toBeDefined()
+    } finally {
+      ;(client as any).postMessageTransport = undefined
+    }
+  })
+
+  it('reuses one SDK secret recovery when transport init races after storage was cleared', async () => {
+    await (client as any).storage.delete(StorageKey.BEACON_SDK_SECRET_SEED)
+    const initSDK = jest.spyOn(client as any, 'initSDK')
+
+    const [firstSeed, secondSeed] = await Promise.all([
+      (client as any).getOrCreateSDKSecretSeed(),
+      (client as any).getOrCreateSDKSecretSeed()
+    ])
+
+    expect(firstSeed).toBe(secondSeed)
+    expect(initSDK).toHaveBeenCalledTimes(1)
+    await expect((client as any).storage.get(StorageKey.BEACON_SDK_SECRET_SEED)).resolves.toBe(
+      firstSeed
+    )
+
+    initSDK.mockRestore()
+  })
+
+  it('recreates the SDK secret seed when storage contains invalid seed sentinels', async () => {
+    await (client as any).storage.set(StorageKey.BEACON_SDK_SECRET_SEED, 'undefined')
+
+    const restoredSeed = await (client as any).getOrCreateSDKSecretSeed()
+
+    expect(restoredSeed).toEqual(expect.any(String))
+    expect(restoredSeed).not.toBe('undefined')
+  })
+
+  it('emits account deactivated and clears state when the stored active account is missing', async () => {
+    const invalidAccountHandler = jest.fn()
+    const activeAccountHandler = jest.fn()
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: 'missing-account-id',
+      [StorageKey.ACCOUNTS]: [createStoredAccount()]
+    })
+
+    ;(window as any).beaconCreatedClientInstance = false
+    const storedStateClient = new DAppClient({
+      name: 'StoredStateApp',
+      storage,
+      preferredNetwork: NetworkType.MAINNET,
+      disableDefaultEvents: true,
+      eventHandlers: {
+        [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: {
+          handler: invalidAccountHandler
+        },
+        [BeaconEvent.ACTIVE_ACCOUNT_SET]: {
+          handler: activeAccountHandler
+        }
+      }
+    })
+
+    await (storedStateClient as any).storageValidated
+
+    await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toBeUndefined()
+    expect(activeAccountHandler).not.toHaveBeenCalled()
+    expect(invalidAccountHandler).toHaveBeenCalledWith(undefined, undefined)
+  })
+
+  it('emits account deactivated and clears state when stored accounts are malformed', async () => {
+    const invalidAccountHandler = jest.fn()
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: 'stored-account-id',
+      [StorageKey.ACCOUNTS]: {
+        accountIdentifier: 'stored-account-id'
+      }
+    })
+
+    ;(window as any).beaconCreatedClientInstance = false
+    const storedStateClient = new DAppClient({
+      name: 'MalformedStoredStateApp',
+      storage,
+      preferredNetwork: NetworkType.MAINNET,
+      disableDefaultEvents: true,
+      eventHandlers: {
+        [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: {
+          handler: invalidAccountHandler
+        }
+      }
+    })
+
+    await (storedStateClient as any).storageValidated
+
+    await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toBeUndefined()
+    expect(invalidAccountHandler).toHaveBeenCalledWith(undefined, undefined)
+  })
+
+  it('clears invalid storage without account deactivated event when validation fails with no active account', async () => {
+    const invalidAccountHandler = jest.fn()
+    const storedAccount = createStoredAccount()
+    const storage = new LocalStorage({
+      [StorageKey.ACCOUNTS]: [storedAccount]
+    })
+    ;(storage as any).validateResults = [false, false]
+
+    ;(window as any).beaconCreatedClientInstance = false
+    const storedStateClient = new DAppClient({
+      name: 'InvalidValidatedStateApp',
+      storage,
+      preferredNetwork: NetworkType.MAINNET,
+      disableDefaultEvents: true,
+      eventHandlers: {
+        [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: {
+          handler: invalidAccountHandler
+        }
+      }
+    })
+
+    await (storedStateClient as any).storageValidated
+
+    await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toBeUndefined()
+    expect(invalidAccountHandler).not.toHaveBeenCalled()
+  })
+
+  it('emits account deactivated once when active-account restore and validation both fail', async () => {
+    const invalidAccountHandler = jest.fn()
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: 'missing-account-id',
+      [StorageKey.ACCOUNTS]: [createStoredAccount()]
+    })
+    ;(storage as any).validateResults = [false, false]
+
+    ;(window as any).beaconCreatedClientInstance = false
+    const storedStateClient = new DAppClient({
+      name: 'DoubleInvalidStoredStateApp',
+      storage,
+      preferredNetwork: NetworkType.MAINNET,
+      disableDefaultEvents: true,
+      eventHandlers: {
+        [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: {
+          handler: invalidAccountHandler
+        }
+      }
+    })
+
+    await (storedStateClient as any).storageValidated
+
+    await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toBeUndefined()
+    expect(invalidAccountHandler).toHaveBeenCalledTimes(1)
   })
 
   it('clears v3 open requests when transport send rejects asynchronously', async () => {
