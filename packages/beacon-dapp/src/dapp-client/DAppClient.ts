@@ -154,21 +154,21 @@ const createLazyPromise = <T>(factory: () => Promise<T>): PromiseLike<T> => {
     return promise
   }
 
-  const lazyPromise = {
-    then<TResult1 = T, TResult2 = never>(
+  const lazyPromise: PromiseLike<T> & {
+    catch: <TResult = never>(
+      onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null
+    ) => Promise<T | TResult>
+    finally: (onfinally?: (() => void) | null) => Promise<T>
+  } = {
+    then: <TResult1 = T, TResult2 = never>(
       onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
       onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
-    ): Promise<TResult1 | TResult2> {
-      return getPromise().then(onfulfilled, onrejected)
-    },
-    catch<TResult = never>(
+    ): Promise<TResult1 | TResult2> => getPromise().then(onfulfilled, onrejected),
+    catch: <TResult = never>(
       onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null
-    ): Promise<T | TResult> {
-      return getPromise().catch(onrejected)
-    },
-    finally(onfinally?: (() => void) | null): Promise<T> {
-      return getPromise().finally(onfinally ?? undefined)
-    }
+    ): Promise<T | TResult> => getPromise().catch(onrejected),
+    finally: (onfinally?: (() => void) | null): Promise<T> =>
+      getPromise().finally(onfinally ?? undefined)
   }
 
   return lazyPromise
@@ -1122,7 +1122,10 @@ export class DAppClient extends Client {
             return
           }
 
-          this.postMessageTransport.connect().then().catch(console.error)
+          this.postMessageTransport
+            .connect()
+            .then()
+            .catch((err) => logger.error('init', 'postmessage connect', err))
 
           if (activeAccount && activeAccount.origin) {
             const origin = activeAccount.origin.type
@@ -1147,14 +1150,16 @@ export class DAppClient extends Client {
                 })
                 this.events
                   .emit(BeaconEvent.PAIR_SUCCESS, peer)
-                  .catch((emitError) => console.warn(emitError))
+                  .catch((emitError) => logger.warn('init', emitError))
 
-                this.setActivePeer(peer).catch(console.error)
-                this.setTransport(this.postMessageTransport).catch(console.error)
+                this.setActivePeer(peer).catch((err) => logger.error('init', err))
+                this.setTransport(this.postMessageTransport).catch((err) =>
+                  logger.error('init', err)
+                )
                 stopListening()
                 resolve(TransportType.POST_MESSAGE)
               })
-              .catch(console.error)
+              .catch((err) => logger.error('init', err))
 
             p2pTransport
               .listenForNewPeer((peer) => {
@@ -1164,14 +1169,14 @@ export class DAppClient extends Client {
                 })
                 this.events
                   .emit(BeaconEvent.PAIR_SUCCESS, peer)
-                  .catch((emitError) => console.warn(emitError))
+                  .catch((emitError) => logger.warn('init', emitError))
 
-                this.setActivePeer(peer).catch(console.error)
-                this.setTransport(this.p2pTransport).catch(console.error)
+                this.setActivePeer(peer).catch((err) => logger.error('init', err))
+                this.setTransport(this.p2pTransport).catch((err) => logger.error('init', err))
                 stopListening()
                 resolve(TransportType.P2P)
               })
-              .catch(console.error)
+              .catch((err) => logger.error('init', err))
 
             walletConnectTransport
               .listenForNewPeer((peer) => {
@@ -1181,14 +1186,16 @@ export class DAppClient extends Client {
                 })
                 this.events
                   .emit(BeaconEvent.PAIR_SUCCESS, peer)
-                  .catch((emitError) => console.warn(emitError))
+                  .catch((emitError) => logger.warn('init', emitError))
 
-                this.setActivePeer(peer).catch(console.error)
-                this.setTransport(this.walletConnectTransport).catch(console.error)
+                this.setActivePeer(peer).catch((err) => logger.error('init', err))
+                this.setTransport(this.walletConnectTransport).catch((err) =>
+                  logger.error('init', err)
+                )
                 stopListening()
                 resolve(TransportType.WALLETCONNECT)
               })
-              .catch(console.error)
+              .catch((err) => logger.error('init', err))
 
             PostMessageTransport.getAvailableExtensions()
               .then(async (extensions) => {
@@ -1196,7 +1203,7 @@ export class DAppClient extends Client {
               })
               .catch((error) => {
                 this._initPromise = undefined
-                console.error(error)
+                logger.error('init', 'getAvailableExtensions', error)
               })
 
             const abortHandler = async () => {
@@ -1214,7 +1221,9 @@ export class DAppClient extends Client {
                 this.walletConnectTransport =
                 this.p2pTransport =
                   undefined
-              this._activeAccount.isResolved() && this.clearActiveAccount()
+              if (this._activeAccount.isResolved()) {
+                this.clearActiveAccount().catch((err) => logger.warn('init', 'clearActiveAccount', err))
+              }
               // Reject _initPromise so any awaiter (makeRequest -> requestPermissions)
               // unwinds via handleRequestError instead of hanging. _initReject
               // also clears _initPromise as a side effect.
@@ -1222,19 +1231,26 @@ export class DAppClient extends Client {
             }
 
             const serializer = new Serializer()
-            const p2pPeerInfo = new Promise<string>(async (resolve) => {
+            const p2pPeerInfo = new Promise<string>(async (resolveP2pPeerInfo) => {
               try {
                 await p2pTransport.connect()
-              } catch (err: any) {
-                logger.error(err)
+              } catch (err: unknown) {
+                const error = err as Error
+                logger.error('init', error.message)
                 await this.hideUI(['alert']) // hide pairing alert
-                setTimeout(() => this.events.emit(BeaconEvent.GENERIC_ERROR, err.message), 1000)
-                abortHandler()
-                resolve('')
+                setTimeout(() => {
+                  this.events
+                    .emit(BeaconEvent.GENERIC_ERROR, error.message)
+                    .catch((emitErr) => logger.warn('init', 'GENERIC_ERROR emit', emitErr))
+                }, 1000)
+                abortHandler().catch((abortErr) => logger.warn('init', 'abortHandler', abortErr))
+                resolveP2pPeerInfo('')
 
                 return
               }
-              resolve(await serializer.serialize(await p2pTransport.getPairingRequestInfo()))
+              resolveP2pPeerInfo(
+                await serializer.serialize(await p2pTransport.getPairingRequestInfo())
+              )
             })
 
             const walletConnectPeerInfo = createLazyPromise(() =>
@@ -1248,8 +1264,8 @@ export class DAppClient extends Client {
                 })
             )
 
-            const postmessagePeerInfo = new Promise<string>(async (resolve) => {
-              resolve(
+            const postmessagePeerInfo = new Promise<string>(async (resolvePostmessagePeerInfo) => {
+              resolvePostmessagePeerInfo(
                 await serializer.serialize(await postMessageTransport.getPairingRequestInfo())
               )
             })
@@ -1266,7 +1282,7 @@ export class DAppClient extends Client {
                 featuredWallets: this.featuredWallets,
                 substratePairing
               })
-              .catch((emitError) => console.warn(emitError))
+              .catch((emitError) => logger.warn('init', emitError))
           }
         }
       } catch (err) {
@@ -1590,6 +1606,10 @@ export class DAppClient extends Client {
   // IndexedDB before the DB was ready, surfacing as unhandledRejection.
   // Hard-disabled here; full removal (option, storage key, IDB store,
   // BACKEND_URL constant, all call sites) tracked as a follow-up.
+  // Noop stub; full removal tracked as a follow-up. Args kept for signature
+  // compatibility with all existing call sites until the real implementation
+  // returns.
+  /* eslint-disable @typescript-eslint/no-unused-vars */
   private sendMetrics(
     _uri: string,
     _options?: RequestInit,
@@ -1598,6 +1618,7 @@ export class DAppClient extends Client {
   ) {
     return
   }
+  /* eslint-enable @typescript-eslint/no-unused-vars */
 
   private async checkMakeRequest() {
     const isResolved = this._transport.isResolved()

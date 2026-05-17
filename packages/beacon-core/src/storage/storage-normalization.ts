@@ -51,26 +51,58 @@ const CLASSIFIED_STORAGE_KEYS = [
 ]
 const STORAGE_KEY_VALUES = new Set<string>(Object.values(StorageKey))
 
-// LocalStorage exposes raw strings; Chrome and IndexedDB expose already-decoded JS values.
-export function normalizeStoredValue<K extends StorageKey>(
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const parseStringifiedString = (rawValue: string): unknown => {
+  try {
+    return JSON.parse(rawValue)
+  } catch {
+    return undefined
+  }
+}
+
+const parseStoredValue = (rawValue: string): unknown => {
+  try {
+    return JSON.parse(rawValue)
+  } catch {
+    return rawValue
+  }
+}
+
+const formatKeys = (keys: readonly string[]): string =>
+  keys.length === 0 ? 'none' : keys.join(', ')
+
+const defaultValue = <K extends StorageKey>(key: K): StorageKeyReturnType[K] => {
+  const value = defaultValues[key]
+
+  return (
+    isRecord(value) || Array.isArray(value) ? JSON.parse(JSON.stringify(value)) : value
+  ) as StorageKeyReturnType[K]
+}
+
+const normalizeRawStringValue = <K extends StorageKey>(
   key: K,
-  rawValue: string | null | undefined
-): StorageKeyReturnType[K] {
-  if (!rawValue || SENTINEL_STRINGS.has(rawValue)) {
+  rawValue: string
+): StorageKeyReturnType[K] => {
+  // STRING keys are SDK-controlled identifiers and serialized WalletConnect blobs, not free-form text.
+  if (!rawValue.startsWith('"')) {
+    return rawValue as StorageKeyReturnType[K]
+  }
+
+  const parsedValue = parseStringifiedString(rawValue)
+
+  if (typeof parsedValue !== 'string' || !parsedValue || SENTINEL_STRINGS.has(parsedValue)) {
     return defaultValue(key)
   }
 
-  if (STRING_STORAGE_KEYS.has(key)) {
-    return normalizeRawStringValue(key, rawValue)
-  }
-
-  return normalizeParsedStoredValue(key, parseStoredValue(rawValue))
+  return parsedValue as StorageKeyReturnType[K]
 }
 
-export function normalizeParsedStoredValue<K extends StorageKey>(
+export const normalizeParsedStoredValue = <K extends StorageKey>(
   key: K,
   value: unknown
-): StorageKeyReturnType[K] {
+): StorageKeyReturnType[K] => {
   if (
     value === undefined ||
     value === null ||
@@ -98,13 +130,27 @@ export function normalizeParsedStoredValue<K extends StorageKey>(
   return defaultValue(key)
 }
 
-export function isStorageKey(key: string): key is StorageKey {
-  return STORAGE_KEY_VALUES.has(key)
+// LocalStorage exposes raw strings; Chrome and IndexedDB expose already-decoded JS values.
+export const normalizeStoredValue = <K extends StorageKey>(
+  key: K,
+  rawValue: string | null | undefined
+): StorageKeyReturnType[K] => {
+  if (!rawValue || SENTINEL_STRINGS.has(rawValue)) {
+    return defaultValue(key)
+  }
+
+  if (STRING_STORAGE_KEYS.has(key)) {
+    return normalizeRawStringValue(key, rawValue)
+  }
+
+  return normalizeParsedStoredValue(key, parseStoredValue(rawValue))
 }
 
-export function assertStorageKeyNormalizationIsExhaustive(
+export const isStorageKey = (key: string): key is StorageKey => STORAGE_KEY_VALUES.has(key)
+
+export const assertStorageKeyNormalizationIsExhaustive = (
   expectedStorageKeys: readonly string[] = Object.values(StorageKey)
-): void {
+): void => {
   const expectedKeys = new Set(expectedStorageKeys)
   const classifiedKeyValues = new Set<string>(CLASSIFIED_STORAGE_KEYS)
   const missingKeys = expectedStorageKeys.filter((key) => !classifiedKeyValues.has(key))
@@ -123,56 +169,6 @@ export function assertStorageKeyNormalizationIsExhaustive(
       ].join(' ')
     )
   }
-}
-
-function normalizeRawStringValue<K extends StorageKey>(
-  key: K,
-  rawValue: string
-): StorageKeyReturnType[K] {
-  // STRING keys are SDK-controlled identifiers and serialized WalletConnect blobs, not free-form text.
-  if (!rawValue.startsWith('"')) {
-    return rawValue as StorageKeyReturnType[K]
-  }
-
-  const parsedValue = parseStringifiedString(rawValue)
-
-  if (typeof parsedValue !== 'string' || !parsedValue || SENTINEL_STRINGS.has(parsedValue)) {
-    return defaultValue(key)
-  }
-
-  return parsedValue as StorageKeyReturnType[K]
-}
-
-function parseStringifiedString(rawValue: string): unknown {
-  try {
-    return JSON.parse(rawValue)
-  } catch {
-    return undefined
-  }
-}
-
-function parseStoredValue(rawValue: string): unknown {
-  try {
-    return JSON.parse(rawValue)
-  } catch {
-    return rawValue
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function defaultValue<K extends StorageKey>(key: K): StorageKeyReturnType[K] {
-  const value = defaultValues[key]
-
-  return (
-    isRecord(value) || Array.isArray(value) ? JSON.parse(JSON.stringify(value)) : value
-  ) as StorageKeyReturnType[K]
-}
-
-function formatKeys(keys: readonly string[]): string {
-  return keys.length === 0 ? 'none' : keys.join(', ')
 }
 
 assertStorageKeyNormalizationIsExhaustive()
