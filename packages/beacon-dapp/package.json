@@ -39,7 +39,7 @@
     "@ecadlabs/beacon-types": "4.8.4-ecad-beta.1",
     "@ecadlabs/beacon-ui": "4.8.4-ecad-beta.1",
     "@ecadlabs/beacon-utils": "4.8.4-ecad-beta.1",
-    "@walletconnect/types": "2.18.0",
+    "@walletconnect/types": "2.23.9",
     "broadcast-channel": "^7.3.0",
     "bs58check": "4.0.0"
   },
