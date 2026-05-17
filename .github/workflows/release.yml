@@ -45,5 +45,17 @@ jobs:
       - name: Run end-to-end tests
         run: ./scripts/npm11.sh run e2e:smoke
 
+      - name: Determine npm dist-tag from ref
+        id: dist_tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          case "$REF_NAME" in
+            *-beta*|*-rc*|*-alpha*) echo "tag=beta" >> "$GITHUB_OUTPUT" ;;
+            *)                      echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Publish public packages
-        run: ./scripts/npm11.sh run publish:packages -- --tag latest
+        env:
+          NPM_DIST_TAG: ${{ steps.dist_tag.outputs.tag }}
+        run: ./scripts/npm11.sh run publish:packages
