@@ -209,15 +209,16 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     }
   }
 
-  private clearEvents() {
-    this.signClient?.removeAllListeners?.('session_event')
-    this.signClient?.removeAllListeners?.('session_update')
-    this.signClient?.removeAllListeners?.('session_delete')
-    this.signClient?.removeAllListeners?.('session_expire')
-    this.signClient?.removeAllListeners?.('session_extend')
-    this.signClient?.removeAllListeners?.('proposal_expire')
-    this.signClient?.core?.pairing?.events?.removeAllListeners?.('pairing_delete')
-    this.signClient?.core?.pairing?.events?.removeAllListeners?.('pairing_expire')
+  private clearEvents(signClient?: Client) {
+    const client = signClient ?? this.signClient
+    client?.removeAllListeners?.('session_event')
+    client?.removeAllListeners?.('session_update')
+    client?.removeAllListeners?.('session_delete')
+    client?.removeAllListeners?.('session_expire')
+    client?.removeAllListeners?.('session_extend')
+    client?.removeAllListeners?.('proposal_expire')
+    client?.core?.pairing?.events?.removeAllListeners?.('pairing_delete')
+    client?.core?.pairing?.events?.removeAllListeners?.('pairing_expire')
   }
 
   private onStorageMessageHandler(type: string) {
@@ -282,11 +283,14 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       signClient.core.relayer.provider.events.removeAllListeners()
       signClient.core.relayer.subscriber.events.removeAllListeners()
       signClient.core.relayer.provider.connection.events.removeAllListeners()
-      this.clearEvents()
+      this.clearEvents(signClient)
     } finally {
-      this.signClient = undefined
-      this.signClientPromise = undefined
-      this.pairingRequestPromise = undefined
+      // A reconnect can swap in a new SignClient while the old relayer is closing.
+      if (this.signClient === signClient) {
+        this.signClient = undefined
+        this.signClientPromise = undefined
+        this.pairingRequestPromise = undefined
+      }
     }
   }
 
