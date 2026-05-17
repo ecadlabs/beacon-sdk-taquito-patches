@@ -413,6 +413,38 @@ describe('WalletConnectCommunicationClient basics', () => {
     jest.useRealTimers()
   })
 
+  it('notifies listeners immediately when an inbound session_delete has a hung pairing disconnect', async () => {
+    jest.useFakeTimers()
+    const resolvedClient = createResolvedSignClient()
+    const session = {
+      topic: 'session-topic',
+      pairingTopic: 'pairing-topic',
+      namespaces: {},
+      peer: { metadata: { name: '', icons: [], redirect: {} } },
+      sessionProperties: {}
+    } as SessionTypes.Struct
+    resolvedClient.core.pairing.disconnect = jest.fn(() => new Promise(() => {}))
+    ;(client as any).session = session
+    const notifyListeners = jest.spyOn(client as any, 'notifyListeners')
+
+    const disconnect = (client as any).disconnect(resolvedClient, {
+      type: 'session',
+      topic: session.topic
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(notifyListeners).toHaveBeenCalledWith(session.topic, {
+      id: 'guid',
+      type: BeaconMessageType.Disconnect
+    })
+    jest.advanceTimersByTime(10000)
+    await Promise.resolve()
+    await Promise.resolve()
+    await expect(disconnect).resolves.toBeUndefined()
+    jest.useRealTimers()
+  })
+
   it('unsubscribeFromEncryptedMessages clears all listeners', async () => {
     await client.listenForEncryptedMessage('k', () => {})
     await client.listenForChannelOpening(() => {})
