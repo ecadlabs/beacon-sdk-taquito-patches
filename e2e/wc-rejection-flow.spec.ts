@@ -91,7 +91,7 @@ test('rejection surfaces ABORTED_ERROR to the dapp instead of hanging', async ()
   const activeAccount = await dapp.evaluate(() =>
     window.localStorage.getItem('beacon:active-account')
   )
-  expect(activeAccount).toBe('undefined')
+  expect(activeAccount).toBe(null)
 
   // Settle pending microtasks so any unhandled rejection has a chance to fire.
   await dapp.waitForTimeout(500)
