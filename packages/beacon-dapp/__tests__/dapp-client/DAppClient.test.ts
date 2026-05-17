@@ -821,7 +821,10 @@ describe('DAppClient — basic unit tests', () => {
     expect(storageChangedCallback).toBeDefined()
 
     const testClient = client as unknown as {
-      storage: { delete: (key: StorageKey) => Promise<void>; getPrefixedKey: (key: StorageKey) => string }
+      storage: {
+        delete: (key: StorageKey) => Promise<void>
+        getPrefixedKey: (key: StorageKey) => string
+      }
       events: { emit: (event: BeaconEvent, payload?: unknown) => Promise<void> }
     }
     const storageDelete = jest.spyOn(testClient.storage, 'delete')
@@ -879,6 +882,42 @@ describe('DAppClient — basic unit tests', () => {
     expect((client as any)._initSubstratePairing).toBeUndefined()
     expect((client as any)._requestPermissionsPromise).toBeUndefined()
     expect((client as any)._requestPermissionsKey).toBeUndefined()
+  })
+
+  it('disconnect tears down initialized transports while pairing is still pending', async () => {
+    const createTransport = (type: TransportType) => ({
+      type,
+      connectionStatus: TransportStatus.CONNECTING,
+      getPeers: jest.fn().mockResolvedValue([]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    })
+    const postMessageTransport = createTransport(TransportType.POST_MESSAGE)
+    const p2pTransport = createTransport(TransportType.P2P)
+    const walletConnectTransport = {
+      ...createTransport(TransportType.WALLETCONNECT),
+      doClientCleanup: jest.fn().mockResolvedValue(undefined)
+    }
+
+    ;(client as any).postMessageTransport = postMessageTransport
+    ;(client as any).p2pTransport = p2pTransport
+    ;(client as any).walletConnectTransport = walletConnectTransport
+
+    await expect(client.disconnect()).resolves.toBeUndefined()
+
+    expect(postMessageTransport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(p2pTransport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(postMessageTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(p2pTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.doClientCleanup).toHaveBeenCalledTimes(1)
+    expect((client as any).postMessageTransport).toBeUndefined()
+    expect((client as any).p2pTransport).toBeUndefined()
+    expect((client as any).walletConnectTransport).toBeUndefined()
   })
 
   it('disconnect uses one in-flight logout for concurrent calls', async () => {
@@ -1004,7 +1043,6 @@ describe('DAppClient — basic unit tests', () => {
     postMessageTransport.getPeers.mockResolvedValue([postMessagePeer])
     p2pTransport.getPeers.mockResolvedValue([p2pPeer])
     walletConnectTransport.getPeers.mockResolvedValue([walletConnectPeer])
-
     ;(client as any).postMessageTransport = postMessageTransport
     ;(client as any).p2pTransport = p2pTransport
     ;(client as any).walletConnectTransport = walletConnectTransport
@@ -1097,10 +1135,7 @@ describe('DAppClient — basic unit tests', () => {
 
     expect(postMessageTransport.disconnect).toHaveBeenCalledTimes(1)
     expect(p2pTransport.disconnect).toHaveBeenCalledTimes(1)
-    expect(mockLoggerWarn).toHaveBeenCalledWith(
-      'disconnectResolvedTransports',
-      expect.any(Error)
-    )
+    expect(mockLoggerWarn).toHaveBeenCalledWith('disconnectResolvedTransports', expect.any(Error))
   })
 
   it('disconnect sends disconnect messages to stored peers before tearing down transport state', async () => {
@@ -2053,7 +2088,6 @@ describe('DAppClient — basic unit tests', () => {
       [StorageKey.ACCOUNTS]: [storedAccount]
     })
     ;(storage as any).validateResults = [false, false]
-
     ;(window as any).beaconCreatedClientInstance = false
     const storedStateClient = new DAppClient({
       name: 'InvalidValidatedStateApp',
@@ -2082,7 +2116,6 @@ describe('DAppClient — basic unit tests', () => {
       [StorageKey.ACCOUNTS]: [createStoredAccount()]
     })
     ;(storage as any).validateResults = [false, false]
-
     ;(window as any).beaconCreatedClientInstance = false
     const storedStateClient = new DAppClient({
       name: 'DoubleInvalidStoredStateApp',
