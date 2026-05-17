@@ -847,6 +847,58 @@ describe('DAppClient — basic unit tests', () => {
     expect(emit).not.toHaveBeenCalledWith(BeaconEvent.ACTIVE_ACCOUNT_SET, undefined)
   })
 
+  it('recovers the active account when accounts storage catches up to an existing pointer', async () => {
+    const account = createStoredAccount()
+    const testClient = client as unknown as {
+      storage: {
+        set: (key: StorageKey, value: unknown) => Promise<void>
+        getPrefixedKey: (key: StorageKey) => string
+      }
+      setActiveAccount: (account?: unknown) => Promise<void>
+    }
+
+    await testClient.storage.set(StorageKey.ACTIVE_ACCOUNT, account.accountIdentifier)
+    await testClient.storage.set(StorageKey.ACCOUNTS, [account])
+    const setActiveAccount = jest.spyOn(testClient, 'setActiveAccount').mockResolvedValue(undefined)
+
+    await storageChangedCallback?.({
+      eventType: 'entryModified',
+      key: testClient.storage.getPrefixedKey(StorageKey.ACCOUNTS),
+      oldValue: '[]',
+      newValue: JSON.stringify([account])
+    })
+
+    expect(setActiveAccount).toHaveBeenCalledWith(account)
+    setActiveAccount.mockRestore()
+  })
+
+  it('does not re-set the active account when accounts storage changes but memory already matches', async () => {
+    const account = createStoredAccount()
+    const testClient = client as unknown as {
+      _activeAccount: ExposedPromise<unknown>
+      storage: {
+        set: (key: StorageKey, value: unknown) => Promise<void>
+        getPrefixedKey: (key: StorageKey) => string
+      }
+      setActiveAccount: (account?: unknown) => Promise<void>
+    }
+
+    testClient._activeAccount = ExposedPromise.resolve(account)
+    await testClient.storage.set(StorageKey.ACTIVE_ACCOUNT, account.accountIdentifier)
+    await testClient.storage.set(StorageKey.ACCOUNTS, [account])
+    const setActiveAccount = jest.spyOn(testClient, 'setActiveAccount').mockResolvedValue(undefined)
+
+    await storageChangedCallback?.({
+      eventType: 'entryModified',
+      key: testClient.storage.getPrefixedKey(StorageKey.ACCOUNTS),
+      oldValue: '[]',
+      newValue: JSON.stringify([account])
+    })
+
+    expect(setActiveAccount).not.toHaveBeenCalled()
+    setActiveAccount.mockRestore()
+  })
+
   it('disconnect rejects pending init and clears permission request state', async () => {
     const transport = {
       type: TransportType.P2P,

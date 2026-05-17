@@ -388,6 +388,11 @@ export class DAppClient extends Client {
 
           return
         }
+        if (event.key === this.storage.getPrefixedKey(StorageKey.ACCOUNTS)) {
+          await this.recoverActiveAccountFromAccountsChange()
+
+          return
+        }
         if (event.key === this.storage.getPrefixedKey(StorageKey.ENABLE_METRICS)) {
           this.enableMetrics = Boolean(await this.storage.get(StorageKey.ENABLE_METRICS))
 
@@ -1508,6 +1513,27 @@ export class DAppClient extends Client {
 
   private async isActiveAccountAlreadyCleared(): Promise<boolean> {
     return this._activeAccount.isResolved() && !(await this.getActiveAccount())
+  }
+
+  private async recoverActiveAccountFromAccountsChange(): Promise<void> {
+    const activeAccountIdentifier = await this.storage.get(StorageKey.ACTIVE_ACCOUNT)
+    if (!activeAccountIdentifier || activeAccountIdentifier === 'undefined') {
+      return
+    }
+
+    if (this._activeAccount.isResolved()) {
+      const activeAccount = await this.getActiveAccount()
+      if (activeAccount?.accountIdentifier === activeAccountIdentifier) {
+        return
+      }
+    }
+
+    const account = await this.getAccount(activeAccountIdentifier)
+    if (!account) {
+      return
+    }
+
+    await this.setActiveAccount(account)
   }
 
   /**
