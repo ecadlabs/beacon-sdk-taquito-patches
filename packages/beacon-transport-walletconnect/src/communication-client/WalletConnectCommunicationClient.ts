@@ -839,12 +839,26 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
     signClient.on('session_delete', (event) => {
       this.disconnectionEvents.add('session_delete')
-      this.disconnect(signClient, { type: 'session', topic: event.topic })
+      this.disconnect(signClient, { type: 'session', topic: event.topic }).catch(
+        (error: unknown) => {
+          logger.warn(
+            'session_delete handler',
+            error instanceof Error ? error.message : String(error)
+          )
+        }
+      )
     })
 
     signClient.on('session_expire', (event) => {
       this.disconnectionEvents.add('session_expire')
-      this.disconnect(signClient, { type: 'session', topic: event.topic })
+      this.disconnect(signClient, { type: 'session', topic: event.topic }).catch(
+        (error: unknown) => {
+          logger.warn(
+            'session_expire handler',
+            error instanceof Error ? error.message : String(error)
+          )
+        }
+      )
     })
     signClient.core.pairing.events.on('pairing_delete', (event) => {
       logger.debug('Pairing deleted', { topic: event.topic })
@@ -960,21 +974,21 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       return undefined
     }
 
-    try {
-      // todo close the matching session and not just the first one
-      if (!this.session.pairingTopic) {
-        await signClient.core.pairing.disconnect({
-          topic: signClient.core.pairing.getPairings()[0]?.topic
-        })
-      } else {
-        await signClient.core.pairing.disconnect({ topic: this.session.pairingTopic })
-      }
-    } catch (error: any) {
-      // If the pairing was already closed, `disconnect` will throw an error.
-      logger.warn(error.message)
+    const session = this.session
+    const pairingTopic = session.pairingTopic ?? signClient.core.pairing.getPairings()[0]?.topic
+
+    if (pairingTopic) {
+      // eslint-disable-next-line no-void
+      void this.withTimeout(
+        signClient.core.pairing.disconnect({ topic: pairingTopic }),
+        WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
+        'WalletConnect pairing disconnect on session close timed out.'
+      ).catch((error: unknown) => {
+        logger.warn(error instanceof Error ? error.message : String(error))
+      })
     }
 
-    return this.session
+    return session
   }
 
   public async getPairingRequestInfo(): Promise<ExtendedWalletConnectPairingRequest> {
