@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-transport-walletconnect",
-  "version": "4.8.3-ecad",
+  "version": "4.8.4-ecad-beta.1",
   "description": "WalletConnect transport for Beacon communication.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
@@ -31,9 +31,9 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-core": "4.8.3-ecad",
-    "@ecadlabs/beacon-types": "4.8.3-ecad",
-    "@ecadlabs/beacon-utils": "4.8.3-ecad",
+    "@ecadlabs/beacon-core": "4.8.4-ecad-beta.1",
+    "@ecadlabs/beacon-types": "4.8.4-ecad-beta.1",
+    "@ecadlabs/beacon-utils": "4.8.4-ecad-beta.1",
     "@walletconnect/sign-client": "2.18.0",
     "@walletconnect/types": "2.18.0",
     "@walletconnect/utils": "2.18.0"

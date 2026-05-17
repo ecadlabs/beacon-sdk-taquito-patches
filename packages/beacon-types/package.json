@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-types",
-  "version": "4.8.3-ecad",
+  "version": "4.8.4-ecad-beta.1",
   "description": "Shared types used across the Beacon SDK packages.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
