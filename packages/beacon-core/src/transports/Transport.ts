@@ -117,9 +117,14 @@ export abstract class Transport<
     } else {
       const knownPeers = await this.getPeers()
       // A broadcast request has to be sent everywhere.
-      const promises = knownPeers.map((peerEl) => this.client.sendMessage(message, peerEl))
-
-      return (await Promise.all(promises))[0]
+      const results = await Promise.allSettled(
+        knownPeers.map((peerEl) => this.client.sendMessage(message, peerEl))
+      )
+      results.forEach((result) => {
+        if (result.status === 'rejected') {
+          logger.warn('Transport.send broadcast', result.reason)
+        }
+      })
     }
   }
 
