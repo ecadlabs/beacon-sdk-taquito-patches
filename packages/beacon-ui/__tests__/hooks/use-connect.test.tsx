@@ -1,4 +1,4 @@
-import { renderHook, act, cleanup } from '@testing-library/react'
+import { renderHook, act, cleanup, waitFor } from '@testing-library/react'
 import useConnect from '../../src/ui/alert/hooks/useConnect'
 import { StorageKey, ExtensionMessageTarget, NetworkType } from '@ecadlabs/beacon-types'
 import { windowRef } from '@ecadlabs/beacon-core'
@@ -22,6 +22,17 @@ global.window.URL.createObjectURL = jest.fn()
 
 // Mock window.open properly
 const windowOpenMock = jest.fn()
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((_resolve, _reject) => {
+    resolve = _resolve
+    reject = _reject
+  })
+
+  return { promise, resolve, reject }
+}
 
 beforeEach(() => {
   window.open = windowOpenMock
@@ -416,7 +427,61 @@ describe('useConnect hook', () => {
     expect(result.current[1]).toBe(false)
   })
 
-  it('should handle wallet_connect branch with invalid wcPayload for a "kukai" wallet', async () => {
+  it('waits for WalletConnect payload before showing Kukai WalletConnect QR', async () => {
+    const webWallet = {
+      key: 'wallet-web-wc',
+      name: 'Kukai Wallet',
+      id: 'wallet-web-wc-id',
+      types: ['web', 'ios'],
+      supportedInteractionStandards: ['wallet_connect'],
+      links: {
+        [OSLink.WEB]: 'https://kukai.example.com',
+        [OSLink.IOS]: 'https://kukai-ios.example.com'
+      },
+      image: 'https://kukai.example.com/icon.png'
+    }
+    wallets.set('wallet-web-wc', webWallet)
+    const wcPayload = deferred<string>()
+
+    const { result } = renderHook(() =>
+      useConnect(
+        false,
+        wcPayload.promise,
+        Promise.resolve('p2p-payload'),
+        Promise.resolve('post-payload'),
+        wallets,
+        onCloseHandler
+      )
+    )
+
+    let clickPromise!: Promise<void>
+    await act(async () => {
+      clickPromise = result.current[7]('wallet-web-wc', {
+        title: 'wc web fallback test',
+        pairingPayload: {
+          networkType: NetworkType.GHOSTNET,
+          p2pSyncCode: Promise.resolve('test'),
+          postmessageSyncCode: Promise.resolve('test'),
+          walletConnectSyncCode: Promise.resolve('test')
+        }
+      })
+      await Promise.resolve()
+    })
+
+    expect(result.current[2]).toBeUndefined()
+    expect(result.current[1]).toBe(true)
+
+    await act(async () => {
+      wcPayload.resolve('wc:topic@2?symKey=abc&relay-protocol=irn')
+      await clickPromise
+    })
+
+    expect(result.current[2]).toBe('wc:topic@2?symKey=abc&relay-protocol=irn')
+    expect(result.current[3]).toBe('install')
+    expect(result.current[1]).toBe(false)
+  })
+
+  it('marks Kukai web wallet as errored when WalletConnect payload is invalid', async () => {
     const wcWalletInvalid = {
       key: 'wallet-wc-invalid',
       name: 'Kukai Wallet',
@@ -452,6 +517,7 @@ describe('useConnect hook', () => {
       })
     })
 
+    await waitFor(() => expect(result.current[3]).toBe('install'))
     expect(result.current[2]).toBe('error')
     expect(result.current[3]).toBe('install')
     expect(result.current[1]).toBe(false)
@@ -543,6 +609,7 @@ describe('useConnect hook', () => {
 
     expect(newTabMock.location.href).toBe('')
     expect(localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)).toBeNull()
+    expect(result.current[1]).toBe(false)
     expect(result.current[6]).toBe(false)
   })
 

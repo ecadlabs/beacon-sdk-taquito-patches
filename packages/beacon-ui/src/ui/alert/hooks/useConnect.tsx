@@ -12,7 +12,7 @@ const logger = new Logger('useConnect')
 
 const useConnect = (
   isMobile: boolean,
-  wcPayload: Promise<string>,
+  wcPayload: PromiseLike<string>,
   p2pPayload: Promise<string>,
   postPayload: Promise<string>,
   wallets: Map<string, MergedWallet>,
@@ -64,7 +64,8 @@ const useConnect = (
       selectedWallet &&
       selectedWallet.supportedInteractionStandards?.includes('wallet_connect')
     ) {
-      const isValid = hasWalletConnectSymKey(await wcPayload)
+      const payload = await wcPayload
+      const isValid = hasWalletConnectSymKey(payload)
       setIsWCWorking(isValid)
 
       if (!isValid && selectedWallet?.name.toLowerCase().includes('kukai')) {
@@ -78,7 +79,7 @@ const useConnect = (
         if (isMobile && selectedWallet.types.includes('ios') && selectedWallet.types.length === 1) {
           handleDeepLinking(selectedWallet)
         } else {
-          setQRCode(await wcPayload)
+          setQRCode(payload)
           setInstallState(selectedWallet)
         }
       }
@@ -118,7 +119,10 @@ const useConnect = (
       }
     } else {
       setInstallState(selectedWallet)
-      config.pairingPayload && setQRCode(await p2pPayload)
+      if (config.pairingPayload) {
+        const payload = await p2pPayload
+        setQRCode(payload)
+      }
       setIsLoading(false)
     }
   }
@@ -158,16 +162,20 @@ const useConnect = (
       wallet.supportedInteractionStandards?.includes('wallet_connect') &&
       !wallet.name.toLowerCase().includes('kukai')
     ) {
-      const isValid = hasWalletConnectSymKey(await wcPayload)
+      const payload = await wcPayload
+      const isValid = hasWalletConnectSymKey(payload)
       setIsWCWorking(isValid)
 
       if (!isValid) {
+        newTab?.close?.()
+        setIsLoading(false)
         return
       }
 
-      link = `${wallet.links[OSLink.WEB]}/wc?uri=${encodeURIComponent(await wcPayload)}`
+      link = `${wallet.links[OSLink.WEB]}/wc?uri=${encodeURIComponent(payload)}`
     } else {
-      link = getTzip10Link(wallet.links[OSLink.WEB], await p2pPayload)
+      const payload = await p2pPayload
+      link = getTzip10Link(wallet.links[OSLink.WEB], payload)
     }
 
     if (newTab) {

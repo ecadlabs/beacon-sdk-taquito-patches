@@ -238,7 +238,7 @@ export interface BeaconEventType {
   [BeaconEvent.PAIR_INIT]: {
     p2pPeerInfo: Promise<string>
     postmessagePeerInfo: Promise<string>
-    walletConnectPeerInfo: Promise<string>
+    walletConnectPeerInfo: PromiseLike<string>
     networkType: NetworkType
     abortedHandler?(): void
     disclaimerText?: string
@@ -376,6 +376,11 @@ const showInvalidAccountDeactivated = async (
   data?: InvalidAccountDeactivatedEvent
 ): Promise<void> => {
   logger.log('showInvalidAccountDeactivated', data?.reason ?? 'unknown')
+
+  if (data?.reason === 'missing_active_account') {
+    return
+  }
+
   await openAlert({
     title: 'Error',
     body: `Your session has expired. Please pair with your wallet again.`

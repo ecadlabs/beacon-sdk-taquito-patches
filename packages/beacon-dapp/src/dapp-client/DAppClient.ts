@@ -144,6 +144,72 @@ const logger = new Logger('DAppClient')
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
 const SESSION_UPDATE_REQUEST_ID = 'session_update'
 
+const createLazyPromise = <T>(factory: () => Promise<T>): PromiseLike<T> => {
+  let promise: Promise<T> | undefined
+
+  const getPromise = (): Promise<T> => {
+    if (!promise) {
+      promise = factory()
+    }
+
+    return promise
+  }
+
+  const lazyPromise = {
+    then<TResult1 = T, TResult2 = never>(
+      onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+      onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+    ): Promise<TResult1 | TResult2> {
+      return getPromise().then(onfulfilled, onrejected)
+    },
+    catch<TResult = never>(
+      onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null
+    ): Promise<T | TResult> {
+      return getPromise().catch(onrejected)
+    },
+    finally(onfinally?: (() => void) | null): Promise<T> {
+      return getPromise().finally(onfinally ?? undefined)
+    }
+  }
+
+  return lazyPromise
+}
+
+export interface DAppClientDisconnectOptions {
+  /**
+   * Send Beacon disconnect messages to stored wallet peers before tearing down the transport.
+   *
+   * Defaults to true because DAppClient.disconnect is the user-facing wallet logout path.
+   */
+  notifyPeers?: boolean
+}
+
+export interface DAppClientRemoveAllPeersOptions {
+  /**
+   * Continue removing local peer/account state even if notifying one peer fails.
+   */
+  ignoreDisconnectErrors?: boolean
+}
+
+type DAppInternalTransport =
+  | DappPostMessageTransport
+  | DappP2PTransport
+  | DappWalletConnectTransport
+
+interface TransportWithClientCleanup {
+  doClientCleanup: () => Promise<void>
+}
+
+interface PeersForTransport {
+  transport: DAppInternalTransport
+  peers: ExtendedPeerInfo[]
+}
+
+interface PeerNotification {
+  transport: DAppInternalTransport
+  peer: ExtendedPeerInfo
+}
+
 /**
  * @publicapi
  *
@@ -262,6 +328,9 @@ export class DAppClient extends Client {
   // Keep this guard scoped to those startup paths.
   private hasEmittedInvalidAccountDeactivated: boolean = false
 
+  private _disconnectPromise?: Promise<void>
+  private _disconnectNotifyPeers: boolean = false
+
   private readonly multiTabChannel = new MultiTabChannel(
     'beacon-sdk-channel',
     this.onBCMessageHandler.bind(this),
@@ -299,8 +368,12 @@ export class DAppClient extends Client {
 
     // Subscribe to storage changes and update the active account if it changes on other tabs
     this.storage.subscribeToStorageChanged(async (event) => {
+      if (event.oldValue === event.newValue) {
+        return
+      }
+
       if (event.eventType === 'storageCleared') {
-        this.setActiveAccount(undefined)
+        await this.setActiveAccount(undefined)
 
         return
       }
@@ -308,10 +381,10 @@ export class DAppClient extends Client {
         if (event.key === this.storage.getPrefixedKey(StorageKey.ACTIVE_ACCOUNT)) {
           const accountIdentifier = event.newValue
           if (!accountIdentifier || accountIdentifier === 'undefined') {
-            this.setActiveAccount(undefined)
+            await this.setActiveAccount(undefined)
           } else {
             const account = await this.getAccount(accountIdentifier)
-            this.setActiveAccount(account)
+            await this.setActiveAccount(account)
           }
 
           return
@@ -334,8 +407,17 @@ export class DAppClient extends Client {
     this.activeAccountLoaded = this.storage
       .get(StorageKey.ACTIVE_ACCOUNT)
       .then(async (activeAccountIdentifier) => {
+        if (activeAccountIdentifier === 'undefined') {
+          await this.deactivateInvalidAccountState('missing_active_account')
+
+          return undefined
+        }
+
         if (activeAccountIdentifier) {
-          const account = await this.accountManager.getAccount(activeAccountIdentifier)
+          const accounts = await this.accountManager.getAccounts()
+          const account = accounts.find(
+            (storedAccount) => storedAccount.accountIdentifier === activeAccountIdentifier
+          )
 
           if (!account) {
             await this.deactivateInvalidAccountState('missing_active_account')
@@ -853,6 +935,12 @@ export class DAppClient extends Client {
     }
   }
   private async channelClosedHandler(type: TransportType) {
+    if (!this._transport.isResolved()) {
+      await this.events.emit(BeaconEvent.CHANNEL_CLOSED)
+
+      return
+    }
+
     const transport = await this.transport
 
     if (transport.type !== type) {
@@ -860,8 +948,7 @@ export class DAppClient extends Client {
     }
 
     await this.events.emit(BeaconEvent.CHANNEL_CLOSED)
-    this.setActiveAccount(undefined)
-    await this.disconnect()
+    await this.disconnect({ notifyPeers: false })
   }
 
   /**
@@ -1142,9 +1229,16 @@ export class DAppClient extends Client {
             resolve(await serializer.serialize(await p2pTransport.getPairingRequestInfo()))
           })
 
-          const walletConnectPeerInfo = new Promise<string>(async (resolve) => {
-            resolve((await walletConnectTransport.getPairingRequestInfo()).uri)
-          })
+          const walletConnectPeerInfo = createLazyPromise(() =>
+            walletConnectTransport
+              .getPairingRequestInfo()
+              .then((pairingRequestInfo) => pairingRequestInfo.uri)
+              .catch((error) => {
+                logger.warn('init', 'walletconnect pairing request failed', error)
+
+                return ''
+              })
+          )
 
           const postmessagePeerInfo = new Promise<string>(async (resolve) => {
             resolve(await serializer.serialize(await postMessageTransport.getPairingRequestInfo()))
@@ -1221,8 +1315,18 @@ export class DAppClient extends Client {
 
     this.hasEmittedInvalidAccountDeactivated = true
     logger.log('deactivateInvalidAccountState', reason)
-    await this.resetInvalidState(false)
+    if (reason === 'missing_active_account') {
+      await this.repairMissingActiveAccount()
+    } else {
+      await this.resetInvalidState(false)
+    }
     await this.events.emit(BeaconEvent.INVALID_ACCOUNT_DEACTIVATED, { reason })
+  }
+
+  private async repairMissingActiveAccount(): Promise<void> {
+    this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(undefined)
+    await this.storage.delete(StorageKey.ACTIVE_ACCOUNT)
+    await this.setActivePeer(undefined)
   }
 
   private async isInvalidState(account: AccountInfo) {
@@ -1258,7 +1362,9 @@ export class DAppClient extends Client {
    * @param account The account that will be set as the active account
    */
   public async setActiveAccount(account?: AccountInfo): Promise<void> {
-    if (!this.isGetActiveAccountHandled) {
+    const activeAccountAlreadyCleared = !account && (await this.isActiveAccountAlreadyCleared())
+
+    if (!activeAccountAlreadyCleared && !this.isGetActiveAccountHandled) {
       console.warn(
         `An active account has been received, but no active subscription was found for BeaconEvent.ACTIVE_ACCOUNT_SET.
         For more information, visit: https://docs.walletbeacon.io/guides/migration-guide`
@@ -1301,7 +1407,10 @@ export class DAppClient extends Client {
       }
     }
 
-    if (this._activeAccount.isSettled()) {
+    if (activeAccountAlreadyCleared) {
+      // Keep peer and transport cleanup below idempotent, but do not write storage or emit
+      // another ACTIVE_ACCOUNT_SET(undefined) for an already-empty account.
+    } else if (this._activeAccount.isSettled()) {
       // If the promise has already been resolved we need to create a new one.
       this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(account)
     } else {
@@ -1345,14 +1454,21 @@ export class DAppClient extends Client {
       await this.setTransport(undefined)
     }
 
-    await this.storage.set(
-      StorageKey.ACTIVE_ACCOUNT,
-      account ? account.accountIdentifier : undefined
-    )
+    if (account) {
+      await this.storage.set(StorageKey.ACTIVE_ACCOUNT, account.accountIdentifier)
+    } else if (!activeAccountAlreadyCleared) {
+      await this.storage.delete(StorageKey.ACTIVE_ACCOUNT)
+    }
 
-    await this.events.emit(BeaconEvent.ACTIVE_ACCOUNT_SET, account)
+    if (!activeAccountAlreadyCleared) {
+      await this.events.emit(BeaconEvent.ACTIVE_ACCOUNT_SET, account)
+    }
 
     return
+  }
+
+  private async isActiveAccountAlreadyCleared(): Promise<boolean> {
+    return this._activeAccount.isResolved() && !(await this.getActiveAccount())
   }
 
   /**
@@ -1538,18 +1654,25 @@ export class DAppClient extends Client {
   /**
    * Remove all peers and all accounts that have been connected through those peers
    */
-  public async removeAllPeers(sendDisconnectToPeers: boolean = false): Promise<void> {
-    const transport = await this.transport
+  public async removeAllPeers(
+    sendDisconnectToPeers: boolean = false,
+    options: DAppClientRemoveAllPeersOptions = {}
+  ): Promise<void> {
+    const transport = (await this.transport) as DAppInternalTransport
 
     const peers: ExtendedPeerInfo[] = await transport.getPeers()
-    const removePeerResult = transport.removeAllPeers()
+    const removePeerResult = await transport.removeAllPeers()
 
     await this.removeAccountsForPeers(peers)
 
     if (sendDisconnectToPeers) {
       const disconnectPromises = peers.map((peer) => this.sendDisconnectToPeer(peer, transport))
 
-      await Promise.all(disconnectPromises)
+      if (options.ignoreDisconnectErrors) {
+        await Promise.allSettled(disconnectPromises)
+      } else {
+        await Promise.all(disconnectPromises)
+      }
     }
 
     return removePeerResult
@@ -3092,28 +3215,164 @@ export class DAppClient extends Client {
     return exposed.promise
   }
 
-  public async disconnect() {
-    if (!this._transport.isResolved()) {
-      throw new Error('No transport available.')
+  /**
+   * Disconnects all resolved transports (postMessage, P2P, WalletConnect), removes their peers,
+   * and clears active account state. After calling, the DAppClient remains usable for a new
+   * requestPermissions().
+   */
+  public async disconnect(options: DAppClientDisconnectOptions = {}) {
+    const { notifyPeers = true } = options
+
+    if (!this._disconnectPromise) {
+      this._disconnectNotifyPeers = false
     }
 
-    const transport = await this.transport
+    this._disconnectNotifyPeers = this._disconnectNotifyPeers || notifyPeers
+    if (this._disconnectPromise) {
+      return this._disconnectPromise
+    }
+
+    this._disconnectPromise = (async () => this.disconnectInternal())().finally(() => {
+      this._disconnectPromise = undefined
+      this._disconnectNotifyPeers = false
+    })
+
+    return this._disconnectPromise
+  }
+
+  private async disconnectInternal(): Promise<void> {
+    this.abortPendingInit()
+
+    if (!this._transport.isResolved()) {
+      await this.clearActiveAccount()
+      this.abortOpenRequests()
+
+      return
+    }
+
+    const transport = (await this.transport) as DAppInternalTransport
 
     if (transport.connectionStatus === TransportStatus.NOT_CONNECTED) {
-      throw new Error('Not connected.')
+      await this.clearActiveAccount()
+      this.abortOpenRequests()
+
+      return
     }
 
     await this.createStateSnapshot()
     this.sendMetrics('performance-metrics/save', await this.buildPayload('disconnect', 'start'))
-    await this.clearActiveAccount()
     this.abortOpenRequests()
-    if (!(transport instanceof WalletConnectTransport)) {
-      await transport.disconnect()
-    }
+    const transports = this.getResolvedTransports(transport)
+    await this.removeAllPeersFromTransports(transports)
+    await this.clearActiveAccount()
+    await this.disconnectResolvedTransports(transports)
     this.postMessageTransport = undefined
     this.p2pTransport = undefined
     this.walletConnectTransport = undefined
     this.sendMetrics('performance-metrics/save', await this.buildPayload('disconnect', 'success'))
+  }
+
+  private getResolvedTransports(selectedTransport: DAppInternalTransport): DAppInternalTransport[] {
+    const transports: DAppInternalTransport[] = []
+
+    const addTransport = (transport?: DAppInternalTransport): void => {
+      if (transport && !transports.includes(transport)) {
+        transports.push(transport)
+      }
+    }
+
+    addTransport(this.postMessageTransport)
+    addTransport(this.p2pTransport)
+    addTransport(this.walletConnectTransport)
+    addTransport(selectedTransport)
+
+    return transports
+  }
+
+  private async removeAllPeersFromTransports(transports: DAppInternalTransport[]): Promise<void> {
+    const peersByTransport: PeersForTransport[] = await Promise.all(
+      transports.map(async (transport): Promise<PeersForTransport> => {
+        const transportPeers: ExtendedPeerInfo[] = await transport.getPeers()
+
+        return {
+          transport,
+          peers: transportPeers
+        }
+      })
+    )
+
+    await Promise.all(peersByTransport.map(({ transport }) => transport.removeAllPeers()))
+
+    const peersToRemove = peersByTransport.flatMap(({ peers: transportPeers }) => transportPeers)
+    await this.removeAccountsForPeers(peersToRemove)
+
+    // If cleanup already removed peers, a late notify upgrade has nothing left to notify.
+    const sendDisconnectToPeers = this._disconnectNotifyPeers
+
+    if (!sendDisconnectToPeers) {
+      return
+    }
+
+    await Promise.allSettled(
+      this.getUniquePeerNotifications(peersByTransport).map(({ transport, peer }) =>
+        this.sendDisconnectToPeer(peer, transport)
+      )
+    )
+  }
+
+  private getUniquePeerNotifications(peersByTransport: PeersForTransport[]): PeerNotification[] {
+    const notifications: PeerNotification[] = []
+    const seen = new Set<string>()
+
+    peersByTransport.forEach(({ transport, peers: transportPeers }) => {
+      transportPeers.forEach((peer) => {
+        const key = this.getPeerNotificationKey(transport, peer)
+        if (seen.has(key)) {
+          return
+        }
+
+        seen.add(key)
+        notifications.push({ transport, peer })
+      })
+    })
+
+    return notifications
+  }
+
+  private getPeerNotificationKey(transport: DAppInternalTransport, peer: ExtendedPeerInfo): string {
+    return [transport.type, peer.publicKey, peer.senderId, peer.id].filter(Boolean).join(':')
+  }
+
+  private async disconnectResolvedTransports(transports: DAppInternalTransport[]): Promise<void> {
+    const results = await Promise.allSettled(
+      transports.map(async (transport) => {
+        if (this.isTransportConnected(transport)) {
+          await transport.disconnect()
+        }
+
+        if (this.hasClientCleanup(transport)) {
+          await transport.doClientCleanup()
+        }
+      })
+    )
+
+    results.forEach((result) => {
+      if (result.status === 'rejected') {
+        logger.warn('disconnectResolvedTransports', result.reason)
+      }
+    })
+  }
+
+  private hasClientCleanup(
+    transport: DAppInternalTransport
+  ): transport is DAppInternalTransport & TransportWithClientCleanup {
+    const transportWithClientCleanup = transport as Partial<TransportWithClientCleanup>
+
+    return typeof transportWithClientCleanup.doClientCleanup === 'function'
+  }
+
+  private isTransportConnected(transport: DAppInternalTransport): boolean {
+    return transport.connectionStatus !== TransportStatus.NOT_CONNECTED
   }
 
   /**

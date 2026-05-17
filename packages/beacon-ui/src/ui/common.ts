@@ -52,14 +52,14 @@ export interface AlertProps {
 export interface PairingPayload {
   p2pSyncCode: Promise<string>
   postmessageSyncCode: Promise<string>
-  walletConnectSyncCode: Promise<string>
+  walletConnectSyncCode: PromiseLike<string>
   networkType: NetworkType
 }
 
 export interface PairOtherProps {
   walletList: MergedWallet[]
   p2pPayload: Promise<string>
-  wcPayload: Promise<string>
+  wcPayload: PromiseLike<string>
   onClickLearnMore: () => void
 }
 

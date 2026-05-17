@@ -5,7 +5,11 @@ export * from '@ecadlabs/beacon-types'
 export * from '@ecadlabs/beacon-utils'
 export * from '@ecadlabs/beacon-ui'
 
-import { DAppClient } from './dapp-client/DAppClient'
+import {
+  DAppClient,
+  type DAppClientDisconnectOptions,
+  type DAppClientRemoveAllPeersOptions
+} from './dapp-client/DAppClient'
 import { DAppClientOptions } from './dapp-client/DAppClientOptions'
 import {
   BeaconEvent,
@@ -20,6 +24,7 @@ import { TzktBlockExplorer } from './utils/tzkt-blockexplorer'
 import { getDAppClientInstance } from './utils/get-instance'
 
 export { DAppClient, DAppClientOptions, getDAppClientInstance }
+export type { DAppClientDisconnectOptions, DAppClientRemoveAllPeersOptions }
 
 // Events
 export { BeaconEvent, BeaconEventHandler, defaultEventCallbacks }
