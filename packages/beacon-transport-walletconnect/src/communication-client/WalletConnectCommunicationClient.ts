@@ -216,8 +216,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     this.signClient?.removeAllListeners?.('session_expire')
     this.signClient?.removeAllListeners?.('session_extend')
     this.signClient?.removeAllListeners?.('proposal_expire')
-    this.signClient?.core.pairing.events.removeAllListeners('pairing_delete')
-    this.signClient?.core.pairing.events.removeAllListeners('pairing_expire')
+    this.signClient?.core?.pairing?.events?.removeAllListeners?.('pairing_delete')
+    this.signClient?.core?.pairing?.events?.removeAllListeners?.('pairing_expire')
   }
 
   private onStorageMessageHandler(type: string) {
