@@ -66,17 +66,50 @@ import {
   getKeypairFromSeed
 } from '@ecadlabs/beacon-utils'
 import { MatrixClient } from '../../src/matrix-client/MatrixClient'
-import { StorageKey } from '@ecadlabs/beacon-types'
+import { P2PPairingRequest, StorageKey } from '@ecadlabs/beacon-types'
 import { P2PCommunicationClient } from '../../src/communication-client/P2PCommunicationClient'
 
 describe('P2PCommunicationClient', () => {
   let client: P2PCommunicationClient
+  let fakeMatrixClient: {
+    subscribe: jest.Mock
+    unsubscribe: jest.Mock
+    unsubscribeAll: jest.Mock
+    joinRooms: jest.Mock
+    sendTextMessage: jest.Mock
+    start: jest.Mock
+    stop: jest.Mock
+    getRoomById: jest.Mock
+    createTrustedPrivateRoom: jest.Mock
+    joinedRooms: Promise<unknown[]>
+  }
   const mockStorage = {
     get: jest.fn(),
     set: jest.fn(),
     delete: jest.fn()
   }
   const fakeKeyPair = { publicKey: 'pub', secretKey: 'sec' }
+  const createDeferred = <T>() => {
+    let resolve!: (value: T) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+
+    return { promise, resolve, reject }
+  }
+  const waitFor = async (predicate: () => boolean): Promise<void> => {
+    for (let i = 0; i < 10; i++) {
+      if (predicate()) {
+        return
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    throw new Error('Timed out waiting for condition')
+  }
 
   beforeEach(() => {
     jest.clearAllMocks()
@@ -92,7 +125,7 @@ describe('P2PCommunicationClient', () => {
     ;(getKeypairFromSeed as jest.Mock).mockResolvedValue(fakeKeyPair)
 
     // MatrixClient.create stub
-    const fakeMatrixClient = {
+    fakeMatrixClient = {
       subscribe: jest.fn(),
       unsubscribe: jest.fn(),
       unsubscribeAll: jest.fn(),
@@ -113,6 +146,7 @@ describe('P2PCommunicationClient', () => {
     jest
       .spyOn(client as any, 'getRelayServer')
       .mockResolvedValue({ server: 'relay.server', timestamp: 1234 })
+    ;(client as any).client.resolve(fakeMatrixClient)
   })
 
   describe('getPairingRequestInfo', () => {
@@ -179,14 +213,86 @@ describe('P2PCommunicationClient', () => {
     })
   })
 
+  describe('sendMessage', () => {
+    const peer = new P2PPairingRequest('peer-id', 'Kukai', 'peer-pub', '3', 'relay.server')
+    let deleteRoomIdFromRoomsSpy: jest.SpyInstance<Promise<void>, [string]>
+
+    beforeEach(() => {
+      jest.spyOn(client as any, 'createCryptoBoxClient').mockResolvedValue({ send: 'send-key' })
+      jest.spyOn(client as any, 'getRelevantRoom').mockResolvedValue('!room:id')
+      deleteRoomIdFromRoomsSpy = jest
+        .spyOn(client, 'deleteRoomIdFromRooms')
+        .mockResolvedValue(undefined)
+    })
+
+    it('does not resolve until the Matrix text message send resolves', async () => {
+      const matrixSend = createDeferred<void>()
+      fakeMatrixClient.sendTextMessage.mockReturnValue(matrixSend.promise)
+
+      const send = client.sendMessage('disconnect-payload', peer).then(() => 'resolved')
+      await waitFor(() => fakeMatrixClient.sendTextMessage.mock.calls.length === 1)
+
+      await expect(Promise.race([send, Promise.resolve('pending')])).resolves.toBe('pending')
+      expect(fakeMatrixClient.sendTextMessage).toHaveBeenCalledWith('!room:id', 'encrypted-payload')
+
+      matrixSend.resolve(undefined)
+
+      await expect(send).resolves.toBe('resolved')
+    })
+
+    it('awaits the M_FORBIDDEN retry send before resolving', async () => {
+      const retrySend = createDeferred<void>()
+      ;(client as any).getRelevantRoom
+        .mockResolvedValueOnce('!old-room:id')
+        .mockResolvedValueOnce('!new-room:id')
+      fakeMatrixClient.sendTextMessage
+        .mockRejectedValueOnce({ errcode: 'M_FORBIDDEN' })
+        .mockReturnValueOnce(retrySend.promise)
+
+      const send = client.sendMessage('disconnect-payload', peer).then(() => 'resolved')
+      await waitFor(() => fakeMatrixClient.sendTextMessage.mock.calls.length === 2)
+
+      await expect(Promise.race([send, Promise.resolve('pending')])).resolves.toBe('pending')
+      expect(deleteRoomIdFromRoomsSpy).toHaveBeenCalledWith('!old-room:id')
+      expect(fakeMatrixClient.sendTextMessage).toHaveBeenNthCalledWith(
+        2,
+        '!new-room:id',
+        'encrypted-payload'
+      )
+
+      retrySend.resolve(undefined)
+
+      await expect(send).resolves.toBe('resolved')
+      expect(fakeMatrixClient.sendTextMessage).toHaveBeenCalledTimes(2)
+      expect(deleteRoomIdFromRoomsSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('rejects when the Matrix text message send fails with a non-M_FORBIDDEN error', async () => {
+      const sendError = new Error('send failed')
+      fakeMatrixClient.sendTextMessage.mockRejectedValueOnce(sendError)
+
+      await expect(client.sendMessage('disconnect-payload', peer)).rejects.toBe(sendError)
+      expect(fakeMatrixClient.sendTextMessage).toHaveBeenCalledTimes(1)
+      expect(deleteRoomIdFromRoomsSpy).not.toHaveBeenCalled()
+    })
+
+    it('rejects when the M_FORBIDDEN retry send fails', async () => {
+      const retryError = new Error('retry failed')
+      ;(client as any).getRelevantRoom
+        .mockResolvedValueOnce('!old-room:id')
+        .mockResolvedValueOnce('!new-room:id')
+      fakeMatrixClient.sendTextMessage
+        .mockRejectedValueOnce({ errcode: 'M_FORBIDDEN' })
+        .mockRejectedValueOnce(retryError)
+
+      await expect(client.sendMessage('disconnect-payload', peer)).rejects.toBe(retryError)
+      expect(fakeMatrixClient.sendTextMessage).toHaveBeenCalledTimes(2)
+    })
+  })
+
   describe('getRelayServer (dead node recovery)', () => {
     let freshClient: P2PCommunicationClient
     type RelayServerRecord = { server: string; timestamp: number; localTimestamp: number }
-    type Deferred<T> = {
-      promise: Promise<T>
-      resolve: (value: T) => void
-      reject: (reason?: unknown) => void
-    }
 
     beforeEach(() => {
       freshClient = new P2PCommunicationClient('MyApp', fakeKeyPair as any, 2, mockStorage as any)
@@ -207,17 +313,6 @@ describe('P2PCommunicationClient', () => {
         'beacon-node-8.octez.io'
       ])
     })
-
-    const createDeferred = <T>(): Deferred<T> => {
-      let resolve!: (value: T) => void
-      let reject!: (reason?: unknown) => void
-      const promise = new Promise<T>((res, rej) => {
-        resolve = res
-        reject = rej
-      })
-
-      return { promise, resolve, reject }
-    }
 
     const setCachedRelay = (relay: RelayServerRecord): void => {
       ;(freshClient as any).relayServer = ExposedPromise.resolve(relay)
