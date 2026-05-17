@@ -1,5 +1,6 @@
 import { Storage, StorageKey, StorageKeyReturnType } from '@ecadlabs/beacon-types'
 import { Logger } from '../utils/Logger'
+import { isStorageKey, normalizeParsedStoredValue } from './storage-normalization'
 
 const logger = new Logger('IndexedDBStorage')
 
@@ -128,7 +129,7 @@ export class IndexedDBStorage extends Storage {
   public get<K extends StorageKey>(key: K, storeName?: string): Promise<StorageKeyReturnType[K]>
   public get(key: string, storeName?: string): Promise<string | undefined>
   public get(key: StorageKey | string, storeName: string = this.storeNames[0]): Promise<any> {
-    return this.transaction(
+    const storedValue = this.transaction(
       'readonly',
       storeName,
       (store) =>
@@ -138,6 +139,10 @@ export class IndexedDBStorage extends Storage {
           getRequest.onerror = () => reject(getRequest.error)
         })
     )
+
+    return isStorageKey(key)
+      ? storedValue.then((value) => normalizeParsedStoredValue(key, value))
+      : storedValue
   }
 
   /**
@@ -154,6 +159,10 @@ export class IndexedDBStorage extends Storage {
     value: any,
     storeName: string = this.storeNames[0]
   ): Promise<void> {
+    if (value === undefined) {
+      return this.delete(key, storeName)
+    }
+
     return this.transaction(
       'readwrite',
       storeName,

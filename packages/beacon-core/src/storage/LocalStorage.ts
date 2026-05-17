@@ -1,4 +1,5 @@
-import { Storage, StorageKey, StorageKeyReturnType, defaultValues } from '@ecadlabs/beacon-types'
+import { Storage, StorageKey, StorageKeyReturnType } from '@ecadlabs/beacon-types'
+import { normalizeStoredValue } from './storage-normalization'
 
 /**
  * @internalapi
@@ -15,22 +16,15 @@ export class LocalStorage extends Storage {
 
   public async get<K extends StorageKey>(key: K): Promise<StorageKeyReturnType[K]> {
     const value = localStorage.getItem(this.getPrefixedKey(key))
-    if (!value) {
-      if (typeof defaultValues[key] === 'object') {
-        return JSON.parse(JSON.stringify(defaultValues[key]))
-      } else {
-        return defaultValues[key]
-      }
-    } else {
-      try {
-        return JSON.parse(value)
-      } catch (jsonParseError) {
-        return value as StorageKeyReturnType[K] // TODO: Validate storage
-      }
-    }
+
+    return normalizeStoredValue(key, value)
   }
 
   public async set<K extends StorageKey>(key: K, value: StorageKeyReturnType[K]): Promise<void> {
+    if (value === undefined) {
+      return this.delete(key)
+    }
+
     if (typeof value === 'string') {
       return localStorage.setItem(this.getPrefixedKey(key), value)
     } else {
