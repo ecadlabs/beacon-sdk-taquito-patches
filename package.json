@@ -1,7 +1,7 @@
 {
   "name": "beacon-sdk-taquito-patches-workspace",
   "private": true,
-  "version": "4.8.3-ecad",
+  "version": "4.8.4-ecad-beta.1",
   "description": "Workspace for the ECAD-maintained Beacon SDK packages.",
   "workspaces": [
     "packages/*"
