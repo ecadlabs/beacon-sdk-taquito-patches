@@ -12,8 +12,19 @@ import {
 } from '@ecadlabs/beacon-types'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { LocalStorage } from '@ecadlabs/beacon-core'
+import { WalletConnectTransport } from '@ecadlabs/beacon-transport-walletconnect'
 import { BeaconEvent } from '../../src/events'
 import { getDAppClientInstance } from '../../src/utils/get-instance'
+
+const mockLoggerWarn = jest.fn()
+let storageChangedCallback:
+  | ((event: {
+      eventType: 'storageCleared' | 'entryModified'
+      key: string | null
+      oldValue: string | null
+      newValue: string | null
+    }) => Promise<void>)
+  | undefined
 
 //
 // 1) Mock out all the heavy @ecadlabs/beacon-core and @ecadlabs/beacon-ui dependencies,
@@ -59,8 +70,8 @@ jest.mock('@ecadlabs/beacon-core', () => {
       async delete(key: string) {
         this.store.delete(key)
       }
-      subscribeToStorageChanged(_cb: any) {
-        /* no op */
+      subscribeToStorageChanged(cb: typeof storageChangedCallback) {
+        storageChangedCallback = cb
       }
       getPrefixedKey(key: string) {
         return key
@@ -114,6 +125,9 @@ jest.mock('@ecadlabs/beacon-core', () => {
       constructor(_name: string) {}
       error() {}
       log() {}
+      warn(...args: unknown[]) {
+        mockLoggerWarn(...args)
+      }
       time() {}
     },
     ClientEvents: {
@@ -160,6 +174,8 @@ describe('DAppClient — basic unit tests', () => {
 
   beforeEach(() => {
     ;(window as any).beaconCreatedClientInstance = false
+    mockLoggerWarn.mockClear()
+    storageChangedCallback = undefined
     client = new DAppClient({
       name: 'TestApp',
       storage: new LocalStorage(),
@@ -572,6 +588,7 @@ describe('DAppClient — basic unit tests', () => {
     const createTransport = (type: TransportType) => ({
       type,
       disconnect: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
       removeListener: jest.fn().mockResolvedValue(undefined),
       addListener: jest.fn().mockResolvedValue(undefined)
     })
@@ -606,16 +623,21 @@ describe('DAppClient — basic unit tests', () => {
     ;(client as any)._initSubstratePairing = false
     ;(client as any)._requestPermissionsPromise = initPromise
     ;(client as any)._requestPermissionsKey = 'sign'
+    const removeAllPeers = jest.spyOn(client, 'removeAllPeers')
 
     await client.destroy()
     await initRejection
 
+    expect(removeAllPeers).not.toHaveBeenCalled()
     expect(postMessageTransport.removeListener).toHaveBeenCalledTimes(1)
     expect(p2pTransport.removeListener).toHaveBeenCalledTimes(1)
     expect(walletConnectTransport.removeListener).toHaveBeenCalledTimes(1)
     expect(postMessageTransport.disconnect).toHaveBeenCalledTimes(1)
     expect(p2pTransport.disconnect).toHaveBeenCalledTimes(1)
     expect(walletConnectTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(postMessageTransport.send).not.toHaveBeenCalled()
+    expect(p2pTransport.send).not.toHaveBeenCalled()
+    expect(walletConnectTransport.send).not.toHaveBeenCalled()
     expect(walletConnectTransport.doClientCleanup).toHaveBeenCalledTimes(1)
     expect(closeMultiTabChannel).toHaveBeenCalledTimes(1)
     expect((client as any).postMessageTransport).toBeUndefined()
@@ -638,6 +660,57 @@ describe('DAppClient — basic unit tests', () => {
     )
   })
 
+  it('does not create a WalletConnect pairing request before the WC payload is awaited', async () => {
+    const pairInitHandler = jest.fn()
+    const createBaseTransport = (type: TransportType) => ({
+      type,
+      connectionStatus: TransportStatus.CONNECTED,
+      connect: jest.fn().mockResolvedValue(undefined),
+      listenForNewPeer: jest.fn().mockResolvedValue(undefined),
+      stopListeningForNewPeers: jest.fn().mockResolvedValue(undefined),
+      getPairingRequestInfo: jest.fn().mockResolvedValue({}),
+      getPeers: jest.fn().mockResolvedValue([]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    })
+    const postMessageTransport = createBaseTransport(TransportType.POST_MESSAGE)
+    const p2pTransport = createBaseTransport(TransportType.P2P)
+    const walletConnectTransport = {
+      ...createBaseTransport(TransportType.WALLETCONNECT),
+      getPairingRequestInfo: jest.fn().mockResolvedValue({ uri: 'wc:test-topic@2?symKey=test' })
+    }
+    const initInternalTransports = jest
+      .spyOn(client as any, 'initInternalTransports')
+      .mockImplementation(async function (this: any) {
+        this.postMessageTransport = postMessageTransport
+        this.p2pTransport = p2pTransport
+        this.walletConnectTransport = walletConnectTransport
+      })
+
+    client.subscribeToEvent(BeaconEvent.PAIR_INIT, pairInitHandler)
+    const initPromise = (client as any).init().catch(() => undefined)
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(pairInitHandler).toHaveBeenCalledTimes(1)
+      expect(walletConnectTransport.getPairingRequestInfo).not.toHaveBeenCalled()
+
+      const pairInitPayload = pairInitHandler.mock.calls[0][0]
+      await expect(pairInitPayload.walletConnectPeerInfo).resolves.toBe(
+        'wc:test-topic@2?symKey=test'
+      )
+      expect(walletConnectTransport.getPairingRequestInfo).toHaveBeenCalledTimes(1)
+    } finally {
+      ;(client as any)._initReject?.({ type: BeaconMessageType.Error })
+      await initPromise
+      initInternalTransports.mockRestore()
+    }
+  })
+
   it('clears the in-memory active account even when storage and transport state are already gone', async () => {
     const staleAccount = createStoredAccount()
 
@@ -654,11 +727,56 @@ describe('DAppClient — basic unit tests', () => {
     await expect((client as any).storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
   })
 
+  it('emits channel close events before transport has resolved', async () => {
+    const channelClosedHandler = jest.fn()
+
+    client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+
+    const result = await Promise.race([
+      (client as any).channelClosedHandler(TransportType.P2P).then(() => 'resolved'),
+      new Promise((resolve) => setTimeout(() => resolve('pending'), 0))
+    ])
+
+    expect(result).toBe('resolved')
+    expect(channelClosedHandler).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not notify wallet peers when cleaning up after a transport channel close', async () => {
+    const staleAccount = createStoredAccount()
+    const peer = createV480P2PPeer()
+    const channelClosedHandler = jest.fn()
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([peer]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+
+    client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [staleAccount])
+    await (client as any).setTransport(transport)
+
+    await (client as any).channelClosedHandler(TransportType.P2P)
+
+    expect(channelClosedHandler).toHaveBeenCalledTimes(1)
+    expect(transport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(transport.send).not.toHaveBeenCalled()
+    await expect(client.getActiveAccount()).resolves.toBeUndefined()
+  })
+
   it('disconnect clears pending in-memory requests for non-WalletConnect transports', async () => {
     const staleAccount = createStoredAccount()
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
       disconnect: jest.fn().mockResolvedValue(undefined),
       removeListener: jest.fn().mockResolvedValue(undefined),
       addListener: jest.fn().mockResolvedValue(undefined)
@@ -667,6 +785,7 @@ describe('DAppClient — basic unit tests', () => {
     const pendingRejection = pendingRequest.promise.catch((error) => error)
 
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
     await (client as any).setTransport(transport)
     ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
 
@@ -679,6 +798,569 @@ describe('DAppClient — basic unit tests', () => {
     })
     await expect(client.getActiveAccount()).resolves.toBeUndefined()
     expect(transport.disconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not emit or rewrite storage when clearing an already-empty active account', async () => {
+    await expect(client.getActiveAccount()).resolves.toBeUndefined()
+
+    const testClient = client as unknown as {
+      storage: { delete: (key: StorageKey) => Promise<void> }
+      events: { emit: (event: BeaconEvent, payload?: unknown) => Promise<void> }
+    }
+    const storageDelete = jest.spyOn(testClient.storage, 'delete')
+    const emit = jest.spyOn(testClient.events, 'emit')
+
+    await client.clearActiveAccount()
+
+    expect(storageDelete).not.toHaveBeenCalledWith(StorageKey.ACTIVE_ACCOUNT)
+    expect(emit).not.toHaveBeenCalledWith(BeaconEvent.ACTIVE_ACCOUNT_SET, undefined)
+  })
+
+  it('does not emit or rewrite storage for duplicate active-account deletion events', async () => {
+    await expect(client.getActiveAccount()).resolves.toBeUndefined()
+    expect(storageChangedCallback).toBeDefined()
+
+    const testClient = client as unknown as {
+      storage: { delete: (key: StorageKey) => Promise<void>; getPrefixedKey: (key: StorageKey) => string }
+      events: { emit: (event: BeaconEvent, payload?: unknown) => Promise<void> }
+    }
+    const storageDelete = jest.spyOn(testClient.storage, 'delete')
+    const emit = jest.spyOn(testClient.events, 'emit')
+
+    await storageChangedCallback?.({
+      eventType: 'entryModified',
+      key: testClient.storage.getPrefixedKey(StorageKey.ACTIVE_ACCOUNT),
+      oldValue: 'active-account-id',
+      newValue: null
+    })
+    await storageChangedCallback?.({
+      eventType: 'entryModified',
+      key: testClient.storage.getPrefixedKey(StorageKey.ACTIVE_ACCOUNT),
+      oldValue: null,
+      newValue: null
+    })
+
+    expect(storageDelete).not.toHaveBeenCalledWith(StorageKey.ACTIVE_ACCOUNT)
+    expect(emit).not.toHaveBeenCalledWith(BeaconEvent.ACTIVE_ACCOUNT_SET, undefined)
+  })
+
+  it('disconnect rejects pending init and clears permission request state', async () => {
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+    let rejectInit!: (reason: unknown) => void
+    const initPromise = new Promise<TransportType>((_resolve, reject) => {
+      rejectInit = reject
+    })
+    const initRejection = expect(initPromise).rejects.toMatchObject({
+      errorType: BeaconErrorType.ABORTED_ERROR
+    })
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
+    await (client as any).setTransport(transport)
+    ;(client as any)._initPromise = initPromise
+    ;(client as any)._initReject = rejectInit
+    ;(client as any)._initSubstratePairing = false
+    ;(client as any)._requestPermissionsPromise = initPromise
+    ;(client as any)._requestPermissionsKey = 'sign'
+
+    await client.disconnect()
+    await initRejection
+
+    expect((client as any)._initPromise).toBeUndefined()
+    expect((client as any)._initReject).toBeUndefined()
+    expect((client as any)._initSubstratePairing).toBeUndefined()
+    expect((client as any)._requestPermissionsPromise).toBeUndefined()
+    expect((client as any)._requestPermissionsKey).toBeUndefined()
+  })
+
+  it('disconnect uses one in-flight logout for concurrent calls', async () => {
+    const peer = createV480P2PPeer()
+    let resolvePeers!: (peers: unknown[]) => void
+    const getPeersPromise = new Promise<unknown[]>((resolve) => {
+      resolvePeers = resolve
+    })
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockReturnValue(getPeersPromise),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+
+    ;(client as any).removeAccountsForPeers = jest.fn().mockResolvedValue(undefined)
+    await (client as any).setTransport(transport)
+
+    const firstDisconnect = client.disconnect()
+    const secondDisconnect = client.disconnect()
+    resolvePeers([peer])
+
+    await expect(Promise.all([firstDisconnect, secondDisconnect])).resolves.toEqual([
+      undefined,
+      undefined
+    ])
+
+    expect(transport.getPeers).toHaveBeenCalledTimes(1)
+    expect(transport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(transport.send).toHaveBeenCalledTimes(1)
+    expect(transport.disconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it('disconnect clears the in-flight promise when internal cleanup throws synchronously', async () => {
+    const disconnectInternal = jest
+      .spyOn(client as any, 'disconnectInternal')
+      .mockImplementationOnce(() => {
+        throw new Error('sync disconnect failure')
+      })
+      .mockResolvedValueOnce(undefined)
+
+    await expect(client.disconnect()).rejects.toThrow('sync disconnect failure')
+    await expect(client.disconnect()).resolves.toBeUndefined()
+
+    expect(disconnectInternal).toHaveBeenCalledTimes(2)
+  })
+
+  it('disconnect sends peer notifications when a concurrent caller upgrades notifyPeers', async () => {
+    const peer = createV480P2PPeer()
+    let resolvePeers!: (peers: unknown[]) => void
+    const getPeersPromise = new Promise<unknown[]>((resolve) => {
+      resolvePeers = resolve
+    })
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockReturnValue(getPeersPromise),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+
+    ;(client as any).removeAccountsForPeers = jest.fn().mockResolvedValue(undefined)
+    await (client as any).setTransport(transport)
+
+    const firstDisconnect = client.disconnect({ notifyPeers: false })
+    const secondDisconnect = client.disconnect({ notifyPeers: true })
+    resolvePeers([peer])
+
+    await expect(Promise.all([firstDisconnect, secondDisconnect])).resolves.toEqual([
+      undefined,
+      undefined
+    ])
+
+    expect(transport.getPeers).toHaveBeenCalledTimes(1)
+    expect(transport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(transport.send).toHaveBeenCalledTimes(1)
+    expect(transport.send).toHaveBeenCalledWith(expect.any(String), peer)
+    expect(transport.disconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it('disconnect tears down all resolved transports, not only the active transport', async () => {
+    const postMessagePeer = {
+      type: 'postmessage-pairing-response',
+      id: 'postmessage-wallet',
+      senderId: 'postmessage-sender',
+      name: 'PostMessage Wallet',
+      publicKey: 'postmessage-wallet',
+      version: '4',
+      extensionId: 'extension-id'
+    }
+    const p2pPeer = createV480P2PPeer()
+    const walletConnectPeer = {
+      type: 'walletconnect-pairing-response',
+      id: 'wc-wallet',
+      senderId: 'wc-wallet',
+      name: 'WalletConnect Wallet',
+      publicKey: 'wc-wallet',
+      version: 'first'
+    }
+    const createTransport = (type: TransportType) => ({
+      type,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    })
+    const postMessageTransport = createTransport(TransportType.POST_MESSAGE)
+    const p2pTransport = createTransport(TransportType.P2P)
+    const walletConnectTransport = {
+      ...createTransport(TransportType.WALLETCONNECT),
+      doClientCleanup: jest.fn().mockResolvedValue(undefined)
+    }
+    postMessageTransport.getPeers.mockResolvedValue([postMessagePeer])
+    p2pTransport.getPeers.mockResolvedValue([p2pPeer])
+    walletConnectTransport.getPeers.mockResolvedValue([walletConnectPeer])
+
+    ;(client as any).postMessageTransport = postMessageTransport
+    ;(client as any).p2pTransport = p2pTransport
+    ;(client as any).walletConnectTransport = walletConnectTransport
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
+    await (client as any).setTransport(p2pTransport)
+
+    await client.disconnect()
+
+    expect(p2pTransport.getPeers).toHaveBeenCalledTimes(1)
+    expect(postMessageTransport.getPeers).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.getPeers).toHaveBeenCalledTimes(1)
+    expect(postMessageTransport.send).toHaveBeenCalledWith(expect.any(String), postMessagePeer)
+    expect(p2pTransport.send).toHaveBeenCalledWith(expect.any(String), p2pPeer)
+    expect(walletConnectTransport.send).toHaveBeenCalledWith(expect.any(String), walletConnectPeer)
+    expect(postMessageTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(p2pTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.doClientCleanup).toHaveBeenCalledTimes(1)
+    expect((client as any).postMessageTransport).toBeUndefined()
+    expect((client as any).p2pTransport).toBeUndefined()
+    expect((client as any).walletConnectTransport).toBeUndefined()
+  })
+
+  it('disconnect tears down resolved transports with no peers without sending notifications', async () => {
+    const createTransport = (type: TransportType) => ({
+      type,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    })
+    const postMessageTransport = createTransport(TransportType.POST_MESSAGE)
+    const p2pTransport = createTransport(TransportType.P2P)
+    const walletConnectTransport = {
+      ...createTransport(TransportType.WALLETCONNECT),
+      doClientCleanup: jest.fn().mockResolvedValue(undefined)
+    }
+
+    ;(client as any).postMessageTransport = postMessageTransport
+    ;(client as any).p2pTransport = p2pTransport
+    ;(client as any).walletConnectTransport = walletConnectTransport
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
+    await (client as any).setTransport(p2pTransport)
+
+    await expect(client.disconnect()).resolves.toBeUndefined()
+
+    expect(postMessageTransport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(p2pTransport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(postMessageTransport.send).not.toHaveBeenCalled()
+    expect(p2pTransport.send).not.toHaveBeenCalled()
+    expect(walletConnectTransport.send).not.toHaveBeenCalled()
+    expect(postMessageTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(p2pTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(walletConnectTransport.doClientCleanup).toHaveBeenCalledTimes(1)
+  })
+
+  it('disconnect logs transport cleanup failures and still resolves', async () => {
+    const postMessageTransport = {
+      type: TransportType.POST_MESSAGE,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockRejectedValue(new Error('postmessage cleanup failed')),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+    const p2pTransport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+
+    ;(client as any).postMessageTransport = postMessageTransport
+    ;(client as any).p2pTransport = p2pTransport
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
+    await (client as any).setTransport(p2pTransport)
+
+    await expect(client.disconnect()).resolves.toBeUndefined()
+
+    expect(postMessageTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(p2pTransport.disconnect).toHaveBeenCalledTimes(1)
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      'disconnectResolvedTransports',
+      expect.any(Error)
+    )
+  })
+
+  it('disconnect sends disconnect messages to stored peers before tearing down transport state', async () => {
+    const peer = createV480P2PPeer()
+    let resolveSend!: () => void
+    const sendPromise = new Promise<void>((resolve) => {
+      resolveSend = resolve
+    })
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([peer]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockReturnValue(sendPromise),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+
+    ;(client as any).removeAccountsForPeers = jest.fn().mockResolvedValue(undefined)
+    await (client as any).setTransport(transport)
+
+    const disconnect = client.disconnect().then(() => 'resolved')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    await expect(Promise.race([disconnect, Promise.resolve('pending')])).resolves.toBe('pending')
+    expect(transport.disconnect).not.toHaveBeenCalled()
+
+    resolveSend()
+
+    await expect(disconnect).resolves.toBe('resolved')
+
+    expect(transport.getPeers).toHaveBeenCalledTimes(1)
+    expect(transport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect((client as any).removeAccountsForPeers).toHaveBeenCalledWith([peer])
+    expect(transport.send).toHaveBeenCalledTimes(1)
+    expect(transport.send).toHaveBeenCalledWith(expect.any(String), peer)
+    expect(transport.disconnect).toHaveBeenCalledTimes(1)
+    expect(transport.send.mock.invocationCallOrder[0]).toBeLessThan(
+      transport.disconnect.mock.invocationCallOrder[0]
+    )
+  })
+
+  it('disconnect clears selected transport and active peer so the client can reconnect', async () => {
+    const peer = createV480P2PPeer()
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([peer]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
+    await (client as any).setTransport(transport)
+    ;(client as any)._activePeer = ExposedPromise.resolve(peer)
+    expect((client as any)._transport.isResolved()).toBe(true)
+
+    await client.disconnect()
+
+    expect((client as any)._transport.isResolved()).toBe(false)
+    await expect((client as any)._activePeer.promise).resolves.toBeUndefined()
+  })
+
+  it('deduplicates peer disconnect notifications across duplicate transport instances', async () => {
+    const peer = createV480P2PPeer()
+    const createTransport = () => ({
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([peer]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    })
+    const firstTransport = createTransport()
+    const secondTransport = createTransport()
+
+    ;(client as any).removeAccountsForPeers = jest.fn().mockResolvedValue(undefined)
+    ;(client as any).p2pTransport = firstTransport
+    await (client as any).setTransport(secondTransport)
+
+    await client.disconnect()
+
+    expect(firstTransport.getPeers).toHaveBeenCalledTimes(1)
+    expect(secondTransport.getPeers).toHaveBeenCalledTimes(1)
+    expect(firstTransport.send).toHaveBeenCalledTimes(1)
+    expect(secondTransport.send).not.toHaveBeenCalled()
+  })
+
+  it('disconnect is idempotent when there are no peers and storage has already been cleared', async () => {
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+
+    await (client as any).storage.delete(StorageKey.ACTIVE_ACCOUNT)
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
+    await (client as any).setTransport(transport)
+
+    await expect(client.disconnect()).resolves.toBeUndefined()
+
+    expect(transport.getPeers).toHaveBeenCalledTimes(1)
+    expect(transport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(transport.send).not.toHaveBeenCalled()
+    expect(transport.disconnect).toHaveBeenCalledTimes(1)
+    await expect(client.getActiveAccount()).resolves.toBeUndefined()
+  })
+
+  it('disconnect is idempotent after a previous disconnect completed', async () => {
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockImplementation(() => {
+        transport.connectionStatus = TransportStatus.NOT_CONNECTED
+
+        return Promise.resolve()
+      }),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+
+    await (client as any).storage.delete(StorageKey.ACTIVE_ACCOUNT)
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
+    await (client as any).setTransport(transport)
+
+    await expect(client.disconnect()).resolves.toBeUndefined()
+    await expect(client.disconnect()).resolves.toBeUndefined()
+
+    expect(transport.getPeers).toHaveBeenCalledTimes(1)
+    expect(transport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(transport.disconnect).toHaveBeenCalledTimes(1)
+    await expect(client.getActiveAccount()).resolves.toBeUndefined()
+  })
+
+  it('disconnect completes local cleanup when peer notification fails', async () => {
+    const staleAccount = createStoredAccount()
+    const peer = createV480P2PPeer()
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([peer]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockRejectedValue(new Error('peer offline')),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+    const pendingRequest = new ExposedPromise<unknown, any>()
+    const pendingRejection = pendingRequest.promise.catch((error) => error)
+
+    ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
+    await (client as any).setTransport(transport)
+    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+
+    await expect(client.disconnect()).resolves.toBeUndefined()
+
+    expect(transport.send).toHaveBeenCalledWith(expect.any(String), peer)
+    expect(transport.disconnect).toHaveBeenCalledTimes(1)
+    expect((client as any).openRequests.size).toBe(0)
+    await expect(pendingRejection).resolves.toMatchObject({
+      id: 'pending-after-disconnect',
+      errorType: BeaconErrorType.ABORTED_ERROR
+    })
+    await expect(client.getActiveAccount()).resolves.toBeUndefined()
+  })
+
+  it('disconnect is a no-op after transport has already been cleared', async () => {
+    const staleAccount = createStoredAccount()
+    const pendingRequest = new ExposedPromise<unknown, any>()
+    const pendingRejection = pendingRequest.promise.catch((error) => error)
+
+    ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
+    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+    await (client as any).storage.delete(StorageKey.ACTIVE_ACCOUNT)
+
+    await expect(client.disconnect()).resolves.toBeUndefined()
+
+    expect((client as any).openRequests.size).toBe(0)
+    await expect(pendingRejection).resolves.toMatchObject({
+      id: 'pending-after-disconnect',
+      errorType: BeaconErrorType.ABORTED_ERROR
+    })
+    await expect(client.getActiveAccount()).resolves.toBeUndefined()
+  })
+
+  it('disconnect is a no-op when transport is already disconnected', async () => {
+    const staleAccount = createStoredAccount()
+    const transport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.NOT_CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+
+    ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
+    await (client as any).storage.delete(StorageKey.ACTIVE_ACCOUNT)
+    await (client as any).setTransport(transport)
+
+    await expect(client.disconnect()).resolves.toBeUndefined()
+
+    expect(transport.getPeers).not.toHaveBeenCalled()
+    expect(transport.removeAllPeers).not.toHaveBeenCalled()
+    expect(transport.send).not.toHaveBeenCalled()
+    expect(transport.disconnect).not.toHaveBeenCalled()
+    await expect(client.getActiveAccount()).resolves.toBeUndefined()
+  })
+
+  it('disconnect closes WalletConnect transport after attempting to notify a stored WalletConnect peer', async () => {
+    const peer = {
+      type: 'walletconnect-pairing-response',
+      id: 'wallet-public-key',
+      senderId: 'wallet-public-key',
+      name: 'WalletConnect Wallet',
+      publicKey: 'wallet-public-key',
+      version: 'first'
+    }
+    const transport = {
+      type: TransportType.WALLETCONNECT,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([peer]),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      doClientCleanup: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined)
+    }
+    Object.setPrototypeOf(transport, WalletConnectTransport.prototype)
+
+    await (client as any).storage.delete(StorageKey.ACTIVE_ACCOUNT)
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
+    await (client as any).setTransport(transport)
+
+    await expect(client.disconnect()).resolves.toBeUndefined()
+
+    expect(transport.getPeers).toHaveBeenCalledTimes(1)
+    expect(transport.removeAllPeers).toHaveBeenCalledTimes(1)
+    expect(transport.send).toHaveBeenCalledWith(expect.any(String), peer)
+    expect(transport.disconnect).toHaveBeenCalledTimes(1)
+    expect(transport.doClientCleanup).toHaveBeenCalledTimes(1)
   })
 
   it('cleans up v3 wrapped responses by the outer request id', async () => {
@@ -1063,13 +1745,14 @@ describe('DAppClient — basic unit tests', () => {
     expect(restoredSeed).not.toBe('undefined')
   })
 
-  it('emits account deactivated and clears state when the stored active account is missing', async () => {
+  it('emits account deactivated and clears the active pointer when the stored active account is missing', async () => {
     const invalidAccountHandler = jest.fn()
     const legacyInvalidAccountHandler = jest.fn()
     const activeAccountHandler = jest.fn()
+    const storedAccount = createStoredAccount()
     const storage = new LocalStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'missing-account-id',
-      [StorageKey.ACCOUNTS]: [createStoredAccount()]
+      [StorageKey.ACCOUNTS]: [storedAccount]
     })
 
     ;(window as any).beaconCreatedClientInstance = false
@@ -1096,13 +1779,197 @@ describe('DAppClient — basic unit tests', () => {
 
     await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
     await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
-    await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([storedAccount])
     expect(activeAccountHandler).not.toHaveBeenCalled()
     expect(invalidAccountHandler).toHaveBeenCalledWith(
       { reason: 'missing_active_account' },
       undefined
     )
     expect(legacyInvalidAccountHandler).toHaveBeenCalled()
+  })
+
+  it('keeps non-active accounts after repairing a missing active account', async () => {
+    const invalidAccountHandler = jest.fn()
+    const storedAccount = createStoredAccount()
+    const secondaryAccount = {
+      ...createStoredAccount(),
+      accountIdentifier: 'secondary-account-id',
+      senderId: 'secondary-wallet-sender-id',
+      address: 'tz1secondaryAddress'
+    }
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: 'missing-account-id',
+      [StorageKey.ACCOUNTS]: [storedAccount, secondaryAccount]
+    })
+
+    ;(window as any).beaconCreatedClientInstance = false
+    const storedStateClient = new DAppClient({
+      name: 'StoredAccountsSurviveRepairApp',
+      storage,
+      preferredNetwork: NetworkType.MAINNET,
+      disableDefaultEvents: true,
+      eventHandlers: {
+        [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: {
+          handler: invalidAccountHandler
+        }
+      }
+    })
+
+    await (storedStateClient as any).storageValidated
+
+    await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storedStateClient.getAccounts()).resolves.toEqual([
+      storedAccount,
+      secondaryAccount
+    ])
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    expect(invalidAccountHandler).toHaveBeenCalledWith(
+      { reason: 'missing_active_account' },
+      undefined
+    )
+  })
+
+  it('treats a literal undefined active-account sentinel as silent state repair', async () => {
+    const invalidAccountHandler = jest.fn()
+    const activeAccountHandler = jest.fn()
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: 'undefined',
+      [StorageKey.BEACON_SDK_SECRET_SEED]: 'seed',
+      [StorageKey.LAST_SELECTED_WALLET]: { key: 'kukai', name: 'Kukai' }
+    })
+
+    ;(window as any).beaconCreatedClientInstance = false
+    const storedStateClient = new DAppClient({
+      name: 'UndefinedSentinelStoredStateApp',
+      storage,
+      preferredNetwork: NetworkType.MAINNET,
+      disableDefaultEvents: true,
+      eventHandlers: {
+        [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: {
+          handler: invalidAccountHandler
+        },
+        [BeaconEvent.ACTIVE_ACCOUNT_SET]: {
+          handler: activeAccountHandler
+        }
+      }
+    })
+
+    await (storedStateClient as any).storageValidated
+
+    await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.BEACON_SDK_SECRET_SEED)).resolves.toBe('seed')
+    await expect(storage.get(StorageKey.LAST_SELECTED_WALLET)).resolves.toEqual({
+      key: 'kukai',
+      name: 'Kukai'
+    })
+    expect(activeAccountHandler).not.toHaveBeenCalled()
+    expect(invalidAccountHandler).toHaveBeenCalledWith(
+      { reason: 'missing_active_account' },
+      undefined
+    )
+  })
+
+  it('continues a permission request after repairing a missing active account', async () => {
+    const invalidAccountHandler = jest.fn()
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: 'undefined',
+      [StorageKey.BEACON_SDK_SECRET_SEED]: 'seed',
+      [StorageKey.LAST_SELECTED_WALLET]: { key: 'kukai', name: 'Kukai' }
+    })
+    const permissionResponse = {
+      id: 'permission-response-id',
+      version: '2',
+      senderId: 'wallet-sender-id',
+      type: BeaconMessageType.PermissionResponse,
+      publicKey: 'edpk',
+      network: {
+        type: NetworkType.MAINNET
+      },
+      scopes: []
+    }
+    const permissionResult = {
+      message: permissionResponse,
+      connectionInfo: {
+        origin: Origin.P2P,
+        id: 'wallet-public-key'
+      }
+    }
+    const accountInfo = {
+      address: 'tz1-address',
+      walletKey: 'wallet-key'
+    }
+
+    ;(window as any).beaconCreatedClientInstance = false
+    const storedStateClient = new DAppClient({
+      name: 'RepairThenConnectApp',
+      storage,
+      preferredNetwork: NetworkType.MAINNET,
+      disableDefaultEvents: true,
+      eventHandlers: {
+        [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: {
+          handler: invalidAccountHandler
+        }
+      }
+    })
+    const hideUI = jest.spyOn(storedStateClient as any, 'hideUI')
+    const makeRequest = jest
+      .spyOn(storedStateClient as any, 'makeRequest')
+      .mockResolvedValue(permissionResult)
+    jest.spyOn(storedStateClient as any, 'checkMakeRequest').mockResolvedValue(true)
+    jest.spyOn(storedStateClient as any, 'getOwnAppMetadata').mockResolvedValue({
+      senderId: 'dapp-sender-id',
+      name: 'RepairThenConnectApp'
+    })
+    jest.spyOn(storedStateClient as any, 'buildPayload').mockResolvedValue({})
+    jest.spyOn(storedStateClient as any, 'sendMetrics').mockResolvedValue(undefined)
+    jest.spyOn(storedStateClient as any, 'onNewAccount').mockResolvedValue(accountInfo)
+    jest.spyOn(storedStateClient as any, 'notifySuccess').mockResolvedValue(undefined)
+    jest.spyOn(storedStateClient as any, 'getWalletInfo').mockResolvedValue({})
+    jest.spyOn((storedStateClient as any).accountManager, 'addAccount').mockResolvedValue(undefined)
+
+    await expect(storedStateClient.requestPermissions()).resolves.toEqual({
+      ...permissionResponse,
+      walletKey: accountInfo.walletKey,
+      address: accountInfo.address,
+      accountInfo
+    })
+
+    expect(invalidAccountHandler).toHaveBeenCalledWith(
+      { reason: 'missing_active_account' },
+      undefined
+    )
+    expect(makeRequest).toHaveBeenCalledTimes(1)
+    expect(hideUI).not.toHaveBeenCalled()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+  })
+
+  it('deletes active-account storage when the active account is cleared', async () => {
+    const storedAccount = createStoredAccount()
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
+      [StorageKey.ACCOUNTS]: [storedAccount]
+    })
+
+    ;(window as any).beaconCreatedClientInstance = false
+    const storedStateClient = new DAppClient({
+      name: 'ClearActiveAccountStorageApp',
+      storage,
+      preferredNetwork: NetworkType.MAINNET,
+      disableDefaultEvents: true,
+      eventHandlers: {
+        [BeaconEvent.ACTIVE_ACCOUNT_SET]: {
+          handler: jest.fn()
+        }
+      }
+    })
+
+    await (storedStateClient as any).storageValidated
+    await storedStateClient.clearActiveAccount()
+
+    await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
   })
 
   it('emits account deactivated and clears state when stored accounts are malformed', async () => {

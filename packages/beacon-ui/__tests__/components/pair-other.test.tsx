@@ -33,6 +33,22 @@ describe('PairOther Component', () => {
     expect(walletConnectButton).toBeInTheDocument()
   })
 
+  test('shows Beacon option when WalletConnect payload does not resolve', async () => {
+    const props: PairOtherProps = {
+      walletList: [],
+      p2pPayload: Promise.resolve('p2p-code'),
+      wcPayload: new Promise<string>(() => {}),
+      onClickLearnMore: jest.fn()
+    }
+
+    render(<PairOther {...props} />)
+
+    const beaconButton = await screen.findByRole('button', { name: /Beacon/i })
+
+    expect(beaconButton).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /WalletConnect/i })).not.toBeInTheDocument()
+  })
+
   test('clicking the Beacon button shows the QR component with p2p payload', async () => {
     render(<PairOther {...defaultProps} />)
 
