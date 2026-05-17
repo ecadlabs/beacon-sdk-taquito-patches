@@ -313,7 +313,7 @@ describe('WalletConnectCommunicationClient basics', () => {
     expect(resolvedClient.core.relayer.transportClose).not.toHaveBeenCalled()
   })
 
-  it('includes required Tezos methods in both required and optional WalletConnect namespaces', () => {
+  it('puts Tezos methods only in required namespace for WalletConnect 2.18 compatibility', () => {
     const required = (client as any).permissionScopeParamsToNamespaces(
       (client as any).getRequiredPermissionScopeParams()
     )
@@ -328,7 +328,7 @@ describe('WalletConnectCommunicationClient basics', () => {
       'tezos_send',
       'tezos_sign'
     ])
-    expect(optional.methods).toEqual(required.methods)
+    expect(optional.methods).toEqual([])
     expect(required.events).toEqual([])
     expect(optional.events).toEqual(['requestAcknowledged'])
   })

@@ -1184,14 +1184,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     return {
       networks: [this.wcOptions.network],
       events: [PermissionScopeEvents.REQUEST_ACKNOWLEDGED],
-      // WalletConnect 2.23+ normalizes deprecated requiredNamespaces into
-      // optionalNamespaces. Keep the required Tezos methods here too so
-      // CAIP-25-aligned wallets receive a complete optional Tezos namespace.
-      methods: [
-        PermissionScopeMethods.GET_ACCOUNTS,
-        PermissionScopeMethods.OPERATION_REQUEST,
-        PermissionScopeMethods.SIGN
-      ]
+      methods: []
     }
   }
 
