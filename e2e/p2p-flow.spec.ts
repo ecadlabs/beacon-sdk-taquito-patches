@@ -24,7 +24,7 @@ test('should load activeAccount on page reload', async () => {
   const activeAccount = await dapp.evaluate(() => {
     return window.localStorage.getItem('beacon:active-account')
   })
-  expect(activeAccount).not.toBe('undefined')
+  expect(activeAccount).not.toBe(null)
 })
 
 test('should send a request to sign', async () => {
@@ -178,7 +178,7 @@ test('@extended should disconnect on tab1 and reconnect on tab2', async () => {
     return window.localStorage.getItem('beacon:active-account')
   })
 
-  expect(activeAccount).not.toBe('undefined')
+  expect(activeAccount).not.toBe(null)
 
   // #sendToSelf
   await dapp.click('#sendToSelf')
@@ -244,7 +244,7 @@ test('@extended should disconnect on tab2 and reconnect on tab3', async () => {
     return window.localStorage.getItem('beacon:active-account')
   })
 
-  expect(activeAccount).not.toBe('undefined')
+  expect(activeAccount).not.toBe(null)
 
   // #sendToSelf
   await dapp2.click('#sendToSelf')

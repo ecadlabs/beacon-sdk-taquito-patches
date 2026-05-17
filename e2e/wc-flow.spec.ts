@@ -24,7 +24,7 @@ test('should load activeAccount on page reload', async () => {
   const activeAccount = await dapp.evaluate(() => {
     return window.localStorage.getItem('beacon:active-account')
   })
-  expect(activeAccount).not.toBe('undefined')
+  expect(activeAccount).not.toBe(null)
 })
 
 test('should send a request to sign', async () => {
@@ -163,7 +163,7 @@ test('should update the session on both tabs', async () => {
     return window.localStorage.getItem('beacon:active-account')
   })
 
-  expect(activeAccount).not.toBe('undefined')
+  expect(activeAccount).not.toBe(null)
 })
 
 test('should close the session through wallet', async () => {
