@@ -323,11 +323,7 @@ describe('WalletConnectCommunicationClient basics', () => {
 
     expect(required.chains).toEqual(['tezos:mainnet'])
     expect(optional.chains).toEqual(['tezos:mainnet'])
-    expect(required.methods).toEqual([
-      'tezos_getAccounts',
-      'tezos_send',
-      'tezos_sign'
-    ])
+    expect(required.methods).toEqual(['tezos_getAccounts', 'tezos_send', 'tezos_sign'])
     expect(optional.methods).toEqual([])
     expect(required.events).toEqual([])
     expect(optional.events).toEqual(['requestAcknowledged'])
@@ -387,6 +383,33 @@ describe('WalletConnectCommunicationClient basics', () => {
     await Promise.resolve()
 
     await expect(validation).resolves.toBe(false)
+    jest.useRealTimers()
+  })
+
+  it('continues local SignClient cleanup when relayer transport close times out', async () => {
+    jest.useFakeTimers()
+    const resolvedClient = createResolvedSignClient()
+    resolvedClient.core.relayer.transportClose.mockImplementation(() => new Promise(() => {}))
+    ;(client as any).signClient = resolvedClient
+
+    const close = client.closeSignClient()
+    await Promise.resolve()
+    jest.advanceTimersByTime(10000)
+
+    await expect(close).resolves.toBeUndefined()
+    expect(resolvedClient.core.events.removeAllListeners).toHaveBeenCalledTimes(1)
+    expect(resolvedClient.core.relayer.events.removeAllListeners).toHaveBeenCalledTimes(1)
+    expect(resolvedClient.core.heartbeat.stop).toHaveBeenCalledTimes(1)
+    expect(resolvedClient.core.relayer.provider.events.removeAllListeners).toHaveBeenCalledTimes(1)
+    expect(resolvedClient.core.relayer.subscriber.events.removeAllListeners).toHaveBeenCalledTimes(
+      1
+    )
+    expect(
+      resolvedClient.core.relayer.provider.connection.events.removeAllListeners
+    ).toHaveBeenCalledTimes(1)
+    expect((client as any).signClient).toBeUndefined()
+    expect((client as any).signClientPromise).toBeUndefined()
+    expect((client as any).pairingRequestPromise).toBeUndefined()
     jest.useRealTimers()
   })
 

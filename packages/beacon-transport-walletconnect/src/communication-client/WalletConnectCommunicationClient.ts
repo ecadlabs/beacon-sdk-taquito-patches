@@ -210,12 +210,12 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   }
 
   private clearEvents() {
-    this.signClient?.removeAllListeners('session_event')
-    this.signClient?.removeAllListeners('session_update')
-    this.signClient?.removeAllListeners('session_delete')
-    this.signClient?.removeAllListeners('session_expire')
-    this.signClient?.removeAllListeners('session_extend')
-    this.signClient?.removeAllListeners('proposal_expire')
+    this.signClient?.removeAllListeners?.('session_event')
+    this.signClient?.removeAllListeners?.('session_update')
+    this.signClient?.removeAllListeners?.('session_delete')
+    this.signClient?.removeAllListeners?.('session_expire')
+    this.signClient?.removeAllListeners?.('session_extend')
+    this.signClient?.removeAllListeners?.('proposal_expire')
     this.signClient?.core.pairing.events.removeAllListeners('pairing_delete')
     this.signClient?.core.pairing.events.removeAllListeners('pairing_expire')
   }
@@ -262,23 +262,32 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       return
     }
 
-    // The timeout only lets cleanup continue; transportClose may still finish later.
-    await this.withTimeout(
-      this.signClient.core.relayer.transportClose(),
-      WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
-      'WalletConnect relayer transport close timed out.'
-    )
-    this.signClient.core.events.removeAllListeners()
-    this.signClient.core.relayer.events.removeAllListeners()
-    this.signClient.core.heartbeat.stop()
-    this.signClient.core.relayer.provider.events.removeAllListeners()
-    this.signClient.core.relayer.subscriber.events.removeAllListeners()
-    this.signClient.core.relayer.provider.connection.events.removeAllListeners()
-    this.clearEvents()
+    const signClient = this.signClient
 
-    this.signClient = undefined
-    this.signClientPromise = undefined
-    this.pairingRequestPromise = undefined
+    // The timeout only lets cleanup continue; transportClose may still finish later.
+    try {
+      await this.withTimeout(
+        signClient.core.relayer.transportClose(),
+        WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
+        'WalletConnect relayer transport close timed out.'
+      )
+    } catch (error: unknown) {
+      logger.warn(error instanceof Error ? error.message : String(error))
+    }
+
+    try {
+      signClient.core.events.removeAllListeners()
+      signClient.core.relayer.events.removeAllListeners()
+      signClient.core.heartbeat.stop()
+      signClient.core.relayer.provider.events.removeAllListeners()
+      signClient.core.relayer.subscriber.events.removeAllListeners()
+      signClient.core.relayer.provider.connection.events.removeAllListeners()
+      this.clearEvents()
+    } finally {
+      this.signClient = undefined
+      this.signClientPromise = undefined
+      this.pairingRequestPromise = undefined
+    }
   }
 
   private async ping() {
@@ -676,7 +685,10 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       await Promise.race([
         signClient.connect(connectParams),
         new Promise<any>((_, reject) =>
-          setTimeout(() => reject(new Error('The connection timed out.')), WALLETCONNECT_CONNECT_TIMEOUT_MS)
+          setTimeout(
+            () => reject(new Error('The connection timed out.')),
+            WALLETCONNECT_CONNECT_TIMEOUT_MS
+          )
         )
       ]).catch((error) => {
         logger.error(`Init error: ${error.message}`)
@@ -1035,17 +1047,17 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     pairings.length &&
       (await Promise.allSettled(
         pairings.map((pairing) =>
-              this.withTimeout(
-                signClient.disconnect({
-                  topic: pairing.topic,
-                  reason: {
-                    code: 0, // TODO: Use constants
-                    message: 'Force new connection'
-                  }
-                }),
-                WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
-                'WalletConnect pairing disconnect timed out.'
-              )
+          this.withTimeout(
+            signClient.disconnect({
+              topic: pairing.topic,
+              reason: {
+                code: 0, // TODO: Use constants
+                message: 'Force new connection'
+              }
+            }),
+            WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
+            'WalletConnect pairing disconnect timed out.'
+          )
         )
       ))
     if (closedSessions || pairings.length > 0 || this.isMobileOS()) {
@@ -1066,17 +1078,17 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     sessions.length &&
       (await Promise.allSettled(
         sessions.map((session) =>
-              this.withTimeout(
-                signClient.disconnect({
-                  topic: (session as any).topic,
-                  reason: {
-                    code: 0, // TODO: Use constants
-                    message: 'Force new connection'
-                  }
-                }),
-                WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
-                'WalletConnect session disconnect timed out.'
-              )
+          this.withTimeout(
+            signClient.disconnect({
+              topic: (session as any).topic,
+              reason: {
+                code: 0, // TODO: Use constants
+                message: 'Force new connection'
+              }
+            }),
+            WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
+            'WalletConnect session disconnect timed out.'
+          )
         )
       ))
 
@@ -1119,7 +1131,10 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       const { approval }: { approval: () => Promise<SessionTypes.Struct> } = await Promise.race([
         signClient.connect(connectParams),
         new Promise<any>((_, reject) =>
-          setTimeout(() => reject(new Error('The connection timed out.')), WALLETCONNECT_CONNECT_TIMEOUT_MS)
+          setTimeout(
+            () => reject(new Error('The connection timed out.')),
+            WALLETCONNECT_CONNECT_TIMEOUT_MS
+          )
         )
       ])
       logger.debug('before await approal', [pairingTopic])
@@ -1711,7 +1726,11 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     }
   }
 
-  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    message: string
+  ): Promise<T> {
     let timeout: ReturnType<typeof setTimeout> | undefined
     try {
       return await Promise.race([
