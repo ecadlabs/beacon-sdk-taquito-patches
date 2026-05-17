@@ -407,14 +407,16 @@ export class DAppClient extends Client {
     this.activeAccountLoaded = this.storage
       .get(StorageKey.ACTIVE_ACCOUNT)
       .then(async (activeAccountIdentifier) => {
+        const accounts = await this.accountManager.getAccounts()
+
         if (activeAccountIdentifier === 'undefined') {
+          // Non-normalizing storage backends can still surface legacy sentinel strings directly.
           await this.deactivateInvalidAccountState('missing_active_account')
 
           return undefined
         }
 
         if (activeAccountIdentifier) {
-          const accounts = await this.accountManager.getAccounts()
           const account = accounts.find(
             (storedAccount) => storedAccount.accountIdentifier === activeAccountIdentifier
           )
@@ -428,11 +430,17 @@ export class DAppClient extends Client {
           await this.setActiveAccount(account)
 
           return account
-        } else {
-          await this.setActiveAccount(undefined)
+        }
+
+        if (accounts.length > 0 && this.hasStoredActiveAccountPointer()) {
+          await this.deactivateInvalidAccountState('missing_active_account')
 
           return undefined
         }
+
+        await this.setActiveAccount(undefined)
+
+        return undefined
       })
       .catch(async (storageError) => {
         logger.error(storageError)
@@ -1327,6 +1335,19 @@ export class DAppClient extends Client {
     this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(undefined)
     await this.storage.delete(StorageKey.ACTIVE_ACCOUNT)
     await this.setActivePeer(undefined)
+  }
+
+  private hasStoredActiveAccountPointer(): boolean {
+    // LocalStorage-specific repair: that backend is where literal sentinel strings were produced.
+    if (typeof localStorage === 'undefined') {
+      return false
+    }
+
+    try {
+      return localStorage.getItem(this.storage.getPrefixedKey(StorageKey.ACTIVE_ACCOUNT)) !== null
+    } catch {
+      return false
+    }
   }
 
   private async isInvalidState(account: AccountInfo) {

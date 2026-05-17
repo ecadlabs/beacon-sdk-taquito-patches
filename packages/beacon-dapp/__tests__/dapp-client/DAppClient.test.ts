@@ -1871,6 +1871,47 @@ describe('DAppClient — basic unit tests', () => {
     )
   })
 
+  it('repairs a normalized undefined active-account sentinel when accounts remain in real storage', async () => {
+    localStorage.clear()
+    const invalidAccountHandler = jest.fn()
+    const activeAccountHandler = jest.fn()
+    const storedAccount = createStoredAccount()
+    const { LocalStorage: RealLocalStorage } = jest.requireActual(
+      '@ecadlabs/beacon-core'
+    ) as typeof import('@ecadlabs/beacon-core')
+    const storage = new RealLocalStorage()
+
+    await storage.set(StorageKey.ACTIVE_ACCOUNT, 'undefined')
+    await storage.set(StorageKey.ACCOUNTS, [storedAccount])
+    ;(window as any).beaconCreatedClientInstance = false
+    const storedStateClient = new DAppClient({
+      name: 'RealStorageUndefinedSentinelApp',
+      storage,
+      preferredNetwork: NetworkType.MAINNET,
+      disableDefaultEvents: true,
+      eventHandlers: {
+        [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: {
+          handler: invalidAccountHandler
+        },
+        [BeaconEvent.ACTIVE_ACCOUNT_SET]: {
+          handler: activeAccountHandler
+        }
+      }
+    })
+
+    await (storedStateClient as any).storageValidated
+
+    await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([storedAccount])
+    expect(activeAccountHandler).not.toHaveBeenCalled()
+    expect(invalidAccountHandler).toHaveBeenCalledWith(
+      { reason: 'missing_active_account' },
+      undefined
+    )
+    localStorage.clear()
+  })
+
   it('continues a permission request after repairing a missing active account', async () => {
     const invalidAccountHandler = jest.fn()
     const storage = new LocalStorage({
