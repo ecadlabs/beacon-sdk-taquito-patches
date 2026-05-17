@@ -1,4 +1,5 @@
-import { Storage, StorageKey, StorageKeyReturnType, defaultValues } from '@ecadlabs/beacon-types'
+import { Storage, StorageKey, StorageKeyReturnType } from '@ecadlabs/beacon-types'
+import { normalizeParsedStoredValue } from './storage-normalization'
 
 /**
  * @internalapi
@@ -19,22 +20,16 @@ export class ChromeStorage implements Storage {
   public async get<K extends StorageKey>(key: K): Promise<StorageKeyReturnType[K]> {
     return new Promise((resolve) => {
       chrome.storage.local.get(null, (storageContent) => {
-        if (storageContent[key]) {
-          resolve(storageContent[key] as StorageKeyReturnType[K])
-        } else {
-          const defaultValue = defaultValues[key]
-
-          if (typeof defaultValue === 'object') {
-            resolve(JSON.parse(JSON.stringify(defaultValue)) as StorageKeyReturnType[K])
-          } else {
-            resolve(defaultValue)
-          }
-        }
+        resolve(normalizeParsedStoredValue(key, storageContent[key]))
       })
     })
   }
 
   public async set<K extends StorageKey>(key: K, value: StorageKeyReturnType[K]): Promise<void> {
+    if (value === undefined) {
+      return this.delete(key)
+    }
+
     return new Promise((resolve) => {
       chrome.storage.local.set({ [key]: value }, () => {
         resolve()
@@ -44,7 +39,7 @@ export class ChromeStorage implements Storage {
 
   public async delete<K extends StorageKey>(key: K): Promise<void> {
     return new Promise((resolve) => {
-      chrome.storage.local.set({ [key]: undefined }, () => {
+      chrome.storage.local.remove(String(key), () => {
         resolve()
       })
     })
