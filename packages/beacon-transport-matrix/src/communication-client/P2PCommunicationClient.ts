@@ -65,6 +65,12 @@ interface BeaconInfoResponse {
 
 const sleep = (time: number) => new Promise((resolve) => setTimeout(resolve, time))
 
+const isMatrixError = (error: unknown): error is { errcode: string } =>
+  typeof error === 'object' &&
+  error !== null &&
+  'errcode' in error &&
+  typeof error.errcode === 'string'
+
 /**
  * @internalapi
  */
@@ -588,22 +594,27 @@ export class P2PCommunicationClient extends CommunicationClient {
     const encryptedMessage = await encryptCryptoboxPayload(message, sharedKey.send)
 
     logger.log('sendMessage', 'sending encrypted message', peer.publicKey, roomId, message)
-    ;(await this.client.promise).sendTextMessage(roomId, encryptedMessage).catch(async (error) => {
-      if (error.errcode === 'M_FORBIDDEN') {
+    try {
+      await (await this.client.promise).sendTextMessage(roomId, encryptedMessage)
+    } catch (error) {
+      const errcode = isMatrixError(error) ? error.errcode : undefined
+      if (errcode === 'M_FORBIDDEN') {
         // Room doesn't exist
         logger.log(`sendMessage`, `M_FORBIDDEN`, roomId, error)
         await this.deleteRoomIdFromRooms(roomId)
         const newRoomId = await this.getRelevantRoom(recipient)
         logger.log(`sendMessage`, `Old room deleted, new room created`, newRoomId)
-        ;(await this.client.promise)
-          .sendTextMessage(newRoomId, encryptedMessage)
-          .catch(async (error2) => {
-            logger.log(`sendMessage`, `inner error`, newRoomId, error2)
-          })
+        try {
+          await (await this.client.promise).sendTextMessage(newRoomId, encryptedMessage)
+        } catch (error2) {
+          logger.log(`sendMessage`, `inner error`, newRoomId, error2)
+          throw error2
+        }
       } else {
         logger.log(`sendMessage`, `unexpected error`, error)
+        throw error
       }
-    })
+    }
   }
 
   public async updatePeerRoom(sender: string, roomId: string): Promise<void> {

@@ -77,4 +77,36 @@ describe('MatrixClient', () => {
       jest.useRealTimers()
     }
   })
+
+  it('generates unique txn ids for concurrent sends', async () => {
+    const store = createStore()
+    await store.update({ accessToken: 'access-token' })
+    const eventEmitter = {
+      onStateChanged: jest.fn(),
+      on: jest.fn(),
+      removeListener: jest.fn()
+    }
+    const eventService = {
+      sendMessage: jest.fn().mockResolvedValue({ event_id: '$event' })
+    }
+    const client = new MatrixClient(
+      store as any,
+      eventEmitter as any,
+      {} as any,
+      {} as any,
+      eventService as any,
+      {} as any
+    )
+    ;(client as any)._isReady.resolve()
+
+    await Promise.all([
+      client.sendTextMessage('!room:id', 'message-a'),
+      client.sendTextMessage('!room:id', 'message-b')
+    ])
+
+    const txnIds = eventService.sendMessage.mock.calls.map((call) => call[3])
+
+    expect(txnIds).toHaveLength(2)
+    expect(new Set(txnIds).size).toBe(2)
+  })
 })

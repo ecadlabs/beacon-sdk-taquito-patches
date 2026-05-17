@@ -33,6 +33,7 @@ const RETRY_INTERVAL = 5000
 export class MatrixClient {
   private isActive: boolean = true
   private _isReady: ExposedPromise<void> = new ExposedPromise()
+  private txnIdLock: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly store: MatrixClientStore,
@@ -391,13 +392,25 @@ export class MatrixClient {
    * Create a transaction ID
    */
   private async createTxnId(): Promise<string> {
-    const timestamp = new Date().getTime()
-    const counter = this.store.get('txnNo')
-
-    await this.store.update({
-      txnNo: counter + 1
+    const previousTxnIdLock = this.txnIdLock
+    let unlockTxnId!: () => void
+    this.txnIdLock = new Promise<void>((resolve) => {
+      unlockTxnId = resolve
     })
 
-    return `m${timestamp}.${counter}`
+    await previousTxnIdLock
+
+    try {
+      const timestamp = new Date().getTime()
+      const counter = this.store.get('txnNo')
+
+      await this.store.update({
+        txnNo: counter + 1
+      })
+
+      return `m${timestamp}.${counter}`
+    } finally {
+      unlockTxnId()
+    }
   }
 }
