@@ -34,8 +34,8 @@
     "@ecadlabs/beacon-core": "4.8.4-ecad",
     "@ecadlabs/beacon-types": "4.8.4-ecad",
     "qrcode": "^1.5.3",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@rollup/plugin-babel": "^6.0.4",
@@ -47,21 +47,21 @@
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.2",
-    "@types/chrome": "^0.1.40",
+    "@types/chrome": "^0.1.43",
     "@types/node": "^22.19.17",
-    "@types/react": "^19.2.14",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
+    "@vitejs/plugin-react": "^6.0.2",
     "postcss-import": "^16.1.0",
-    "rollup": "^4.60.2",
+    "rollup": "^4.62.2",
     "rollup-plugin-postcss": "^4.0.2",
     "rollup-plugin-string": "^3.0.0",
     "rollup-plugin-typescript2": "^0.37.0",
-    "vite": "^8.0.9"
+    "vite": "^8.0.16"
   },
   "optionalDependencies": {
-    "@rollup/rollup-darwin-arm64": "4.60.2",
-    "@rollup/rollup-linux-x64-gnu": "4.60.2"
+    "@rollup/rollup-darwin-arm64": "4.62.2",
+    "@rollup/rollup-linux-x64-gnu": "4.62.2"
   },
   "publishConfig": {
     "access": "public"
