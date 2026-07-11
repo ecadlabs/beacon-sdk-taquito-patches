@@ -34,9 +34,9 @@
     "@ecadlabs/beacon-core": "4.8.4-ecad",
     "@ecadlabs/beacon-types": "4.8.4-ecad",
     "@ecadlabs/beacon-utils": "4.8.4-ecad",
-    "@walletconnect/sign-client": "2.18.0",
-    "@walletconnect/types": "2.18.0",
-    "@walletconnect/utils": "2.18.0"
+    "@walletconnect/sign-client": "2.23.10",
+    "@walletconnect/types": "2.23.10",
+    "@walletconnect/utils": "2.23.10"
   },
   "publishConfig": {
     "access": "public"
