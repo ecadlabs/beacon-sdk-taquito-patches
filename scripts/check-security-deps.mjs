@@ -10,6 +10,12 @@ const minimumVersions = {
   'picomatch': '2.3.2'
 }
 
+const pinnedVersions = {
+  '@walletconnect/sign-client': '2.18.0',
+  '@walletconnect/types': '2.18.0',
+  '@walletconnect/utils': '2.18.0'
+}
+
 const compareSemver = (left, right) => {
   const leftParts = left.split('.').map((part) => Number.parseInt(part, 10))
   const rightParts = right.split('.').map((part) => Number.parseInt(part, 10))
@@ -30,8 +36,10 @@ const compareSemver = (left, right) => {
   return 0
 }
 
+const rootManifest = readJson(path.join(repoRoot, 'package.json'))
 const manifests = [
   readJson(path.join(repoRoot, 'packages', 'beacon-core', 'package.json')),
+  readJson(path.join(repoRoot, 'packages', 'beacon-dapp', 'package.json')),
   readJson(path.join(repoRoot, 'packages', 'beacon-utils', 'package.json')),
   readJson(path.join(repoRoot, 'packages', 'beacon-transport-walletconnect', 'package.json'))
 ]
@@ -46,6 +54,7 @@ const getResolvedEntries = (dependencyName) =>
 
 const beaconUtilsManifest = manifests.find((manifest) => manifest.name === '@ecadlabs/beacon-utils')
 const beaconCoreManifest = manifests.find((manifest) => manifest.name === '@ecadlabs/beacon-core')
+const beaconDappManifest = manifests.find((manifest) => manifest.name === '@ecadlabs/beacon-dapp')
 const walletConnectTransportManifest = manifests.find(
   (manifest) => manifest.name === '@ecadlabs/beacon-transport-walletconnect'
 )
@@ -70,6 +79,47 @@ if (beaconCoreManifest.dependencies?.['@stablelib/ed25519']) {
 
 if (walletConnectTransportManifest.dependencies?.elliptic) {
   failures.push('@ecadlabs/beacon-transport-walletconnect must not declare elliptic')
+}
+
+if (beaconDappManifest.dependencies?.['@walletconnect/types'] !== pinnedVersions['@walletconnect/types']) {
+  failures.push(
+    `@ecadlabs/beacon-dapp declares @walletconnect/types@${beaconDappManifest.dependencies?.['@walletconnect/types'] ?? 'missing'}, expected exact ${pinnedVersions['@walletconnect/types']}`
+  )
+}
+
+for (const [dependencyName, pinnedVersion] of Object.entries(pinnedVersions)) {
+  if (rootManifest.dependencies?.[dependencyName] !== pinnedVersion) {
+    failures.push(
+      `root package.json declares ${dependencyName}@${rootManifest.dependencies?.[dependencyName] ?? 'missing'}, expected exact ${pinnedVersion}`
+    )
+  }
+
+  if (rootManifest.overrides?.[dependencyName] !== pinnedVersion) {
+    failures.push(
+      `root package.json overrides ${dependencyName}@${rootManifest.overrides?.[dependencyName] ?? 'missing'}, expected exact ${pinnedVersion}`
+    )
+  }
+
+  if (walletConnectTransportManifest.dependencies?.[dependencyName] !== pinnedVersion) {
+    failures.push(
+      `@ecadlabs/beacon-transport-walletconnect declares ${dependencyName}@${walletConnectTransportManifest.dependencies?.[dependencyName] ?? 'missing'}, expected exact ${pinnedVersion}`
+    )
+  }
+
+  const resolvedEntries = getResolvedEntries(dependencyName)
+
+  if (resolvedEntries.length === 0) {
+    failures.push(`package-lock.json is missing resolved entry for ${dependencyName}`)
+    continue
+  }
+
+  for (const entry of resolvedEntries) {
+    if (entry.version !== pinnedVersion) {
+      failures.push(
+        `package-lock.json resolves ${dependencyName}@${entry.version ?? 'missing'} at ${entry.packagePath}, expected exact ${pinnedVersion}`
+      )
+    }
+  }
 }
 
 for (const [dependencyName, minimumVersion] of Object.entries(minimumVersions)) {

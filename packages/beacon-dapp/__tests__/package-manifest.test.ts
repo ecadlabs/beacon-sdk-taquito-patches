@@ -7,7 +7,7 @@ describe('@ecadlabs/beacon-dapp package manifest', () => {
     dependencies?: Record<string, string>
   }
 
-  it('declares WalletConnect types used by its published TypeScript surface', () => {
-    expect(manifest.dependencies?.['@walletconnect/types']).toEqual(expect.any(String))
+  it('pins WalletConnect types to 2.18.0 for Kukai iOS compatibility', () => {
+    expect(manifest.dependencies?.['@walletconnect/types']).toBe('2.18.0')
   })
 })
