@@ -180,7 +180,12 @@ export class MatrixClient {
     this.session = Symbol('Matrix client session')
     this._isReady = new ExposedPromise()
 
-    return this.httpClient.cancelAllRequests()
+    try {
+      await this.httpClient.cancelAllRequests()
+    } finally {
+      // P2P reset deletes preserved state after stop; older writes must settle first.
+      await this.store.flush()
+    }
   }
 
   /**

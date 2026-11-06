@@ -60,6 +60,7 @@ export class MatrixClientStore {
    * A promise that resolves once the client is ready
    */
   private readonly waitReadyPromise: Promise<void>
+  private persistence: Promise<void> = Promise.resolve()
 
   constructor(private readonly storage: Storage) {
     this.waitReadyPromise = new Promise<void>(async (resolve, reject) => {
@@ -102,9 +103,17 @@ export class MatrixClientStore {
 
     const oldState = Object.assign({}, this.state)
     this.setState(stateUpdate)
-    this.updateStorage(stateUpdate)
+    const persistence = this.updateStorage(stateUpdate)
 
     this.notifyListeners(oldState, this.state, stateUpdate)
+    await persistence
+  }
+
+  /** Drain writes after the client has stopped producing state updates. */
+  public async flush(): Promise<void> {
+    // Failed initialization cannot enqueue writes, but must not prevent teardown.
+    await this.waitReady().catch(() => undefined)
+    await this.persistence
   }
 
   /**
@@ -168,7 +177,7 @@ export class MatrixClientStore {
    *
    * @param stateUpdate
    */
-  private updateStorage(stateUpdate: Partial<MatrixStateUpdate>): void {
+  private updateStorage(stateUpdate: Partial<MatrixStateUpdate>): Promise<void> {
     const preservedState = {
       syncToken: this.state.syncToken,
       rooms: this.state.rooms
@@ -178,11 +187,16 @@ export class MatrixClientStore {
     )
 
     if (hasUpdatedCachedFields) {
-      // sync method, latest-wins write — observe rejection so it surfaces in logs.
-      this.storage
-        .set(StorageKey.MATRIX_PRESERVED_STATE, this.prepareData(preservedState))
+      const snapshot = this.prepareData(preservedState)
+      // Serialize snapshots and recover the queue so a failed write cannot block teardown.
+      this.persistence = this.persistence
+        .then(() => this.storage.set(StorageKey.MATRIX_PRESERVED_STATE, snapshot))
         .catch((error) => logger.error('updateStorage', 'failed to persist matrix state', error))
+
+      return this.persistence
     }
+
+    return Promise.resolve()
   }
 
   /**
