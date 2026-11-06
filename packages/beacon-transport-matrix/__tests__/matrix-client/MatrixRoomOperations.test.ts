@@ -28,17 +28,18 @@ const createReadyClient = async () => {
   await store.update({ accessToken: 'access-token' })
   const http = new MatrixHttpClient('https://matrix.example')
   const roomService = new MatrixRoomService(http)
+  const eventService = new MatrixEventService(http)
   const client = new MatrixClient(
     store,
     new MatrixClientEventEmitter(),
     new MatrixUserService(http),
     roomService,
-    new MatrixEventService(http),
+    eventService,
     http
   )
   // Login/polling readiness is a precondition; this suite exercises room operations.
   jest.spyOn(client, 'isConnected').mockResolvedValue(undefined)
-  return { client, roomService }
+  return { client, roomService, eventService, store }
 }
 
 describe('Matrix room operation completion', () => {
@@ -143,5 +144,39 @@ describe('Matrix room operation completion', () => {
     response.resolve({ room_id: '!room:relay' })
     await expect(operation).resolves.toBeUndefined()
     expect(completed).toBe(true)
+  })
+
+  it('does not join a room when stopped after readiness resolves', async () => {
+    const { client, roomService } = await createReadyClient()
+    const join = jest.spyOn(roomService, 'joinRoom').mockResolvedValue({ room_id: '!room:relay' })
+    const operation = client.joinRooms('!room:relay')
+    const rejection = expect(operation).rejects.toMatchObject({ name: 'AbortError' })
+
+    await client.stop()
+
+    await rejection
+    expect(join).not.toHaveBeenCalled()
+  })
+
+  it('does not send a message when stopped while its transaction ID is pending', async () => {
+    const { client, eventService, store } = await createReadyClient()
+    const updating = deferred<void>()
+    const release = deferred<void>()
+    const update = store.update.bind(store)
+    jest.spyOn(store, 'update').mockImplementation(async (state) => {
+      updating.resolve(undefined)
+      await release.promise
+      await update(state)
+    })
+    const send = jest.spyOn(eventService, 'sendMessage').mockResolvedValue({ event_id: '$event' })
+    const operation = client.sendTextMessage('!room:relay', 'hello')
+    const rejection = expect(operation).rejects.toMatchObject({ name: 'AbortError' })
+
+    await updating.promise
+    await client.stop()
+    release.resolve(undefined)
+
+    await rejection
+    expect(send).not.toHaveBeenCalled()
   })
 })
