@@ -459,6 +459,24 @@ describe('P2PCommunicationClient', () => {
       }
     })
 
+    it('propagates a rejected channel-opening callback to the Matrix event boundary', async () => {
+      jest.spyOn(client, 'isChannelOpenMessage').mockResolvedValue(true)
+      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      jest.mocked(openCryptobox).mockResolvedValue(JSON.stringify({ publicKey: 'ab'.repeat(32) }))
+      const failure = new Error('pairing callback failed')
+      const rejected = Promise.reject(failure)
+      // Observe the original promise even on the broken path that discards it.
+      void rejected.catch(() => undefined)
+      const callback = jest.fn(() => rejected)
+      await client.listenForChannelOpening(callback)
+      const listener: (event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => Promise<void> =
+        fakeMatrixClient.subscribe.mock.calls[0][1]
+
+      await expect(listener(messageEvent('ab'.repeat(24)))).rejects.toBe(failure)
+      expect(callback).toHaveBeenCalledTimes(1)
+    })
+
     it.each(['', 'hello', 'Tezos π'])('accepts a string body: %p', (body) => {
       expect(client.isTextMessage(messageEvent(body).content)).toBe(true)
     })

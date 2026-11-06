@@ -180,20 +180,17 @@ export class PostMessageTransport<
   public async listen(publicKey: string): Promise<void> {
     logger.log('listen', publicKey)
 
-    await this.client
-      .listenForEncryptedMessage(publicKey, (message: string, context: ConnectionContext) => {
+    await this.client.listenForEncryptedMessage(
+      publicKey,
+      (message: string, context: ConnectionContext) => {
         const connectionContext: ConnectionContext = {
           origin: Origin.EXTENSION,
           id: context.id
         }
 
-        return this.notifyListeners(message, connectionContext).catch((error) => {
-          logger.error('listen', error)
-        })
-      })
-      .catch((error) => {
-        throw error
-      })
+        return this.notifyListeners(message, connectionContext)
+      }
+    )
   }
 }
 
