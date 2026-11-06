@@ -1087,6 +1087,9 @@ export class DAppClient extends Client {
     let removeAbortListener: () => void = () => undefined
     this._initPromise = new Promise(async (resolve, reject) => {
       const abort = () => {
+        this.walletConnectTransport
+          ?.stopListeningForNewPeers()
+          .catch((error) => logger.error('stopListeningForNewPeers', error))
         this._initPromise = undefined
         reject(this.createAbortedError())
       }

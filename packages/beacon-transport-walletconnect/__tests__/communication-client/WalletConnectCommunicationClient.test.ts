@@ -670,6 +670,7 @@ describe('String message dispatching', () => {
       receivedMessages.push(JSON.parse(serialized) as Record<string, unknown>)
     })
 
+    await client.listenForChannelOpening(() => true)
     await client.getPairingRequestInfo()
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -708,6 +709,7 @@ describe('String message dispatching', () => {
     await client.listenForEncryptedMessage('dapp-listener', (serialized) => {
       receivedMessages.push(JSON.parse(serialized) as Record<string, unknown>)
     })
+    await client.listenForChannelOpening(() => true)
     await client.getPairingRequestInfo()
     await new Promise((resolve) => setTimeout(resolve, 0))
 

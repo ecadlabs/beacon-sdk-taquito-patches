@@ -110,13 +110,17 @@ function getStringBetween(str: string | undefined, startChar: string, endChar: s
   return str.substring(startIndex + 1, endIndex)
 }
 
+type ChannelOpeningListener = (
+  pairingResponse: ExtendedWalletConnectPairingResponse,
+  isCurrent: () => boolean
+) => void | boolean | Promise<void | boolean>
+
 export class WalletConnectCommunicationClient extends CommunicationClient {
   protected readonly activeListeners: Map<string, (message: string) => void> = new Map()
 
-  protected readonly channelOpeningListeners: Map<
-    string,
-    (pairingResponse: ExtendedWalletConnectPairingResponse) => void
-  > = new Map()
+  protected readonly channelOpeningListeners: Map<string, ChannelOpeningListener> = new Map()
+  private pairingGeneration = 0
+  private approvalQueue: Promise<void> = Promise.resolve()
 
   private static instance: WalletConnectCommunicationClient
   public signClient: Client | undefined
@@ -184,15 +188,13 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     this.activeListeners.set(senderPublicKey, callbackFunction)
   }
 
-  public async listenForChannelOpening(
-    messageCallback: (pairingResponse: ExtendedWalletConnectPairingResponse) => void
-  ): Promise<void> {
-    const callbackFunction = async (
-      pairingResponse: ExtendedWalletConnectPairingResponse
-    ): Promise<void> => {
-      messageCallback(pairingResponse)
-    }
-    this.channelOpeningListeners.set('channelOpening', callbackFunction)
+  public async listenForChannelOpening(messageCallback: ChannelOpeningListener): Promise<void> {
+    this.channelOpeningListeners.set('channelOpening', messageCallback)
+  }
+
+  public cancelPendingPairing(): void {
+    this.pairingGeneration++
+    this.pairingRequestPromise = undefined
   }
 
   /**
@@ -262,12 +264,13 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   }
 
   async unsubscribeFromEncryptedMessages(): Promise<void> {
+    this.cancelPendingPairing()
     this.activeListeners.clear()
     this.channelOpeningListeners.clear()
   }
 
-  async unsubscribeFromEncryptedMessage(_senderPublicKey: string): Promise<void> {
-    // implementation
+  public async unsubscribeFromEncryptedMessage(senderPublicKey: string): Promise<void> {
+    this.activeListeners.delete(senderPublicKey)
   }
 
   async closeSignClient() {
@@ -648,6 +651,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   public async init(
     forceNewConnection: boolean = false
   ): Promise<{ uri: string; topic: string } | undefined> {
+    const generation = ++this.pairingGeneration
+    const isCurrent = () => generation === this.pairingGeneration
     logger.warn('init')
     this.disconnectionEvents.size && this.disconnectionEvents.clear()
 
@@ -656,6 +661,9 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     }
 
     const signClient = await this.getSignClient()
+    if (!isCurrent()) {
+      return
+    }
 
     if (!signClient) {
       throw new Error('Failed to connect to the relayer.')
@@ -667,7 +675,11 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       const restoredSession = signClient.session.get(signClient.session.keys[lastIndex])
 
       // Validate session is not stale
-      if (await this.isSessionValid(restoredSession)) {
+      const valid = await this.isSessionValid(restoredSession)
+      if (!isCurrent()) {
+        return
+      }
+      if (valid) {
         this.session = restoredSession
         this.updateStorageWallet(this.session)
         this.setDefaultAccountAndNetwork()
@@ -732,7 +744,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       'WalletConnect pairing ping timed out.'
     )
       .then(async () => {
-        if (!hasResponse) {
+        if (!hasResponse && isCurrent()) {
           // Only show "waiting for acknowledge" message if pong arrives before response
           const fun = this.eventHandlers.get(ClientEvents.WC_ACK_NOTIFICATION)
           fun && fun('pending')
@@ -742,14 +754,20 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
     approval()
       .then((session) => {
-        logger.debug('session open')
-
         hasResponse = true
+        // Finish rollback before another approval can persist the same wallet public key.
+        const delivery = this.approvalQueue.then(async () => {
+          if (!isCurrent()) {
+            await this.discardApproval(signClient, session)
 
-        this.updateStorageWallet(session)
+            return
+          }
 
-        const pairingResponse: ExtendedWalletConnectPairingResponse =
-          new ExtendedWalletConnectPairingResponse(
+          this.validateReceivedNamespace(permissionScopeParams, session.namespaces)
+          const previousSession = this.session
+          this.session = session
+          const ownsSession = () => isCurrent() && this.session?.topic === session.topic
+          const pairingResponse = new ExtendedWalletConnectPairingResponse(
             session.topic,
             session.peer.metadata.name,
             session.peer.publicKey,
@@ -758,25 +776,35 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
             session.peer.metadata.name
           )
 
-        this.channelOpeningListeners.forEach((listener) => {
-          listener(pairingResponse)
+          let accepted = false
+          try {
+            for (const listener of this.channelOpeningListeners.values()) {
+              if (!ownsSession()) {
+                break
+              }
+              accepted = (await listener(pairingResponse, ownsSession)) !== false
+            }
+          } finally {
+            if (!accepted) {
+              if (this.session?.topic === session.topic) {
+                this.session = previousSession
+              }
+              await this.discardApproval(signClient, session)
+            }
+          }
+          if (accepted && this.session?.topic === session.topic) {
+            this.updateStorageWallet(session)
+          }
         })
+        this.approvalQueue = delivery.catch(() => undefined)
 
-        if (session?.controller !== this.session?.controller) {
-          logger.debug('Controller doesnt match, closing active session', [session.pairingTopic])
-          this.activeAccountOrPbk && this.closeActiveSession(this.activeAccountOrPbk, false)
-          this.session = undefined // close the previous session
-        }
-
-        // We need this check in the event the user aborts the sync process on the wallet side
-        // but there is already a connection set
-        this.session = this.session ?? session
-        logger.debug('Session is now', [session.pairingTopic])
-
-        this.validateReceivedNamespace(permissionScopeParams, this.session.namespaces)
+        return delivery
       })
       .catch(async (error: any) => {
         hasResponse = true
+        if (!isCurrent()) {
+          return
+        }
         if (
           !error.message ||
           !error.message.length ||
@@ -809,9 +837,11 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       })
       .then(async () => {
         const isLeader = await this.isLeader()
-        if (!isLeader && !this.isMobileOS()) {
+        if (isCurrent() && !isLeader && !this.isMobileOS()) {
           await this.closeSignClient()
-          this.clearState()
+          if (isCurrent()) {
+            this.clearState()
+          }
         }
       })
 
@@ -820,7 +850,20 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     return { uri: uri ?? '', topic }
   }
 
+  private async discardApproval(signClient: Client, session: SessionTypes.Struct): Promise<void> {
+    try {
+      await this.withTimeout(
+        signClient.disconnect({ topic: session.topic, reason: getSdkError('USER_DISCONNECTED') }),
+        WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
+        'WalletConnect discarded approval disconnect timed out.'
+      )
+    } catch (error) {
+      logger.warn('discardApproval', getErrorDiagnostic(error))
+    }
+  }
+
   public async close() {
+    this.cancelPendingPairing()
     await this.closePairings()
     this.unsubscribeFromEncryptedMessages()
     this.messageIds = []
@@ -1025,9 +1068,12 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
   public async getPairingRequestInfo(): Promise<ExtendedWalletConnectPairingRequest> {
     if (!this.pairingRequestPromise) {
-      this.pairingRequestPromise = this.createPairingRequestInfo().finally(() => {
-        this.pairingRequestPromise = undefined
+      const request = this.createPairingRequestInfo().finally(() => {
+        if (this.pairingRequestPromise === request) {
+          this.pairingRequestPromise = undefined
+        }
       })
+      this.pairingRequestPromise = request
     }
 
     return this.pairingRequestPromise
