@@ -847,8 +847,10 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     signClient.on('session_event', (event) => {
       if (
         event.params.event.name === PermissionScopeEvents.REQUEST_ACKNOWLEDGED &&
+        this.session?.topic === event.topic &&
         this.messageIds.length
       ) {
+        // requestAcknowledged has no defined request ID; retain the existing queue selection.
         this.acknowledgeRequest(this.messageIds[0])
       }
     })

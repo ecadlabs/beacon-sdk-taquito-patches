@@ -2340,51 +2340,70 @@ describe('DAppClient — basic unit tests', () => {
     }
   })
 
-  it('keeps acknowledged requests open without timing them out', async () => {
-    jest.useFakeTimers()
-    ;(window as any).beaconCreatedClientInstance = false
-    const timeoutClient = new DAppClient({
-      name: 'TimeoutApp',
-      storage: new LocalStorage(),
-      preferredNetwork: NetworkType.MAINNET,
-      requestTimeoutMs: 10
-    })
-    timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
-    const channelClosedHandler = jest.fn()
-    timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
-    jest.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
+  it.each(['valid', 'unknown', 'closed'])(
+    'handles a %s ACK without clearing unrelated request timeouts',
+    async (ackKind) => {
+      jest.useFakeTimers()
+      ;(window as any).beaconCreatedClientInstance = false
+      const timeoutClient = new DAppClient({
+        name: 'TimeoutApp',
+        storage: new LocalStorage(),
+        preferredNetwork: NetworkType.MAINNET,
+        requestTimeoutMs: 10
+      })
+      timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
+      const channelClosedHandler = jest.fn()
+      timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
+      jest.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
 
-    const operationRequest = new ExposedPromise<unknown, unknown>()
-    const rejection = jest.fn()
-    void operationRequest.promise.catch(rejection)
+      const operationRequest = new ExposedPromise<unknown, unknown>()
+      const rejection = jest.fn()
+      void operationRequest.promise.catch(rejection)
 
-    try {
-      ;(timeoutClient as any).addOpenRequest('acknowledged-request-id', operationRequest)
+      try {
+        ;(timeoutClient as any).addOpenRequest('acknowledged-request-id', operationRequest)
 
-      await (timeoutClient as any).handleResponse(
-        {
-          id: 'acknowledged-request-id',
-          version: '2',
-          senderId: 'wallet-sender-id',
-          type: BeaconMessageType.Acknowledge
-        },
-        {
-          origin: Origin.P2P,
-          id: 'wallet-public-key'
+        if (ackKind === 'closed') {
+          timeoutClient['addOpenRequest']('closed-request-id', new ExposedPromise())
+          timeoutClient['clearOpenRequest']('closed-request-id')
         }
-      )
 
-      jest.advanceTimersByTime(10)
-      await Promise.resolve()
+        await timeoutClient['handleResponse'](
+          {
+            id: ackKind === 'valid' ? 'acknowledged-request-id' : `${ackKind}-request-id`,
+            version: '2',
+            senderId: 'wallet-sender-id',
+            type: BeaconMessageType.Acknowledge
+          },
+          {
+            origin: Origin.WALLETCONNECT,
+            id: 'wallet-public-key'
+          }
+        )
 
-      expect(rejection).not.toHaveBeenCalled()
-      expect(channelClosedHandler).not.toHaveBeenCalled()
-      expect((timeoutClient as any).openRequests.has('acknowledged-request-id')).toBe(true)
-    } finally {
-      ;(timeoutClient as any).clearOpenRequest('acknowledged-request-id')
-      jest.useRealTimers()
+        jest.advanceTimersByTime(10)
+        await Promise.resolve()
+
+        if (ackKind === 'valid') {
+          expect(rejection).not.toHaveBeenCalled()
+          expect(channelClosedHandler).not.toHaveBeenCalled()
+          expect(timeoutClient['openRequests'].has('acknowledged-request-id')).toBe(true)
+        } else {
+          expect(rejection).toHaveBeenCalledWith(
+            expect.objectContaining({
+              id: 'acknowledged-request-id',
+              errorType: BeaconErrorType.PEER_UNREACHABLE
+            })
+          )
+          expect(channelClosedHandler).toHaveBeenCalledTimes(1)
+          expect(timeoutClient['openRequests'].has('acknowledged-request-id')).toBe(false)
+        }
+      } finally {
+        ;(timeoutClient as any).clearOpenRequest('acknowledged-request-id')
+        jest.useRealTimers()
+      }
     }
-  })
+  )
 
   it('does not time out the walletconnect session_update marker', async () => {
     jest.useFakeTimers()
