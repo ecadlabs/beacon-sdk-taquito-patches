@@ -168,7 +168,7 @@ describe('MatrixHttpClient sync query requests', () => {
     await expect(client.get<MatrixSyncResponse>('/sync', { timeout: 1 })).rejects.toBe(failure)
   })
 
-  it('retains the abort signal and cancellation reason for issued requests', async () => {
+  it('aborts issued requests with a native AbortError', async () => {
     const client = new MatrixHttpClient('https://matrix.example')
     await client.get<MatrixSyncResponse>('/sync', { timeout: 1 })
     const signal = fetchMock.mock.calls[0]?.[1]?.signal
@@ -177,6 +177,52 @@ describe('MatrixHttpClient sync query requests', () => {
     await client.cancelAllRequests()
 
     expect(signal?.aborted).toBe(true)
-    expect(signal?.reason).toBe('Manually cancelled')
+    expect(signal?.reason).toBeInstanceOf(DOMException)
+    expect(signal?.reason.name).toBe('AbortError')
+  })
+
+  it('rejects with AbortError when cancelled after headers while reading the body', async () => {
+    const client = new MatrixHttpClient('https://matrix.example')
+    let bodyReadStarted!: () => void
+    const readingBody = new Promise<void>((resolve) => {
+      bodyReadStarted = resolve
+    })
+    fetchMock.mockImplementationOnce(async (_url, init) => {
+      const signal = init?.signal
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener('abort', () => controller.error(signal.reason), { once: true })
+        }
+      })
+      const pendingResponse = new Response(body)
+      const readText = pendingResponse.text.bind(pendingResponse)
+      jest.spyOn(pendingResponse, 'text').mockImplementation(() => {
+        const pendingText = readText()
+        bodyReadStarted()
+        return pendingText
+      })
+      return pendingResponse
+    })
+
+    const request = client.get<MatrixSyncResponse>('/sync')
+    const rejection = expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    await readingBody
+    await client.cancelAllRequests()
+    await rejection
+    await expect(client.get<MatrixSyncResponse>('/sync')).resolves.toEqual(response)
+    expect(fetchMock.mock.calls[1]?.[1]?.signal?.aborted).toBe(false)
+  })
+
+  it('allows subsequent requests after repeated cancellations', async () => {
+    const client = new MatrixHttpClient('https://matrix.example')
+    fetchMock.mockImplementation(async (_url, init) => {
+      init?.signal?.throwIfAborted()
+      return Response.json(response)
+    })
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await client.cancelAllRequests()
+      await expect(client.get<MatrixSyncResponse>('/sync')).resolves.toEqual(response)
+    }
   })
 })

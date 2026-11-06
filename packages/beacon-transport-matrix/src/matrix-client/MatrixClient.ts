@@ -305,6 +305,11 @@ export class MatrixClient {
     await this.requiresAuthorization('send', async (accessToken) => {
       const txnId = await this.createTxnId()
 
+      // Stop may run while the transaction ID is being persisted.
+      if (!this.isActive) {
+        throw new DOMException('Matrix client stopped', 'AbortError')
+      }
+
       return this.eventService.sendMessage(
         accessToken,
         roomId,
@@ -397,6 +402,10 @@ export class MatrixClient {
     name: string,
     action: (accessToken: string) => Promise<T>
   ): Promise<T> {
+    if (!this.isActive) {
+      throw new DOMException('Matrix client stopped', 'AbortError')
+    }
+
     const storedToken: string | undefined = this.store.get('accessToken')
 
     if (!storedToken) {

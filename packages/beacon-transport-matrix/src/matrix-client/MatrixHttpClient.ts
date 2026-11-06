@@ -15,7 +15,7 @@ const CLIENT_API_R0 = '/_matrix/client/r0'
  * Handling the HTTP connection to the matrix synapse node
  */
 export class MatrixHttpClient {
-  private readonly abortController: AbortController
+  private abortController: AbortController
 
   constructor(private readonly baseUrl: string) {
     this.abortController = new AbortController()
@@ -57,7 +57,8 @@ export class MatrixHttpClient {
   }
 
   public async cancelAllRequests(): Promise<void> {
-    this.abortController.abort('Manually cancelled')
+    this.abortController.abort()
+    this.abortController = new AbortController()
   }
 
   /**
