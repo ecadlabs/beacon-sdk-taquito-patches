@@ -17,6 +17,7 @@ describe('MatrixClient', () => {
       update: jest.fn(async (update: Record<string, unknown>) => {
         Object.assign(state, update)
       }),
+      flush: jest.fn().mockResolvedValue(undefined),
       onStateChanged: jest.fn(),
       getRoom: jest.fn()
     }

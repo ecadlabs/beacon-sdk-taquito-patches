@@ -1,3 +1,5 @@
+import { setImmediate } from 'node:timers/promises'
+import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { LocalStorage, Logger } from '@ecadlabs/beacon-core'
 import { StorageKey } from '@ecadlabs/beacon-types'
 import { MatrixClientStore } from '../../src/matrix-client/MatrixClientStore'
@@ -70,6 +72,121 @@ describe('Matrix preserved room state', () => {
 
     await store.update({ syncToken: 'next-sync' })
     expect(write).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not resolve update until its preserved-state write settles', async () => {
+    const storage = new LocalStorage()
+    const entered = new ExposedPromise<void>()
+    const release = new ExposedPromise<void>()
+    const set = storage.set.bind(storage)
+    jest.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
+      entered.resolve()
+      await release.promise
+      await set(key, value)
+    })
+    const store = new MatrixClientStore(storage)
+    let settled = false
+    const updating = store.update({ syncToken: 'held-sync' }).then(() => {
+      settled = true
+    })
+    await entered.promise
+    try {
+      await setImmediate()
+      expect(settled).toBe(false)
+    } finally {
+      release.resolve()
+      await updating
+    }
+    await expect(storage.get(StorageKey.MATRIX_PRESERVED_STATE)).resolves.toMatchObject({
+      syncToken: 'held-sync'
+    })
+  })
+
+  it('does not block non-preserved updates behind a held preserved-state write', async () => {
+    const storage = new LocalStorage()
+    const entered = new ExposedPromise<void>()
+    const release = new ExposedPromise<void>()
+    const set = storage.set.bind(storage)
+    const write = jest.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
+      entered.resolve()
+      await release.promise
+      await set(key, value)
+    })
+    const store = new MatrixClientStore(storage)
+    const persisting = store.update({ syncToken: 'held-sync' })
+    await entered.promise
+    let updated = false
+    const updating = store.update({ txnNo: 1 }).then(() => {
+      updated = true
+    })
+    let flushed = false
+    const flushing = store.flush().then(() => {
+      flushed = true
+    })
+    try {
+      await setImmediate()
+      expect(updated).toBe(true)
+      expect(store.get('txnNo')).toBe(1)
+      expect(write).toHaveBeenCalledTimes(1)
+      expect(flushed).toBe(false)
+    } finally {
+      release.resolve()
+      await Promise.all([persisting, updating, flushing])
+    }
+    await expect(storage.get(StorageKey.MATRIX_PRESERVED_STATE)).resolves.toMatchObject({
+      syncToken: 'held-sync'
+    })
+  })
+
+  it('keeps the newer snapshot when successful preserved-state writes overlap', async () => {
+    const storage = new LocalStorage()
+    const entered = new ExposedPromise<void>()
+    const release = new ExposedPromise<void>()
+    const set = storage.set.bind(storage)
+    const write = jest.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
+      entered.resolve()
+      await release.promise
+      await set(key, value)
+    })
+    const store = new MatrixClientStore(storage)
+    const first = store.update({ syncToken: 'old-sync' })
+    await entered.promise
+    const second = store.update({ syncToken: 'new-sync' })
+    try {
+      await setImmediate()
+      expect(write).toHaveBeenCalledTimes(1)
+    } finally {
+      release.resolve()
+      await Promise.all([first, second])
+    }
+    expect(write).toHaveBeenCalledTimes(2)
+    await expect(storage.get(StorageKey.MATRIX_PRESERVED_STATE)).resolves.toMatchObject({
+      syncToken: 'new-sync'
+    })
+  })
+
+  it('persists a later update after a held write rejects', async () => {
+    const storage = new LocalStorage()
+    const entered = new ExposedPromise<void>()
+    const release = new ExposedPromise<void>()
+    const failure = new Error('held write failed')
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
+    jest.spyOn(storage, 'set').mockImplementationOnce(async () => {
+      entered.resolve()
+      await release.promise
+      throw failure
+    })
+    const store = new MatrixClientStore(storage)
+    const first = store.update({ syncToken: 'failed-sync' })
+    await entered.promise
+    const second = store.update({ syncToken: 'new-sync' })
+    release.resolve()
+    await Promise.all([first, second])
+    await setImmediate()
+    expect(error).toHaveBeenCalledWith('updateStorage', 'failed to persist matrix state', failure)
+    await expect(storage.get(StorageKey.MATRIX_PRESERVED_STATE)).resolves.toMatchObject({
+      syncToken: 'new-sync'
+    })
   })
 
   it('logs storage-write failures while retaining the updated in-memory state', async () => {
