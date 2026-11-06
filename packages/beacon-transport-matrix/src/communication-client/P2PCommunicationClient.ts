@@ -835,7 +835,7 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async listenForChannelOpening(
-    messageCallback: (pairingResponse: ExtendedP2PPairingResponse) => void
+    messageCallback: (pairingResponse: ExtendedP2PPairingResponse) => void | Promise<void>
   ): Promise<void> {
     logger.debug('listenForChannelOpening')
     const session = this.captureSession()
@@ -870,6 +870,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       const splits = content.message.content.split(':')
       const payload = Buffer.from(splits[splits.length - 1], 'hex')
       if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
+        let response: ExtendedP2PPairingResponse
         try {
           const keyPair = this.keyPair
           if (!keyPair) {
@@ -886,11 +887,13 @@ export class P2PCommunicationClient extends CommunicationClient {
             JSON.stringify(pairingResponse)
           )
           const senderId = await getSenderId(pairingResponse.publicKey)
-          if (this.isCurrentSession(session)) {
-            messageCallback({ ...pairingResponse, senderId })
-          }
+          response = { ...pairingResponse, senderId }
         } catch {
           // Some channel messages are encrypted for other recipients.
+          return
+        }
+        if (this.isCurrentSession(session)) {
+          await messageCallback(response)
         }
       }
     })

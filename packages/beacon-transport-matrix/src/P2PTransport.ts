@@ -119,19 +119,13 @@ export class P2PTransport<
   }
 
   public async listen(publicKey: string): Promise<void> {
-    await this.client
-      .listenForEncryptedMessage(publicKey, (message) => {
-        const connectionContext: ConnectionContext = {
-          origin: Origin.P2P,
-          id: publicKey
-        }
+    await this.client.listenForEncryptedMessage(publicKey, (message) => {
+      const connectionContext: ConnectionContext = {
+        origin: Origin.P2P,
+        id: publicKey
+      }
 
-        return this.notifyListeners(message, connectionContext).catch((error) => {
-          logger.error('listen', error)
-        })
-      })
-      .catch((error) => {
-        throw error
-      })
+      return this.notifyListeners(message, connectionContext)
+    })
   }
 }

@@ -1,4 +1,7 @@
-import { StorageKey, TransportStatus } from '@ecadlabs/beacon-types'
+import { LocalStorage } from '@ecadlabs/beacon-core'
+import { ExposedPromise } from '@ecadlabs/beacon-utils'
+import { P2PCommunicationClient } from '../src/communication-client/P2PCommunicationClient'
+import { Origin, P2PPairingRequest, StorageKey, TransportStatus } from '@ecadlabs/beacon-types'
 import { P2PTransport } from '../src/P2PTransport'
 
 describe('P2PTransport.connect', () => {
@@ -87,37 +90,88 @@ describe('P2PTransport.connect', () => {
     await outcome
     expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
   })
-  it('returns the message listener completion promise', async () => {
+  it.each(['resolve', 'reject'] as const)('preserves listener %s completion', async (outcome) => {
     const transport = new P2PTransport(
       'test',
-      { publicKey: 'public', secretKey: 'secret' } as any,
-      {} as any,
+      { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) },
+      new LocalStorage(),
       {},
       StorageKey.TRANSPORT_P2P_PEERS_DAPP
     )
-    let receive!: (message: string) => void | Promise<void>
-    jest
-      .spyOn((transport as any).client, 'listenForEncryptedMessage')
-      .mockImplementation(async (_key: unknown, callback: any) => {
+    let receive!: Parameters<P2PCommunicationClient['listenForEncryptedMessage']>[1]
+    const registration = jest
+      .spyOn(P2PCommunicationClient.prototype, 'listenForEncryptedMessage')
+      .mockImplementation(async (_key, callback) => {
         receive = callback
       })
-    let finish!: () => void
-    const pending = new Promise<void>((resolve) => {
-      finish = resolve
-    })
-    await transport.addListener(() => pending)
-    await transport.listen('peer')
-    const delivery = receive('message')
-    expect(delivery).toBeInstanceOf(Promise)
-    let completed = false
-    Promise.resolve(delivery).then(() => {
-      completed = true
-    })
-    await Promise.resolve()
-    expect(completed).toBe(false)
-    finish()
-    await delivery
-    expect(completed).toBe(true)
+    const pending = new ExposedPromise<void>()
+    const listener = jest.fn(() => pending.promise)
+    const failure = new Error('listener failed')
+    try {
+      await transport.addListener(listener)
+      await transport.listen('peer')
+      const delivery = receive('message')
+      expect(delivery).toBeInstanceOf(Promise)
+      let completed = false
+      const observed = Promise.resolve(delivery).finally(() => {
+        completed = true
+      })
+      const assertion =
+        outcome === 'reject'
+          ? expect(observed).rejects.toBe(failure)
+          : expect(observed).resolves.toBeUndefined()
+      await Promise.resolve()
+      expect(completed).toBe(false)
+      expect(listener).toHaveBeenCalledWith('message', { origin: Origin.P2P, id: 'peer' })
+      if (outcome === 'reject') {
+        pending.reject(failure)
+      } else {
+        pending.resolve()
+      }
+      await assertion
+      expect(completed).toBe(true)
+    } finally {
+      registration.mockRestore()
+    }
+  })
+
+  it('fails and cleans up connect when an awaited initial replay listener rejects', async () => {
+    const transport = new P2PTransport(
+      'test',
+      { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) },
+      new LocalStorage(),
+      {},
+      StorageKey.TRANSPORT_P2P_PEERS_DAPP
+    )
+    const start = jest.spyOn(P2PCommunicationClient.prototype, 'start').mockResolvedValue(undefined)
+    const stop = jest.spyOn(P2PCommunicationClient.prototype, 'stop').mockResolvedValue(undefined)
+    const registration = jest
+      .spyOn(P2PCommunicationClient.prototype, 'listenForEncryptedMessage')
+      .mockImplementation(async (_key, callback) => {
+        // The communication client awaits its buffered message before registration returns.
+        await callback('buffered message')
+      })
+    const peers = jest
+      .spyOn(transport, 'getPeers')
+      .mockResolvedValue([new P2PPairingRequest('peer-id', 'Wallet', 'peer', '2', 'relay.example')])
+    const failure = new Error('replayed message listener failed')
+    const listener = jest.fn().mockRejectedValue(failure)
+    try {
+      await transport.addListener(listener)
+      await expect(transport.connect()).rejects.toBe(failure)
+      expect(listener).toHaveBeenCalledWith('buffered message', { origin: Origin.P2P, id: 'peer' })
+      expect(stop).toHaveBeenCalledTimes(1)
+      expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
+
+      listener.mockResolvedValue(undefined)
+      await transport.connect()
+      expect(transport.connectionStatus).toBe(TransportStatus.CONNECTED)
+    } finally {
+      start.mockRestore()
+      stop.mockRestore()
+      registration.mockRestore()
+      peers.mockRestore()
+    }
   })
 
   it('cleans up the initial buffer when a peer is added after a no-peer connection', async () => {
