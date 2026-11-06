@@ -352,16 +352,17 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       return
     }
 
-    this.messageIds.unshift(message.id)
-
     switch (message.type) {
       case BeaconMessageType.PermissionRequest:
+        this.messageIds.unshift(message.id)
         this.requestPermissions(message)
         break
       case BeaconMessageType.OperationRequest:
+        this.messageIds.unshift(message.id)
         this.sendOperations(message)
         break
       case BeaconMessageType.SignPayloadRequest:
+        this.messageIds.unshift(message.id)
         this.signPayload(message)
         break
       default:

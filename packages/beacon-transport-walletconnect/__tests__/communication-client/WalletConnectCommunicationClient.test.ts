@@ -508,4 +508,187 @@ describe('String message dispatching', () => {
     await client.sendMessage(JSON.stringify(msg))
     expect(client.signPayload).toHaveBeenCalled()
   })
+
+  const createApprovedSession = (topic: string, publicKey: string): SessionTypes.Struct =>
+    ({
+      topic,
+      pairingTopic: `pairing-${topic}`,
+      controller: publicKey,
+      expiry: Math.floor(Date.now() / 1000) + 7 * 86400,
+      namespaces: {
+        tezos: {
+          accounts: [`tezos:mainnet:${publicKey}`],
+          methods: ['tezos_getAccounts', 'tezos_send', 'tezos_sign'],
+          events: []
+        }
+      },
+      peer: {
+        publicKey,
+        metadata: {
+          name: 'Test Wallet',
+          description: 'Test Wallet',
+          url: 'https://wallet.example.com',
+          icons: ['https://wallet.example.com/icon.png'],
+          redirect: {}
+        }
+      },
+      sessionProperties: {
+        pubkey: publicKey,
+        algo: 'ed25519',
+        address: 'tz1address'
+      }
+    }) as unknown as SessionTypes.Struct
+
+  it('correlates a reconnect PermissionResponse to the new PermissionRequest after close and Disconnect', async () => {
+    const firstSession = createApprovedSession(
+      'session-topic-1',
+      'edpktp3QT23n223n223n223n223n223n223n223n223n223n223n1'
+    )
+    const secondSession = createApprovedSession(
+      'session-topic-2',
+      'edpktp3QT23n223n223n223n223n223n223n223n223n223n223n2'
+    )
+    const signClient = SignClient as unknown as { init: jest.Mock }
+    const firstSignClient = {
+      ...createResolvedSignClient(),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      connect: jest.fn().mockResolvedValue({
+        uri: 'wc:pairing-topic-1@2?symKey=key-1',
+        approval: () => Promise.resolve(firstSession)
+      })
+    }
+    const secondSignClient = {
+      ...createResolvedSignClient(),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      connect: jest.fn().mockResolvedValue({
+        uri: 'wc:pairing-topic-2@2?symKey=key-2',
+        approval: () => Promise.resolve(secondSession)
+      })
+    }
+    signClient.init
+      .mockResolvedValueOnce(firstSignClient)
+      .mockResolvedValueOnce(secondSignClient)
+
+    const receivedMessages: Array<Record<string, unknown>> = []
+    await client.listenForEncryptedMessage('dapp-listener', (serialized) => {
+      receivedMessages.push(JSON.parse(serialized) as Record<string, unknown>)
+    })
+
+    await client.getPairingRequestInfo()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    await client.sendMessage(
+      JSON.stringify({
+        id: 'permission-request-1',
+        version: '2',
+        senderId: 'dapp-sender',
+        type: BeaconMessageType.PermissionRequest,
+        appMetadata: { senderId: 'dapp-sender', name: 'Test DApp' },
+        network: { type: NetworkType.MAINNET }
+      })
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(receivedMessages).toHaveLength(1)
+    expect(receivedMessages[0]).toMatchObject({
+      type: BeaconMessageType.PermissionResponse,
+      id: 'permission-request-1',
+      senderId: 'session-topic-1'
+    })
+
+    // Simulate DAppClient.disconnect(): transport close followed by outgoing Disconnect message
+    firstSignClient.session.getAll = jest.fn(() => [firstSession])
+    await client.close()
+    await client.sendMessage(
+      JSON.stringify({
+        id: 'disconnect-message-1',
+        version: '2',
+        senderId: 'dapp-sender',
+        type: BeaconMessageType.Disconnect
+      })
+    )
+
+    // Reconnect with a fresh session approval and second PermissionRequest
+    await client.listenForEncryptedMessage('dapp-listener', (serialized) => {
+      receivedMessages.push(JSON.parse(serialized) as Record<string, unknown>)
+    })
+    await client.getPairingRequestInfo()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    await client.sendMessage(
+      JSON.stringify({
+        id: 'permission-request-2',
+        version: '2',
+        senderId: 'dapp-sender',
+        type: BeaconMessageType.PermissionRequest,
+        appMetadata: { senderId: 'dapp-sender', name: 'Test DApp' },
+        network: { type: NetworkType.MAINNET }
+      })
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(receivedMessages).toHaveLength(2)
+    expect(receivedMessages[1]).toMatchObject({
+      type: BeaconMessageType.PermissionResponse,
+      id: 'permission-request-2',
+      senderId: 'session-topic-2'
+    })
+  })
+
+  it('does not let an outbound Disconnect message poison correlation of a subsequent SignPayloadResponse', async () => {
+    const publicKey = 'edpktp3QT23n223n223n223n223n223n223n223n223n223n223n1'
+    const session = createApprovedSession('session-topic-1', publicKey)
+
+    const resolvedClient = {
+      ...createResolvedSignClient(),
+      ping: jest.fn().mockResolvedValue(undefined),
+      request: jest.fn().mockResolvedValue({ signature: 'edsig-valid' })
+    }
+    ;(client as any).signClient = resolvedClient
+    ;(client as any).session = session
+    ;(client as any).activeAccountOrPbk = publicKey
+    ;(client as any).activeNetwork = NetworkType.MAINNET
+
+    const receivedMessages: Array<Record<string, unknown>> = []
+    await client.listenForEncryptedMessage('dapp-listener', (serialized) => {
+      receivedMessages.push(JSON.parse(serialized) as Record<string, unknown>)
+    })
+
+    try {
+      await client.sendMessage(
+        JSON.stringify({
+          id: 'disconnect-message-id',
+          version: '2',
+          senderId: 'dapp-sender',
+          type: BeaconMessageType.Disconnect
+        })
+      )
+
+      const signRequest: SignPayloadRequest = {
+        id: 'sign-request-id',
+        type: BeaconMessageType.SignPayloadRequest,
+        payload: '050100',
+        signingType: SigningType.RAW,
+        senderId: 'dapp-sender',
+        sourceAddress: 'tz1address',
+        version: '2'
+      }
+      await client.sendMessage(JSON.stringify(signRequest))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      const signPayloadResponses = receivedMessages.filter(
+        (message) => message.type === BeaconMessageType.SignPayloadResponse
+      )
+      expect(signPayloadResponses).toHaveLength(1)
+      expect(signPayloadResponses[0]).toMatchObject({
+        type: BeaconMessageType.SignPayloadResponse,
+        id: 'sign-request-id',
+        signature: 'edsig-valid'
+      })
+      expect(receivedMessages.map((message) => message.id)).not.toContain('disconnect-message-id')
+    } finally {
+      clearInterval((client as any).pingInterval)
+      ;(client as any).pingInterval = undefined
+    }
+  })
 })
