@@ -28,7 +28,6 @@ export interface AlertConfig {
   disclaimerText?: string
   analytics?: AnalyticsInterface
   featuredWallets?: string[]
-  substratePairing?: boolean
 }
 
 export interface ConfigurableAlertProps extends Omit<AlertConfig, 'closeButtonCallback'> {

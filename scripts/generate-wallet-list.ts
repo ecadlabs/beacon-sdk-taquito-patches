@@ -10,13 +10,6 @@ import {
 } from '../packages/beacon-types/src/types/ui'
 
 import {
-  substrateExtensionList,
-  substrateDesktopList,
-  substrateWebList,
-  substrateIosList
-} from './blockchains/substrate'
-
-import {
   tezosDesktopList,
   tezosExtensionList,
   tezosIosList,
@@ -37,8 +30,7 @@ const generateForBlockchains = (
   extensionList: ExtensionApp[],
   desktopList: DesktopApp[],
   webList: WebApp[],
-  iosList: App[],
-  outputFileName: string = 'wallet-lists' // default parameter
+  iosList: App[]
 ) => {
   const PKG_DIR = path.join(__dirname, '../')
   const REGISTRY_DIR = path.join(PKG_DIR, 'assets', 'logos')
@@ -86,7 +78,7 @@ const generateForBlockchains = (
 
     out += `export const iOSList: App[] = ${JSON.stringify(iosListWithInlinedLogo, null, 2)}\n`
 
-    await writeFile(path.join(ALERT_DEST_DIR, `${outputFileName}.ts`), out)
+    await writeFile(path.join(ALERT_DEST_DIR, 'wallet-lists.ts'), out)
   }
 
   const createAlert = async () => {
@@ -144,27 +136,9 @@ generateForBlockchains(
 )
 
 generateForBlockchains(
-  'beacon-blockchain-substrate',
-  substrateExtensionList,
-  substrateDesktopList,
-  substrateWebList,
-  substrateIosList
-)
-
-generateForBlockchains(
   'beacon-ui',
   tezosExtensionList,
   tezosDesktopList,
   tezosWebList,
   tezosIosList
-)
-
-// Custom filename example:
-generateForBlockchains(
-  'beacon-ui',
-  substrateExtensionList,
-  substrateDesktopList,
-  substrateWebList,
-  substrateIosList,
-  'substrate-wallet-lists'
 )

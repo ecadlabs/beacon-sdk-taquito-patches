@@ -9,24 +9,26 @@ import {
 import { ExtensionMessageTarget, Origin } from '@ecadlabs/beacon-types'
 import { PostMessageClient } from '../src/PostMessageClient'
 
-jest.mock('@ecadlabs/beacon-core', () => ({
-  ...jest.requireActual('@ecadlabs/beacon-core'),
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
   windowRef: {
-    postMessage: jest.fn(),
-    addEventListener: jest.fn(),
-    removeEventListener: jest.fn(),
+    postMessage: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
     location: { origin: 'https://dapp.example' }
   },
-  getSenderId: jest.fn().mockResolvedValue('beacon-sender-id')
+  getSenderId: vi.fn().mockResolvedValue('beacon-sender-id')
 }))
 
-jest.mock('@ecadlabs/beacon-utils', () => ({
-  ...jest.requireActual('@ecadlabs/beacon-utils'),
-  openCryptobox: jest.fn()
+vi.mock('@ecadlabs/beacon-utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@ecadlabs/beacon-utils')>()),
+  openCryptobox: vi.fn()
 }))
 
 class TestClient extends PostMessageClient {
-  readonly decrypt = jest.fn<Promise<string>, [string, string]>().mockResolvedValue('plaintext')
+  readonly decrypt = vi
+    .fn<(...args: [string, string]) => Promise<string>>()
+    .mockResolvedValue('plaintext')
 
   protected override async decryptMessage(
     senderPublicKey: string,
@@ -76,7 +78,7 @@ const openingEvent = (includeTargetId = true) => ({
 })
 
 const dispatchMessage = async (event: unknown): Promise<void> => {
-  const listeners = jest
+  const listeners = vi
     .mocked(windowRef.addEventListener)
     .mock.calls.filter(([name]) => name === 'message')
     .map(([, listener]) => listener)
@@ -98,8 +100,8 @@ describe('PostMessageClient inbound envelopes', () => {
   let client: TestClient
 
   beforeEach(() => {
-    jest.clearAllMocks()
-    jest.mocked(openCryptobox).mockResolvedValue(JSON.stringify(pairingResponse))
+    vi.clearAllMocks()
+    vi.mocked(openCryptobox).mockResolvedValue(JSON.stringify(pairingResponse))
     client = new TestClient('Dapp', keyPair)
   })
 
@@ -108,9 +110,9 @@ describe('PostMessageClient inbound envelopes', () => {
     { sender: {}, expectedId: '' }
   ])('forwards encrypted messages with sender $expectedId', async ({ sender, expectedId }) => {
     const notification = new ExposedPromise<void>()
-    const callback = jest.fn(() => notification.resolve())
+    const callback = vi.fn(() => notification.resolve())
     await client.listenForEncryptedMessage('peer-public-key', callback)
-    const openingCallback = jest.fn()
+    const openingCallback = vi.fn()
     await client.listenForChannelOpening(openingCallback)
     const event = {
       ...encryptedEvent(),
@@ -219,8 +221,8 @@ describe('PostMessageClient inbound envelopes', () => {
       make: () => ({ ...encryptedEvent(), data: { ...encryptedEvent().data, sender: null } })
     }
   ])('ignores encrypted input with $name before decryption', async ({ make }) => {
-    const callback = jest.fn()
-    const openingCallback = jest.fn()
+    const callback = vi.fn()
+    const openingCallback = vi.fn()
     await client.listenForEncryptedMessage('peer-public-key', callback)
     await client.listenForChannelOpening(openingCallback)
 
@@ -233,9 +235,9 @@ describe('PostMessageClient inbound envelopes', () => {
   })
 
   it('delivers a channel opening at the production minimum with its extension identity', async () => {
-    const callback = jest.fn()
+    const callback = vi.fn()
     await client.listenForChannelOpening(callback)
-    const encryptedCallback = jest.fn()
+    const encryptedCallback = vi.fn()
     await client.listenForEncryptedMessage('peer-public-key', encryptedCallback)
 
     await dispatchMessage(openingEvent())
@@ -340,8 +342,8 @@ describe('PostMessageClient inbound envelopes', () => {
       make: () => ({ ...openingEvent(), data: { ...openingEvent().data, sender: null } })
     }
   ])('ignores channel opening input with $name before cryptography', async ({ make }) => {
-    const callback = jest.fn()
-    const encryptedCallback = jest.fn()
+    const callback = vi.fn()
+    const encryptedCallback = vi.fn()
     await client.listenForChannelOpening(callback)
     await client.listenForEncryptedMessage('peer-public-key', encryptedCallback)
 
@@ -355,8 +357,8 @@ describe('PostMessageClient inbound envelopes', () => {
 
   it('delivers encrypted messages without a targetId', async () => {
     const notification = new ExposedPromise<void>()
-    const callback = jest.fn(() => notification.resolve())
-    const openingCallback = jest.fn()
+    const callback = vi.fn(() => notification.resolve())
+    const openingCallback = vi.fn()
     await client.listenForEncryptedMessage('peer-public-key', callback)
     await client.listenForChannelOpening(openingCallback)
     const event = encryptedEvent(false)
@@ -374,8 +376,8 @@ describe('PostMessageClient inbound envelopes', () => {
   })
 
   it('delivers channel openings without a targetId', async () => {
-    const callback = jest.fn()
-    const encryptedCallback = jest.fn()
+    const callback = vi.fn()
+    const encryptedCallback = vi.fn()
     await client.listenForChannelOpening(callback)
     await client.listenForEncryptedMessage('peer-public-key', encryptedCallback)
     const event = openingEvent(false)
@@ -394,7 +396,7 @@ describe('PostMessageClient inbound envelopes', () => {
   })
 
   it('rejects a pairing payload one byte below the production length precheck', async () => {
-    const callback = jest.fn()
+    const callback = vi.fn()
     await client.listenForChannelOpening(callback)
     const event = openingEvent()
     event.data.message.payload = 'aa'.repeat(minimumPairingPayloadBytes - 1)
@@ -409,14 +411,14 @@ describe('PostMessageClient inbound envelopes', () => {
     const failure = new Error('consumer rejected the message')
     const logged = new ExposedPromise<void>()
     const delivered = new ExposedPromise<void>()
-    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => logged.resolve())
-    const rejectedCallback = jest.fn(async () => {
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => logged.resolve())
+    const rejectedCallback = vi.fn(async () => {
       throw failure
     })
-    const healthyCallback = jest.fn(() => delivered.resolve())
+    const healthyCallback = vi.fn(() => delivered.resolve())
     await client.listenForEncryptedMessage('rejecting-peer', rejectedCallback)
     await client.listenForEncryptedMessage('healthy-peer', healthyCallback)
-    await client.listenForChannelOpening(jest.fn())
+    await client.listenForChannelOpening(vi.fn())
 
     try {
       await dispatchMessage(encryptedEvent())
@@ -462,7 +464,7 @@ describe('PostMessageClient inbound envelopes', () => {
   })
 
   it('captures validated pairing payload and identity before the asynchronous recognition step', async () => {
-    const callback = jest.fn()
+    const callback = vi.fn()
     await client.listenForChannelOpening(callback)
     const event = openingEvent()
 

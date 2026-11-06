@@ -13,10 +13,10 @@ describe('P2PTransport.connect', () => {
       {},
       StorageKey.TRANSPORT_P2P_PEERS_DAPP
     )
-    jest.spyOn((transport as any).client, 'start').mockResolvedValue(undefined)
-    const stop = jest.spyOn((transport as any).client, 'stop').mockResolvedValue(undefined)
-    jest.spyOn(transport, 'getPeers').mockResolvedValue([{ publicKey: 'peer-1' }] as any)
-    jest.spyOn(transport, 'listen').mockRejectedValue(new Error('listener failed'))
+    vi.spyOn((transport as any).client, 'start').mockResolvedValue(undefined)
+    const stop = vi.spyOn((transport as any).client, 'stop').mockResolvedValue(undefined)
+    vi.spyOn(transport, 'getPeers').mockResolvedValue([{ publicKey: 'peer-1' }] as any)
+    vi.spyOn(transport, 'listen').mockRejectedValue(new Error('listener failed'))
 
     await expect(transport.connect()).rejects.toThrow('listener failed')
     expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
@@ -30,21 +30,22 @@ describe('P2PTransport.connect', () => {
       {},
       StorageKey.TRANSPORT_P2P_PEERS_DAPP
     )
-    jest.spyOn((transport as any).client, 'start').mockResolvedValue(undefined)
+    vi.spyOn((transport as any).client, 'start').mockResolvedValue(undefined)
     let finishRegistration!: () => void
     const pendingRegistration = new Promise<void>((resolve) => {
       finishRegistration = resolve
     })
     const failure = new Error('listener failed')
-    jest
-      .spyOn(transport, 'getPeers')
-      .mockResolvedValue([{ publicKey: 'peer-1' }, { publicKey: 'peer-2' }] as any)
-    const listen = jest
+    vi.spyOn(transport, 'getPeers').mockResolvedValue([
+      { publicKey: 'peer-1' },
+      { publicKey: 'peer-2' }
+    ] as any)
+    const listen = vi
       .spyOn(transport, 'listen')
       .mockRejectedValueOnce(failure)
       .mockReturnValueOnce(pendingRegistration)
       .mockResolvedValue(undefined)
-    const cleanup = jest.spyOn((transport as any).client, 'stop').mockResolvedValue(undefined)
+    const cleanup = vi.spyOn((transport as any).client, 'stop').mockResolvedValue(undefined)
     const connect = transport.connect()
     const outcome = expect(connect).rejects.toBe(failure)
     for (let i = 0; i < 10; i++) {
@@ -70,13 +71,13 @@ describe('P2PTransport.connect', () => {
       {},
       StorageKey.TRANSPORT_P2P_PEERS_DAPP
     )
-    jest.spyOn((transport as any).client, 'start').mockResolvedValue(undefined)
-    jest.spyOn(transport, 'getPeers').mockRejectedValue(new Error('storage failed'))
+    vi.spyOn((transport as any).client, 'start').mockResolvedValue(undefined)
+    vi.spyOn(transport, 'getPeers').mockRejectedValue(new Error('storage failed'))
     let finishCleanup!: () => void
     const pendingCleanup = new Promise<void>((resolve) => {
       finishCleanup = resolve
     })
-    const cleanup = jest.spyOn((transport as any).client, 'stop').mockReturnValue(pendingCleanup)
+    const cleanup = vi.spyOn((transport as any).client, 'stop').mockReturnValue(pendingCleanup)
     const connect = transport.connect()
     const outcome = expect(connect).rejects.toThrow('storage failed')
     for (let i = 0; i < 10; i++) {
@@ -99,13 +100,13 @@ describe('P2PTransport.connect', () => {
       StorageKey.TRANSPORT_P2P_PEERS_DAPP
     )
     let receive!: Parameters<P2PCommunicationClient['listenForEncryptedMessage']>[1]
-    const registration = jest
+    const registration = vi
       .spyOn(P2PCommunicationClient.prototype, 'listenForEncryptedMessage')
       .mockImplementation(async (_key, callback) => {
         receive = callback
       })
     const pending = new ExposedPromise<void>()
-    const listener = jest.fn(() => pending.promise)
+    const listener = vi.fn(() => pending.promise)
     const failure = new Error('listener failed')
     try {
       await transport.addListener(listener)
@@ -143,19 +144,19 @@ describe('P2PTransport.connect', () => {
       {},
       StorageKey.TRANSPORT_P2P_PEERS_DAPP
     )
-    const start = jest.spyOn(P2PCommunicationClient.prototype, 'start').mockResolvedValue(undefined)
-    const stop = jest.spyOn(P2PCommunicationClient.prototype, 'stop').mockResolvedValue(undefined)
-    const registration = jest
+    const start = vi.spyOn(P2PCommunicationClient.prototype, 'start').mockResolvedValue(undefined)
+    const stop = vi.spyOn(P2PCommunicationClient.prototype, 'stop').mockResolvedValue(undefined)
+    const registration = vi
       .spyOn(P2PCommunicationClient.prototype, 'listenForEncryptedMessage')
       .mockImplementation(async (_key, callback) => {
         // The communication client awaits its buffered message before registration returns.
         await callback('buffered message')
       })
-    const peers = jest
+    const peers = vi
       .spyOn(transport, 'getPeers')
       .mockResolvedValue([new P2PPairingRequest('peer-id', 'Wallet', 'peer', '2', 'relay.example')])
     const failure = new Error('replayed message listener failed')
-    const listener = jest.fn().mockRejectedValue(failure)
+    const listener = vi.fn().mockRejectedValue(failure)
     try {
       await transport.addListener(listener)
       await expect(transport.connect()).rejects.toBe(failure)
@@ -183,14 +184,14 @@ describe('P2PTransport.connect', () => {
       StorageKey.TRANSPORT_P2P_PEERS_DAPP
     )
     const communication = (transport as any).client
-    const matrix = { subscribe: jest.fn(), unsubscribe: jest.fn() }
-    const buffer = jest.fn()
+    const matrix = { subscribe: vi.fn(), unsubscribe: vi.fn() }
+    const buffer = vi.fn()
     communication.client.resolve(matrix)
     communication.initialListener = buffer
-    jest.spyOn(communication, 'start').mockResolvedValue(undefined)
-    jest.spyOn(communication, 'createCryptoBoxServer').mockResolvedValue({ receive: 'key' })
-    jest.spyOn(transport, 'getPeers').mockResolvedValue([])
-    jest.spyOn((transport as any).peerManager, 'addPeer').mockResolvedValue(undefined)
+    vi.spyOn(communication, 'start').mockResolvedValue(undefined)
+    vi.spyOn(communication, 'createCryptoBoxServer').mockResolvedValue({ receive: 'key' })
+    vi.spyOn(transport, 'getPeers').mockResolvedValue([])
+    vi.spyOn((transport as any).peerManager, 'addPeer').mockResolvedValue(undefined)
     await transport.connect()
     expect(matrix.unsubscribe).not.toHaveBeenCalled()
     await transport.addPeer({ publicKey: 'peer' } as any)

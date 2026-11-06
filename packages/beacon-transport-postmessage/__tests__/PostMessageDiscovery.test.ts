@@ -4,23 +4,23 @@ type MessageHandler = (event: unknown) => void
 type WindowIdentity = { location: { origin: string } }
 
 const loadTransport = async () => {
-  jest.resetModules()
+  vi.resetModules()
   const listeners: MessageHandler[] = []
-  const postMessage = jest.fn<void, [unknown, string?]>()
-  const addEventListener = jest.fn<void, [string, MessageHandler]>((name, handler) => {
+  const postMessage = vi.fn<(...args: [unknown, string?]) => void>()
+  const addEventListener = vi.fn<(...args: [string, MessageHandler]) => void>((name, handler) => {
     if (name === 'message') {
       listeners.push(handler)
     }
   })
-  const removeEventListener = jest.fn<void, [string, MessageHandler]>()
+  const removeEventListener = vi.fn<(...args: [string, MessageHandler]) => void>()
   const windowRef = {
     location: { origin: 'https://dapp.example' },
     postMessage,
     addEventListener,
     removeEventListener
   }
-  jest.doMock('@ecadlabs/beacon-core', () => ({
-    ...jest.requireActual<typeof import('@ecadlabs/beacon-core')>('@ecadlabs/beacon-core'),
+  vi.doMock('@ecadlabs/beacon-core', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
     windowRef
   }))
   const { PostMessageTransport } = await import('../src/PostMessageTransport')
@@ -83,11 +83,11 @@ const malformedOptionalFields: Array<[string, unknown]> = [
 ]
 
 describe('PostMessageTransport public extension discovery', () => {
-  beforeEach(() => jest.useFakeTimers())
+  beforeEach(() => vi.useFakeTimers())
   afterEach(async () => {
-    await jest.runOnlyPendingTimersAsync()
-    jest.useRealTimers()
-    jest.dontMock('@ecadlabs/beacon-core')
+    await vi.runOnlyPendingTimersAsync()
+    vi.useRealTimers()
+    vi.doUnmock('@ecadlabs/beacon-core')
   })
 
   it('shares one timed collection and keeps its cached array', async () => {
@@ -105,9 +105,9 @@ describe('PostMessageTransport public extension discovery', () => {
       { target: ExtensionMessageTarget.EXTENSION, payload: 'ping' },
       windowRef.location.origin
     )
-    await jest.advanceTimersByTimeAsync(999)
+    await vi.advanceTimersByTimeAsync(999)
     expect(settled).toBe(false)
-    await jest.advanceTimersByTimeAsync(1)
+    await vi.advanceTimersByTimeAsync(1)
     const collected = await first
     expect(collected).toEqual([])
     expect(await second).toBe(collected)
@@ -128,7 +128,7 @@ describe('PostMessageTransport public extension discovery', () => {
       link: 'https://wallet.example'
     }
     discovery(trustedEvent(windowRef, { payload: 'pong', sender }))
-    await jest.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(1000)
     const extensions = await PostMessageTransport.getAvailableExtensions()
 
     expect(extensions).toEqual([sender])
@@ -151,7 +151,7 @@ describe('PostMessageTransport public extension discovery', () => {
     }
     discovery(trustedEvent(windowRef, { payload: 'pong', sender: empty }))
     discovery(trustedEvent(windowRef, { payload: 'pong', sender: absent }))
-    await jest.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(1000)
 
     expect(await PostMessageTransport.getAvailableExtensions()).toEqual([empty, absent])
   })
@@ -166,7 +166,7 @@ describe('PostMessageTransport public extension discovery', () => {
     discovery(
       trustedEvent(windowRef, { payload: 'pong', sender: { id: 'another', name: 'Another' } })
     )
-    await jest.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(1000)
 
     expect(await PostMessageTransport.getAvailableExtensions()).toEqual([
       first,
@@ -179,7 +179,7 @@ describe('PostMessageTransport public extension discovery', () => {
 
   it('keeps collecting valid late responses into the cached array', async () => {
     const { PostMessageTransport, discovery, windowRef } = await loadTransport()
-    await jest.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(1000)
     const extensions = await PostMessageTransport.getAvailableExtensions()
     const late = { id: 'late', name: 'Late Wallet' }
 
@@ -195,7 +195,7 @@ describe('PostMessageTransport public extension discovery', () => {
     discovery({ source: {}, origin: windowRef.location.origin, data })
     discovery({ source: windowRef, origin: 'https://other.example', data })
     discovery({ source: windowRef, data })
-    await jest.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(1000)
 
     expect(await PostMessageTransport.getAvailableExtensions()).toEqual([])
     expect(windowRef.postMessage).toHaveBeenCalledTimes(1)
@@ -206,7 +206,7 @@ describe('PostMessageTransport public extension discovery', () => {
     async (_name, makeEvent) => {
       const { PostMessageTransport, discovery, windowRef } = await loadTransport()
       expect(() => discovery(makeEvent(windowRef))).not.toThrow()
-      await jest.advanceTimersByTimeAsync(1000)
+      await vi.advanceTimersByTimeAsync(1000)
 
       expect(await PostMessageTransport.getAvailableExtensions()).toEqual([])
       expect(windowRef.postMessage).toHaveBeenCalledTimes(1)
@@ -217,7 +217,7 @@ describe('PostMessageTransport public extension discovery', () => {
     const { PostMessageTransport, discovery, windowRef } = await loadTransport()
     const sender = { id: 'wallet', name: 'Wallet', [field]: value }
     discovery(trustedEvent(windowRef, { payload: 'pong', sender }))
-    await jest.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(1000)
 
     expect(await PostMessageTransport.getAvailableExtensions()).toEqual([])
     expect(windowRef.postMessage).toHaveBeenCalledTimes(1)
@@ -225,11 +225,11 @@ describe('PostMessageTransport public extension discovery', () => {
 })
 
 describe('PostMessageTransport public availability probe', () => {
-  beforeEach(() => jest.useFakeTimers())
+  beforeEach(() => vi.useFakeTimers())
   afterEach(async () => {
-    await jest.runOnlyPendingTimersAsync()
-    jest.useRealTimers()
-    jest.dontMock('@ecadlabs/beacon-core')
+    await vi.runOnlyPendingTimersAsync()
+    vi.useRealTimers()
+    vi.doUnmock('@ecadlabs/beacon-core')
   })
 
   it('preserves the weaker availability policy and removes its exact listener after pong', async () => {

@@ -1,4 +1,4 @@
-/** @jest-environment node */
+/** @vitest-environment node */
 
 import {
   defaultValues,
@@ -63,17 +63,17 @@ const createClient = async (accessToken?: string) => {
     events,
     http
   )
-  jest.spyOn(client, 'isConnected').mockResolvedValue(undefined)
+  vi.spyOn(client, 'isConnected').mockResolvedValue(undefined)
   return client
 }
 
 describe('Matrix outbound text body contract', () => {
-  afterEach(() => jest.restoreAllMocks())
+  afterEach(() => vi.restoreAllMocks())
 
   it.each(['message', '', 'Tezos 💚 Καλημέρα 你好'])(
     'sends flat text content without a wrapper: %s',
     async (body) => {
-      const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(response())
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response())
       const { events } = createServices()
 
       await expect(
@@ -93,7 +93,7 @@ describe('Matrix outbound text body contract', () => {
   )
 
   it('encodes room and transaction identifiers while preserving the body bytes', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(response())
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response())
     const { events } = createServices()
     const body = 'text with \"quotes\" & / ?'
 
@@ -115,7 +115,7 @@ describe('Matrix outbound text body contract', () => {
   })
 
   it('carries public client text sends through the actual service and HTTP client', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch').mockImplementation(async () => response())
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => response())
     const client = await createClient('client-token')
     const bodies = ['first', '', '🚀 Unicode']
 
@@ -139,7 +139,7 @@ describe('Matrix outbound text body contract', () => {
   })
 
   it('requires authorization before making a public client HTTP send', async () => {
-    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(response())
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response())
     const client = await createClient()
 
     await expect(client.sendTextMessage('!room:id', 'message')).rejects.toBe(
@@ -150,7 +150,7 @@ describe('Matrix outbound text body contract', () => {
 
   it('preserves network error identity through the service', async () => {
     const failure = new Error('network failed')
-    jest.spyOn(globalThis, 'fetch').mockRejectedValue(failure)
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(failure)
     const { events } = createServices()
 
     await expect(
@@ -165,14 +165,14 @@ describe('Matrix outbound text body contract', () => {
 
   it('preserves network error identity through the public client', async () => {
     const failure = new Error('client network failed')
-    jest.spyOn(globalThis, 'fetch').mockRejectedValue(failure)
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(failure)
     const client = await createClient('client-token')
 
     await expect(client.sendTextMessage('!room:id', 'message')).rejects.toBe(failure)
   })
 
   it('forwards a server error payload to the caller', async () => {
-    jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ errcode: 'M_FORBIDDEN', error: 'not allowed' }), {
         status: 403
       })
@@ -190,7 +190,7 @@ describe('Matrix outbound text body contract', () => {
   })
 
   it('forwards the complete successful response without reconstructing it', async () => {
-    jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ event_id: '$result', extra: { preserved: true } }), {
         status: 200
       })
@@ -214,7 +214,7 @@ describe('Matrix outbound text body contract', () => {
     const pendingResponse = new Promise<Response>((resolve) => {
       completeResponse = resolve
     })
-    jest.spyOn(globalThis, 'fetch').mockReturnValue(pendingResponse)
+    vi.spyOn(globalThis, 'fetch').mockReturnValue(pendingResponse)
     const { events } = createServices()
     let settled = false
     const send = events

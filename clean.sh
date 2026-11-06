@@ -1,7 +1,6 @@
 # rm -rf ./dist
 # rm -rf ./node_modules
 
-# rm -rf ./packages/beacon-blockchain-substrate/dist
 # rm -rf ./packages/beacon-blockchain-tezos/dist
 # rm -rf ./packages/beacon-blockchain-tezos-sapling/dist
 # rm -rf ./packages/beacon-core/dist
@@ -14,7 +13,6 @@
 # rm -rf ./packages/beacon-utils/dist
 # rm -rf ./packages/beacon-wallet/dist
 
-rm -rf ./packages/beacon-blockchain-substrate/node_modules
 rm -rf ./packages/beacon-blockchain-tezos/node_modules
 rm -rf ./packages/beacon-blockchain-tezos-sapling/node_modules
 rm -rf ./packages/beacon-core/node_modules

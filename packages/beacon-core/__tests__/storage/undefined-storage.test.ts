@@ -10,7 +10,7 @@ import {
 describe('storage undefined writes', () => {
   afterEach(() => {
     localStorage.clear()
-    jest.restoreAllMocks()
+    vi.restoreAllMocks()
     delete (globalThis as any).chrome
   })
 
@@ -97,12 +97,12 @@ describe('storage undefined writes', () => {
   })
 
   it('removes Chrome storage entries instead of setting undefined', async () => {
-    const remove = jest.fn((_key: string, callback: () => void) => callback())
-    const set = jest.fn((_value: Record<string, unknown>, callback: () => void) => callback())
+    const remove = vi.fn((_key: string, callback: () => void) => callback())
+    const set = vi.fn((_value: Record<string, unknown>, callback: () => void) => callback())
     ;(globalThis as any).chrome = {
       storage: {
         local: {
-          get: jest.fn(),
+          get: vi.fn(),
           remove,
           set
         }
@@ -119,14 +119,14 @@ describe('storage undefined writes', () => {
     ;(globalThis as any).chrome = {
       storage: {
         local: {
-          get: jest.fn((_key: null, callback: (value: Record<string, unknown>) => void) =>
+          get: vi.fn((_key: null, callback: (value: Record<string, unknown>) => void) =>
             callback({
               [StorageKey.ACCOUNTS]: { not: 'an array' },
               [StorageKey.WC_2_CORE_PAIRING]: '[{"topic":"abc"}]'
             })
           ),
-          remove: jest.fn(),
-          set: jest.fn()
+          remove: vi.fn(),
+          set: vi.fn()
         }
       }
     }
@@ -139,7 +139,7 @@ describe('storage undefined writes', () => {
 
   it('removes IndexedDB entries instead of putting undefined', async () => {
     const storage = Object.create(IndexedDBStorage.prototype) as IndexedDBStorage
-    const remove = jest.spyOn(storage, 'delete').mockResolvedValue(undefined)
+    const remove = vi.spyOn(storage, 'delete').mockResolvedValue(undefined)
 
     await storage.set(StorageKey.ACTIVE_ACCOUNT, undefined, 'keyvaluestorage')
 

@@ -300,8 +300,6 @@ export class DAppClient extends Client {
    */
   private _initReject: ((reason: ErrorResponse) => void) | undefined
 
-  private _initSubstratePairing: boolean | undefined
-
   private _requestPermissionsPromise: Promise<PermissionResponseOutput> | undefined
 
   private _requestPermissionsKey: string | undefined
@@ -1024,7 +1022,6 @@ export class DAppClient extends Client {
     this._initReject?.(this.createAbortedError())
     this._initPromise = undefined
     this._initReject = undefined
-    this._initSubstratePairing = undefined
     this._requestPermissionsPromise = undefined
     this._requestPermissionsKey = undefined
   }
@@ -1052,25 +1049,10 @@ export class DAppClient extends Client {
     }
   }
 
-  public async init(
-    transport?: Transport<any>,
-    substratePairing?: boolean
-  ): Promise<TransportType> {
+  public async init(transport?: Transport<PeerInfoType>): Promise<TransportType> {
     this.assertNotDestroyed()
 
-    const requestedSubstratePairing = substratePairing === true
-
     if (this._initPromise) {
-      if (
-        !transport &&
-        this._initReject &&
-        this._initSubstratePairing !== requestedSubstratePairing
-      ) {
-        throw new Error(
-          'Cannot start a permission request with different pairing options while another pairing is pending'
-        )
-      }
-
       return this._initPromise
     }
 
@@ -1084,7 +1066,7 @@ export class DAppClient extends Client {
     }
 
     if (this._initPromise) {
-      return this.init(transport, substratePairing)
+      return this.init(transport)
     }
     let removeAbortListener: () => void = () => undefined
     this._initPromise = new Promise(async (resolve, reject) => {
@@ -1097,7 +1079,6 @@ export class DAppClient extends Client {
       }
       transition.addEventListener('abort', abort, { once: true })
       removeAbortListener = () => transition.removeEventListener('abort', abort)
-      this._initSubstratePairing = requestedSubstratePairing
       // Capture reject so abort paths (modal close, transport-level rejection)
       // can unwedge a pending `await this.init()`. _initReject is cleared by
       // the .finally below whether the promise resolves or rejects, so the
@@ -1355,8 +1336,7 @@ export class DAppClient extends Client {
                 },
                 disclaimerText: this.disclaimerText,
                 analytics: this.analytics,
-                featuredWallets: this.featuredWallets,
-                substratePairing
+                featuredWallets: this.featuredWallets
               })
               .catch((emitError) => logger.warn('init', emitError))
           }
@@ -1391,7 +1371,6 @@ export class DAppClient extends Client {
         removeAbortListener()
         if (!this._initPromise || this._initPromise === initPromise) {
           this._initReject = undefined
-          this._initSubstratePairing = undefined
         }
       })
       .catch(() => {
@@ -2218,7 +2197,7 @@ export class DAppClient extends Client {
       account: accountInfo,
       output: {
         address: partialAccountInfos[0].address,
-        network: { type: 'substrate' },
+        network: { type: input.blockchainIdentifier },
         scopes: []
       } as any,
       blockExplorer: this.blockExplorer,
@@ -3395,7 +3374,7 @@ export class DAppClient extends Client {
   }> {
     const messageId = otherTabMessageId ?? (await generateGUID())
     logger.log('makeRequest', 'starting')
-    await this.init(undefined, true)
+    await this.init()
     logger.log('makeRequest', 'after init')
 
     if (await this.addRequestAndCheckIfRateLimited()) {

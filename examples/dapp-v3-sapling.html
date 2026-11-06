@@ -124,8 +124,8 @@
         // matrixNodes: ['beacon.tztip.me']
       })
 
-      const substrateBlockchain = new beaconSapling.TezosSaplingBlockchain()
-      client.addBlockchain(substrateBlockchain)
+      const saplingBlockchain = new beaconSapling.TezosSaplingBlockchain()
+      client.addBlockchain(saplingBlockchain)
 
       // Display the active account in the UI
       const updateActiveAccount = () => {
@@ -168,7 +168,7 @@
         return client.getActiveAccount().then((activeAccount) => {
           client
             .request({
-              blockchainIdentifier: 'substrate',
+              blockchainIdentifier: 'tezos-sapling',
               type: 'blockchain_request',
               blockchainData: {
                 type: 'transfer_request',

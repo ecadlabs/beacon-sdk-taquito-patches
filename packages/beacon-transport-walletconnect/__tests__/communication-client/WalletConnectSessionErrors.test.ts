@@ -18,24 +18,24 @@ const restoredSession: SessionTypes.Struct = {
   peer: { publicKey: 'wallet-key', metadata }
 }
 const mockRemote = {
-  session: { keys: ['restored-topic'], get: jest.fn(() => restoredSession) },
-  ping: jest.fn<Promise<void>, []>(),
-  extend: jest.fn<Promise<void>, []>(),
-  disconnect: jest.fn<Promise<void>, []>(),
-  connect: jest.fn(async () => ({
+  session: { keys: ['restored-topic'], get: vi.fn(() => restoredSession) },
+  ping: vi.fn<(...args: []) => Promise<void>>(),
+  extend: vi.fn<(...args: []) => Promise<void>>(),
+  disconnect: vi.fn<(...args: []) => Promise<void>>(),
+  connect: vi.fn(async () => ({
     uri: 'wc:new-topic@2?symKey=key',
     approval: () => new Promise<SessionTypes.Struct>(() => {})
   })),
-  on: jest.fn(),
+  on: vi.fn(),
   core: {
     relayer: {},
-    pairing: { events: { on: jest.fn() }, ping: jest.fn(async () => {}) }
+    pairing: { events: { on: vi.fn() }, ping: vi.fn(async () => {}) }
   }
 }
 
-jest.mock('@walletconnect/sign-client', () => ({ init: async () => mockRemote }))
+vi.mock('@walletconnect/sign-client', () => ({ default: { init: async () => mockRemote } }))
 // Match the SDK's USER_DISCONNECTED reason without loading its ESM-only crypto dependencies in JSDOM.
-jest.mock('@walletconnect/utils', () => ({
+vi.mock('@walletconnect/utils', () => ({
   getSdkError: () => ({ code: 6000, message: 'User disconnected.' })
 }))
 
@@ -63,8 +63,8 @@ describe('WalletConnect restored-session failure containment', () => {
     }
   })
   beforeEach(() => {
-    jest.useFakeTimers()
-    jest.clearAllMocks()
+    vi.useFakeTimers()
+    vi.clearAllMocks()
     localStorage.clear()
     Object.defineProperty(restoredSession, 'expiry', {
       configurable: true,
@@ -76,9 +76,9 @@ describe('WalletConnect restored-session failure containment', () => {
     mockRemote.disconnect.mockResolvedValue(undefined)
   })
   afterEach(() => {
-    jest.clearAllTimers()
-    jest.useRealTimers()
-    jest.restoreAllMocks()
+    vi.clearAllTimers()
+    vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   function client(): WalletConnectCommunicationClient {
@@ -96,7 +96,7 @@ describe('WalletConnect restored-session failure containment', () => {
     async ({ failure, diagnostic }) => {
       mockRemote.ping.mockRejectedValue(failure)
       mockRemote.disconnect.mockRejectedValue(failure)
-      const warn = jest.spyOn(Logger.prototype, 'warn')
+      const warn = vi.spyOn(Logger.prototype, 'warn')
       const instance = client()
 
       await expect(instance.init()).resolves.toEqual({
@@ -123,8 +123,8 @@ describe('WalletConnect restored-session failure containment', () => {
     'retains the valid session and original diagnostic when extension rejects with $failure',
     async ({ failure, diagnostic }) => {
       mockRemote.extend.mockRejectedValue(failure)
-      const warn = jest.spyOn(Logger.prototype, 'warn')
-      const error = jest.spyOn(Logger.prototype, 'error')
+      const warn = vi.spyOn(Logger.prototype, 'warn')
+      const error = vi.spyOn(Logger.prototype, 'error')
       const instance = client()
 
       await expect(instance.init()).resolves.toBeUndefined()
@@ -155,7 +155,7 @@ describe('WalletConnect restored-session failure containment', () => {
         throw null
       }
     })
-    const error = jest.spyOn(Logger.prototype, 'error')
+    const error = vi.spyOn(Logger.prototype, 'error')
     const instance = client()
 
     await expect(instance.init()).resolves.toBeUndefined()
@@ -166,11 +166,14 @@ describe('WalletConnect restored-session failure containment', () => {
     expect(mockRemote.connect).not.toHaveBeenCalled()
   })
   it.each([
-    new Proxy({ message: 'relay unavailable' }, {
-      has() {
-        throw new Error('property check failed')
+    new Proxy(
+      { message: 'relay unavailable' },
+      {
+        has() {
+          throw new Error('property check failed')
+        }
       }
-    }),
+    ),
     {
       get message(): string {
         throw new Error('message getter failed')
@@ -178,14 +181,16 @@ describe('WalletConnect restored-session failure containment', () => {
     }
   ])('continues pairing when a rejection cannot be inspected', async (failure) => {
     mockRemote.ping.mockRejectedValue(failure)
-    const warn = jest.spyOn(Logger.prototype, 'warn')
+    const warn = vi.spyOn(Logger.prototype, 'warn')
 
     await expect(client().init()).resolves.toEqual({
       uri: 'wc:new-topic@2?symKey=key',
       topic: 'new-topic'
     })
 
-    const diagnostic = warn.mock.calls.find(([label]) => label === 'Session validation failed: ping failed')
+    const diagnostic = warn.mock.calls.find(
+      ([label]) => label === 'Session validation failed: ping failed'
+    )
     expect(diagnostic?.[1]).toBe(failure)
     expect(mockRemote.connect).toHaveBeenCalledTimes(1)
   })

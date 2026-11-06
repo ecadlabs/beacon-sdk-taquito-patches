@@ -4,14 +4,14 @@ import useIsMobile from '../../src/ui/alert/hooks/useIsMobile'
 import * as platformUtils from '../../src/utils/platform'
 
 // Mock the external isMobileOS function.
-jest.mock('../../src/utils/platform', () => ({
-  isMobileOS: jest.fn()
+vi.mock('../../src/utils/platform', () => ({
+  isMobileOS: vi.fn()
 }))
 
 describe('useIsMobile', () => {
   beforeEach(() => {
     // Clear mocks between tests
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   test('returns true if isMobileOS returns true regardless of window width', () => {
@@ -80,8 +80,8 @@ describe('useIsMobile', () => {
     ;(platformUtils.isMobileOS as any).mockReturnValue(false)
 
     // Spy on addEventListener and removeEventListener.
-    const addEventListenerSpy = jest.spyOn(window, 'addEventListener')
-    const removeEventListenerSpy = jest.spyOn(window, 'removeEventListener')
+    const addEventListenerSpy = vi.spyOn(window, 'addEventListener')
+    const removeEventListenerSpy = vi.spyOn(window, 'removeEventListener')
 
     const { unmount } = renderHook(() => useIsMobile())
 

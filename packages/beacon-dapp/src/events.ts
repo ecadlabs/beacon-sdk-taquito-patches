@@ -240,7 +240,6 @@ export interface BeaconEventType {
     disclaimerText?: string
     analytics: AnalyticsInterface
     featuredWallets?: string[]
-    substratePairing?: boolean
   }
   [BeaconEvent.PAIR_SUCCESS]:
     | ExtendedPostMessagePairingResponse
@@ -538,8 +537,7 @@ const showPairAlert = async (data: BeaconEventType[BeaconEvent.PAIR_INIT]): Prom
     closeButtonCallback: data.abortedHandler,
     disclaimerText: data.disclaimerText,
     analytics: data.analytics,
-    featuredWallets: data.featuredWallets,
-    substratePairing: data.substratePairing
+    featuredWallets: data.featuredWallets
   }
   openAlert(alertConfig)
 }
@@ -562,7 +560,8 @@ const showPermissionSuccessAlert = async (
     }
   ]
 
-  if ((output.network.type as any) !== 'substrate') {
+  // V3 accounts carry chain-specific permissions rather than the Tezos network/scope schema.
+  if (!('chainData' in data.account)) {
     actions.push({
       text: 'Network',
       actionText: `${output.network.type}`

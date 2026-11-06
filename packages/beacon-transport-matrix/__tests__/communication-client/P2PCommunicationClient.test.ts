@@ -1,8 +1,9 @@
+import type { Mock, MockInstance } from 'vitest'
 // __tests__/communication-client/P2PCommunicationClient.test.ts
 
 // Mock external dependencies
-jest.mock('@ecadlabs/beacon-utils', () => {
-  const actual = jest.requireActual('@ecadlabs/beacon-utils')
+vi.mock('@ecadlabs/beacon-utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@ecadlabs/beacon-utils')>()
 
   class ExposedPromise<T> {
     public promise: Promise<T>
@@ -36,22 +37,22 @@ jest.mock('@ecadlabs/beacon-utils', () => {
   return {
     ...actual,
     ExposedPromise,
-    sign: jest.fn(() => new Uint8Array(64)),
-    generateGUID: jest.fn(),
-    getHexHash: jest.fn(),
-    recipientString: jest.fn(),
-    encryptCryptoboxPayload: jest.fn(),
-    decryptCryptoboxPayload: jest.fn(),
-    openCryptobox: jest.fn(),
-    toHex: jest.fn(),
-    getKeypairFromSeed: jest.fn(),
+    sign: vi.fn(() => new Uint8Array(64)),
+    generateGUID: vi.fn(),
+    getHexHash: vi.fn(),
+    recipientString: vi.fn(),
+    encryptCryptoboxPayload: vi.fn(),
+    decryptCryptoboxPayload: vi.fn(),
+    openCryptobox: vi.fn(),
+    toHex: vi.fn(),
+    getKeypairFromSeed: vi.fn(),
     secretbox_NONCEBYTES: 8,
     secretbox_MACBYTES: 16
   }
 })
 
-jest.mock('../../src/matrix-client/MatrixClient', () => ({
-  MatrixClient: { create: jest.fn() }
+vi.mock('../../src/matrix-client/MatrixClient', () => ({
+  MatrixClient: { create: vi.fn() }
 }))
 
 // Imports
@@ -78,21 +79,21 @@ import { P2PCommunicationClient } from '../../src/communication-client/P2PCommun
 describe('P2PCommunicationClient', () => {
   let client: P2PCommunicationClient
   let fakeMatrixClient: {
-    subscribe: jest.Mock
-    unsubscribe: jest.Mock
-    unsubscribeAll: jest.Mock
-    joinRooms: jest.Mock
-    sendTextMessage: jest.Mock
-    start: jest.Mock
-    stop: jest.Mock
-    getRoomById: jest.Mock
-    createTrustedPrivateRoom: jest.Mock
+    subscribe: Mock
+    unsubscribe: Mock
+    unsubscribeAll: Mock
+    joinRooms: Mock
+    sendTextMessage: Mock
+    start: Mock
+    stop: Mock
+    getRoomById: Mock
+    createTrustedPrivateRoom: Mock
     joinedRooms: Promise<unknown[]>
   }
   const mockStorage = {
-    get: jest.fn(),
-    set: jest.fn(),
-    delete: jest.fn()
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn()
   }
   const fakeKeyPair = { publicKey: 'pub', secretKey: 'sec' }
   const createDeferred = <T>() => {
@@ -118,40 +119,41 @@ describe('P2PCommunicationClient', () => {
   }
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
 
     // beacon-utils mocks
-    ;(generateGUID as jest.Mock).mockResolvedValue('generated-guid')
-    ;(getHexHash as jest.Mock).mockResolvedValue('hex-hash')
-    ;(recipientString as jest.Mock).mockReturnValue('@hex-hash:relay.server')
-    ;(encryptCryptoboxPayload as jest.Mock).mockResolvedValue('encrypted-payload')
-    ;(decryptCryptoboxPayload as jest.Mock).mockResolvedValue('decrypted-payload')
-    ;(openCryptobox as jest.Mock).mockResolvedValue(JSON.stringify({ foo: 'bar' }))
-    ;(toHex as jest.Mock).mockReturnValue('deadbeef')
-    ;(getKeypairFromSeed as jest.Mock).mockResolvedValue(fakeKeyPair)
+    ;(generateGUID as Mock).mockResolvedValue('generated-guid')
+    ;(getHexHash as Mock).mockResolvedValue('hex-hash')
+    ;(recipientString as Mock).mockReturnValue('@hex-hash:relay.server')
+    ;(encryptCryptoboxPayload as Mock).mockResolvedValue('encrypted-payload')
+    ;(decryptCryptoboxPayload as Mock).mockResolvedValue('decrypted-payload')
+    ;(openCryptobox as Mock).mockResolvedValue(JSON.stringify({ foo: 'bar' }))
+    ;(toHex as Mock).mockReturnValue('deadbeef')
+    ;(getKeypairFromSeed as Mock).mockResolvedValue(fakeKeyPair)
 
     // MatrixClient.create stub
     fakeMatrixClient = {
-      subscribe: jest.fn(),
-      unsubscribe: jest.fn(),
-      unsubscribeAll: jest.fn(),
-      joinRooms: jest.fn(),
-      sendTextMessage: jest.fn(),
-      start: jest.fn(),
-      stop: jest.fn(),
-      getRoomById: jest.fn().mockResolvedValue({ members: ['@peer:relay'] }),
-      createTrustedPrivateRoom: jest.fn().mockResolvedValue('!room:id'),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+      unsubscribeAll: vi.fn(),
+      joinRooms: vi.fn(),
+      sendTextMessage: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+      getRoomById: vi.fn().mockResolvedValue({ members: ['@peer:relay'] }),
+      createTrustedPrivateRoom: vi.fn().mockResolvedValue('!room:id'),
       joinedRooms: Promise.resolve([])
     }
-    ;(MatrixClient.create as jest.Mock).mockReturnValue(fakeMatrixClient)
+    ;(MatrixClient.create as Mock).mockReturnValue(fakeMatrixClient)
 
     client = new P2PCommunicationClient('MyApp', fakeKeyPair as any, 2, mockStorage as any)
 
     // Stub getPublicKey and getRelayServer
-    ;(client as any).getPublicKey = jest.fn().mockResolvedValue('pub')
-    jest
-      .spyOn(client as any, 'getRelayServer')
-      .mockResolvedValue({ server: 'relay.server', timestamp: 1234 })
+    ;(client as any).getPublicKey = vi.fn().mockResolvedValue('pub')
+    vi.spyOn(client as any, 'getRelayServer').mockResolvedValue({
+      server: 'relay.server',
+      timestamp: 1234
+    })
     ;(client as any).client.resolve(fakeMatrixClient)
   })
 
@@ -199,7 +201,7 @@ describe('P2PCommunicationClient', () => {
     beforeEach(() => {
       mockStorage.delete.mockResolvedValue(undefined)
       fakeMatrixClient.stop.mockResolvedValue(undefined)
-      jest.spyOn(client as any, 'createCryptoBoxServer').mockResolvedValue({ receive: 'key' })
+      vi.spyOn(client as any, 'createCryptoBoxServer').mockResolvedValue({ receive: 'key' })
     })
 
     const initialMessage = () => ({
@@ -220,15 +222,15 @@ describe('P2PCommunicationClient', () => {
       ;(client as any).createCryptoBoxServer.mockImplementation((key: string) =>
         key === 'sender-pub' ? gate.promise : Promise.resolve({ receive: 'key' })
       )
-      jest
-        .spyOn(client as any, 'isSender')
-        .mockImplementation(async (_event: unknown, key: unknown) => key === 'sender-pub')
-      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
-      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
-      const buffer = jest.fn()
+      vi.spyOn(client as any, 'isSender').mockImplementation(
+        async (_event: unknown, key: unknown) => key === 'sender-pub'
+      )
+      vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      const buffer = vi.fn()
       ;(client as any).initialListener = buffer
-      const wrong = client.listenForEncryptedMessage('wrong-peer', jest.fn())
-      const handler = jest.fn()
+      const wrong = client.listenForEncryptedMessage('wrong-peer', vi.fn())
+      const handler = vi.fn()
       const matching = client.listenForEncryptedMessage('sender-pub', handler)
       await wrong
       expect(fakeMatrixClient.unsubscribe).not.toHaveBeenCalled()
@@ -248,10 +250,10 @@ describe('P2PCommunicationClient', () => {
       const event = initialMessage()
       ;(client as any).initialEvent = event
       const gate = createDeferred<void>()
-      jest.spyOn(client as any, 'isSender').mockResolvedValue(true)
-      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
-      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
-      const handler = jest.fn(() => gate.promise)
+      vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      const handler = vi.fn(() => gate.promise)
       const registration = client.listenForEncryptedMessage('sender-pub', handler)
       await waitFor(() => handler.mock.calls.length === 1)
       const live = (client as any).activeListeners.get('sender-pub')(event)
@@ -263,11 +265,11 @@ describe('P2PCommunicationClient', () => {
     it('does not finalize a new session when an old registration settles after reset', async () => {
       const gate = createDeferred<any>()
       ;(client as any).createCryptoBoxServer.mockReturnValueOnce(gate.promise)
-      const old = client.listenForEncryptedMessage('old-peer', jest.fn())
+      const old = client.listenForEncryptedMessage('old-peer', vi.fn())
       await client.reset()
       ;(client as any).client.resolve(fakeMatrixClient)
       const event = initialMessage()
-      const buffer = jest.fn()
+      const buffer = vi.fn()
       ;(client as any).initialEvent = event
       ;(client as any).initialListener = buffer
       gate.resolve({ receive: 'key' })
@@ -284,16 +286,16 @@ describe('P2PCommunicationClient', () => {
       ;(client as any).createCryptoBoxServer.mockImplementation((key: string) =>
         key === 'pending-peer' ? keeper.promise : Promise.resolve({ receive: 'key' })
       )
-      jest
-        .spyOn(client as any, 'isSender')
-        .mockImplementation(async (_event: unknown, key: unknown) => key === 'sender-pub')
-      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
-      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      vi.spyOn(client as any, 'isSender').mockImplementation(
+        async (_event: unknown, key: unknown) => key === 'sender-pub'
+      )
+      vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
       const event = initialMessage()
       ;(client as any).initialEvent = event
       const handlerGate = createDeferred<void>()
-      const handler = jest.fn(() => handlerGate.promise)
-      const pending = client.listenForEncryptedMessage('pending-peer', jest.fn())
+      const handler = vi.fn(() => handlerGate.promise)
+      const pending = client.listenForEncryptedMessage('pending-peer', vi.fn())
       const registration = client.listenForEncryptedMessage('sender-pub', handler)
       await waitFor(() => handler.mock.calls.length === 1)
       const newer = initialMessage()
@@ -309,14 +311,14 @@ describe('P2PCommunicationClient', () => {
       ;(client as any).createCryptoBoxServer.mockImplementation((key: string) =>
         key === 'pending-peer' ? keeper.promise : Promise.resolve({ receive: 'key' })
       )
-      jest.spyOn(client as any, 'isSender').mockResolvedValue(true)
-      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
-      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
-      ;(decryptCryptoboxPayload as jest.Mock).mockRejectedValueOnce(new Error('wrong recipient'))
+      vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      ;(decryptCryptoboxPayload as Mock).mockRejectedValueOnce(new Error('wrong recipient'))
       const event = initialMessage()
       ;(client as any).initialEvent = event
-      const pending = client.listenForEncryptedMessage('pending-peer', jest.fn())
-      const handler = jest.fn()
+      const pending = client.listenForEncryptedMessage('pending-peer', vi.fn())
+      const handler = vi.fn()
       await client.listenForEncryptedMessage('sender-pub', handler)
       expect(handler).not.toHaveBeenCalled()
       expect((client as any).initialEvent).toBe(event)
@@ -326,11 +328,11 @@ describe('P2PCommunicationClient', () => {
     it('consumes a matching buffered event once even if its handler rejects', async () => {
       const event = initialMessage()
       ;(client as any).initialEvent = event
-      jest.spyOn(client as any, 'isSender').mockResolvedValue(true)
-      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
-      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
       const failure = new Error('handler rejected')
-      const handler = jest.fn().mockRejectedValue(failure)
+      const handler = vi.fn().mockRejectedValue(failure)
       await expect(client.listenForEncryptedMessage('sender-pub', handler)).rejects.toBe(failure)
       await (client as any).activeListeners.get('sender-pub')(event)
       expect(handler).toHaveBeenCalledTimes(1)
@@ -340,7 +342,7 @@ describe('P2PCommunicationClient', () => {
       const event = initialMessage()
       event.timestamp = Date.now() - 6 * 60 * 1000
       ;(client as any).initialEvent = event
-      const handler = jest.fn()
+      const handler = vi.fn()
       await client.listenForEncryptedMessage('sender-pub', handler)
       expect(handler).not.toHaveBeenCalled()
       expect((client as any).initialEvent).toBeUndefined()
@@ -350,19 +352,19 @@ describe('P2PCommunicationClient', () => {
       'ignores a callback resumed after reset at the %s boundary',
       async (boundary) => {
         const gate = createDeferred<void>()
-        const sender = jest.spyOn(client as any, 'isSender').mockImplementation(async () => {
+        const sender = vi.spyOn(client as any, 'isSender').mockImplementation(async () => {
           if (boundary === 'sender') await gate.promise
           return true
         })
-        const relay = jest.spyOn(client, 'updateRelayServer').mockImplementation(async () => {
+        const relay = vi.spyOn(client, 'updateRelayServer').mockImplementation(async () => {
           if (boundary === 'relay') await gate.promise
         })
-        const room = jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
-        ;(decryptCryptoboxPayload as jest.Mock).mockImplementation(async () => {
+        const room = vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+        ;(decryptCryptoboxPayload as Mock).mockImplementation(async () => {
           if (boundary === 'decrypt') await gate.promise
           return 'decrypted-payload'
         })
-        const handler = jest.fn()
+        const handler = vi.fn()
         await client.listenForEncryptedMessage('sender-pub', handler)
         const delivery = (client as any).activeListeners.get('sender-pub')(initialMessage())
         await waitFor(() =>
@@ -370,7 +372,7 @@ describe('P2PCommunicationClient', () => {
             ? sender.mock.calls.length > 0
             : boundary === 'relay'
               ? relay.mock.calls.length > 0
-              : (decryptCryptoboxPayload as jest.Mock).mock.calls.length > 0
+              : (decryptCryptoboxPayload as Mock).mock.calls.length > 0
         )
         await client.reset()
         gate.resolve()
@@ -380,9 +382,9 @@ describe('P2PCommunicationClient', () => {
       }
     )
     it('finalizes the buffer after standalone peer registration', async () => {
-      const buffer = jest.fn()
+      const buffer = vi.fn()
       ;(client as any).initialListener = buffer
-      await client.listenForEncryptedMessage('sender-pub', jest.fn())
+      await client.listenForEncryptedMessage('sender-pub', vi.fn())
       expect(fakeMatrixClient.unsubscribe).toHaveBeenCalledWith(
         MatrixClientEventType.MESSAGE,
         buffer
@@ -392,7 +394,7 @@ describe('P2PCommunicationClient', () => {
     it.each(['reset', 'stop'] as const)(
       'subscribes a known peer on the new Matrix client after %s',
       async (operation) => {
-        await client.listenForEncryptedMessage('sender-pub', jest.fn())
+        await client.listenForEncryptedMessage('sender-pub', vi.fn())
         const oldListener = (client as any).activeListeners.get('sender-pub')
         expect(fakeMatrixClient.subscribe).toHaveBeenCalledWith(
           MatrixClientEventType.MESSAGE,
@@ -402,12 +404,12 @@ describe('P2PCommunicationClient', () => {
         await client[operation]()
         const replacementMatrixClient = {
           ...fakeMatrixClient,
-          subscribe: jest.fn(),
-          start: jest.fn().mockResolvedValue(undefined)
+          subscribe: vi.fn(),
+          start: vi.fn().mockResolvedValue(undefined)
         }
-        ;(MatrixClient.create as jest.Mock).mockReturnValue(replacementMatrixClient)
+        ;(MatrixClient.create as Mock).mockReturnValue(replacementMatrixClient)
         await client.start()
-        await client.listenForEncryptedMessage('sender-pub', jest.fn())
+        await client.listenForEncryptedMessage('sender-pub', vi.fn())
 
         const newListener = (client as any).activeListeners.get('sender-pub')
         expect(replacementMatrixClient.subscribe).toHaveBeenCalledWith(
@@ -419,11 +421,11 @@ describe('P2PCommunicationClient', () => {
     )
 
     it('propagates callback rejection after successful message decryption', async () => {
-      jest.spyOn(client as any, 'isSender').mockResolvedValue(true)
-      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
-      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
       const failure = new Error('message handler failed')
-      const handler = jest.fn().mockRejectedValue(failure)
+      const handler = vi.fn().mockRejectedValue(failure)
       await client.listenForEncryptedMessage('sender-pub', handler)
       const listener = (client as any).activeListeners.get('sender-pub')
 
@@ -460,15 +462,15 @@ describe('P2PCommunicationClient', () => {
     })
 
     it('propagates a rejected channel-opening callback to the Matrix event boundary', async () => {
-      jest.spyOn(client, 'isChannelOpenMessage').mockResolvedValue(true)
-      jest.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
-      jest.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
-      jest.mocked(openCryptobox).mockResolvedValue(JSON.stringify({ publicKey: 'ab'.repeat(32) }))
+      vi.spyOn(client, 'isChannelOpenMessage').mockResolvedValue(true)
+      vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      vi.mocked(openCryptobox).mockResolvedValue(JSON.stringify({ publicKey: 'ab'.repeat(32) }))
       const failure = new Error('pairing callback failed')
       const rejected = Promise.reject(failure)
       // Observe the original promise even on the broken path that discards it.
       void rejected.catch(() => undefined)
-      const callback = jest.fn(() => rejected)
+      const callback = vi.fn(() => rejected)
       await client.listenForChannelOpening(callback)
       const listener: (event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => Promise<void> =
         fakeMatrixClient.subscribe.mock.calls[0][1]
@@ -488,7 +490,7 @@ describe('P2PCommunicationClient', () => {
     it.each([undefined, null, 42, false, {}, []])(
       'ignores malformed channel-opening bodies before string operations: %p',
       async (body) => {
-        const callback = jest.fn()
+        const callback = vi.fn()
         await client.listenForChannelOpening(callback)
         const listener: (event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => Promise<void> =
           fakeMatrixClient.subscribe.mock.calls[0][1]
@@ -540,7 +542,7 @@ describe('P2PCommunicationClient', () => {
     })
 
     it('fetches /_synapse/client/beacon/info and maps the response', async () => {
-      const fetchMock = jest.fn().mockResolvedValue({
+      const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
         statusText: 'OK',
@@ -567,12 +569,12 @@ describe('P2PCommunicationClient', () => {
 
   describe('sendMessage', () => {
     const peer = new P2PPairingRequest('peer-id', 'Kukai', 'peer-pub', '3', 'relay.server')
-    let deleteRoomIdFromRoomsSpy: jest.SpyInstance<Promise<void>, [string]>
+    let deleteRoomIdFromRoomsSpy: MockInstance<(...args: [string]) => Promise<void>>
 
     beforeEach(() => {
-      jest.spyOn(client as any, 'createCryptoBoxClient').mockResolvedValue({ send: 'send-key' })
-      jest.spyOn(client as any, 'getRelevantRoom').mockResolvedValue('!room:id')
-      deleteRoomIdFromRoomsSpy = jest
+      vi.spyOn(client as any, 'createCryptoBoxClient').mockResolvedValue({ send: 'send-key' })
+      vi.spyOn(client as any, 'getRelevantRoom').mockResolvedValue('!room:id')
+      deleteRoomIdFromRoomsSpy = vi
         .spyOn(client, 'deleteRoomIdFromRooms')
         .mockResolvedValue(undefined)
     })
@@ -674,8 +676,8 @@ describe('P2PCommunicationClient', () => {
       const now = Date.now()
       setCachedRelay({ server: 'cached-node.papers.tech', timestamp: 1234, localTimestamp: now })
 
-      const beaconInfoSpy = jest.spyOn(freshClient, 'getBeaconInfo')
-      const discoverySpy = jest.spyOn(freshClient as any, 'findBestRegionAndGetServer')
+      const beaconInfoSpy = vi.spyOn(freshClient, 'getBeaconInfo')
+      const discoverySpy = vi.spyOn(freshClient as any, 'findBestRegionAndGetServer')
       mockStorage.get.mockResolvedValue('should-not-be-read')
 
       const result = await freshClient.getRelayServer()
@@ -689,10 +691,10 @@ describe('P2PCommunicationClient', () => {
     it('refreshes stale in-memory relay server when cached server is reachable', async () => {
       setCachedRelay({ server: 'cached-node.papers.tech', timestamp: 1000, localTimestamp: 0 })
 
-      const beaconInfoSpy = jest
+      const beaconInfoSpy = vi
         .spyOn(freshClient, 'getBeaconInfo')
         .mockResolvedValue({ region: 'eu', known_servers: [], timestamp: 2222 })
-      const discoverySpy = jest.spyOn(freshClient as any, 'findBestRegionAndGetServer')
+      const discoverySpy = vi.spyOn(freshClient as any, 'findBestRegionAndGetServer')
 
       const result = await freshClient.getRelayServer()
 
@@ -709,8 +711,7 @@ describe('P2PCommunicationClient', () => {
       mockStorage.set.mockResolvedValue(undefined)
 
       // First call (stored node) rejects, second call (discovery probe) succeeds
-      jest
-        .spyOn(freshClient, 'getBeaconInfo')
+      vi.spyOn(freshClient, 'getBeaconInfo')
         .mockRejectedValueOnce(new Error('ECONNREFUSED'))
         .mockResolvedValue({ region: 'eu', known_servers: ['a'], timestamp: 5000 })
 
@@ -727,9 +728,11 @@ describe('P2PCommunicationClient', () => {
     it('uses stored node when it is reachable', async () => {
       mockStorage.get.mockResolvedValue('healthy-node.papers.tech')
 
-      jest
-        .spyOn(freshClient, 'getBeaconInfo')
-        .mockResolvedValue({ region: 'eu', known_servers: ['a'], timestamp: 7777 })
+      vi.spyOn(freshClient, 'getBeaconInfo').mockResolvedValue({
+        region: 'eu',
+        known_servers: ['a'],
+        timestamp: 7777
+      })
 
       const result = await freshClient.getRelayServer()
 
@@ -744,7 +747,7 @@ describe('P2PCommunicationClient', () => {
       mockStorage.delete.mockResolvedValue(undefined)
 
       // All discovery probes fail
-      jest.spyOn(freshClient, 'getBeaconInfo').mockRejectedValue(new Error('ECONNREFUSED'))
+      vi.spyOn(freshClient, 'getBeaconInfo').mockRejectedValue(new Error('ECONNREFUSED'))
 
       await expect(freshClient.getRelayServer()).rejects.toThrow()
 
@@ -758,10 +761,10 @@ describe('P2PCommunicationClient', () => {
       mockStorage.set.mockResolvedValue(undefined)
       mockStorage.get.mockResolvedValue('')
 
-      const beaconInfoSpy = jest
+      const beaconInfoSpy = vi
         .spyOn(freshClient, 'getBeaconInfo')
         .mockRejectedValueOnce(new Error('ETIMEDOUT'))
-      const discoverySpy = jest
+      const discoverySpy = vi
         .spyOn(freshClient as any, 'findBestRegionAndGetServer')
         .mockResolvedValue({ server: 'discovered-node.papers.tech', timestamp: 5000 })
 
@@ -778,7 +781,7 @@ describe('P2PCommunicationClient', () => {
       mockStorage.get.mockReturnValue(storageGet.promise)
       mockStorage.delete.mockResolvedValue(undefined)
 
-      jest.spyOn(freshClient as any, 'findBestRegionAndGetServer').mockImplementation(() => {
+      vi.spyOn(freshClient as any, 'findBestRegionAndGetServer').mockImplementation(() => {
         throw new Error('offline')
       })
 
@@ -796,7 +799,7 @@ describe('P2PCommunicationClient', () => {
     it('reuses a single in-flight discovery for concurrent callers', async () => {
       mockStorage.get.mockResolvedValue('')
       mockStorage.set.mockResolvedValue(undefined)
-      const discoverySpy = jest
+      const discoverySpy = vi
         .spyOn(freshClient as any, 'findBestRegionAndGetServer')
         .mockResolvedValue({ server: 'discovered-node.papers.tech', timestamp: 3000 })
 
@@ -839,7 +842,7 @@ describe('P2PCommunicationClient', () => {
         resolveSecond = resolve
       })
 
-      jest.spyOn(freshClient, 'getBeaconInfo').mockImplementation(async () => {
+      vi.spyOn(freshClient, 'getBeaconInfo').mockImplementation(async () => {
         callCount += 1
         if (callCount === 1) {
           return firstRefresh
@@ -850,7 +853,7 @@ describe('P2PCommunicationClient', () => {
         throw new Error(`Unexpected getBeaconInfo call #${callCount}`)
       })
 
-      const discoverySpy = jest
+      const discoverySpy = vi
         .spyOn(freshClient as any, 'findBestRegionAndGetServer')
         .mockResolvedValue({ server: 'unexpected-discovery.papers.tech', timestamp: 9999 })
 

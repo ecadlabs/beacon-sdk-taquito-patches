@@ -13,18 +13,18 @@ describe('MatrixClient', () => {
     }
 
     return {
-      get: jest.fn((key: string) => state[key]),
-      update: jest.fn(async (update: Record<string, unknown>) => {
+      get: vi.fn((key: string) => state[key]),
+      update: vi.fn(async (update: Record<string, unknown>) => {
         Object.assign(state, update)
       }),
-      flush: jest.fn().mockResolvedValue(undefined),
-      onStateChanged: jest.fn(),
-      getRoom: jest.fn()
+      flush: vi.fn().mockResolvedValue(undefined),
+      onStateChanged: vi.fn(),
+      getRoom: vi.fn()
     }
   }
 
   it('treats manual stop during polling as normal shutdown', async () => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     const unhandledRejections: unknown[] = []
     const onUnhandledRejection = (reason: unknown): void => {
       unhandledRejections.push(reason)
@@ -34,21 +34,21 @@ describe('MatrixClient', () => {
     try {
       const store = createStore()
       const eventEmitter = {
-        onStateChanged: jest.fn(),
-        on: jest.fn(),
-        removeListener: jest.fn()
+        onStateChanged: vi.fn(),
+        on: vi.fn(),
+        removeListener: vi.fn()
       }
       const userService = {
-        login: jest.fn().mockResolvedValue({ access_token: 'access-token' })
+        login: vi.fn().mockResolvedValue({ access_token: 'access-token' })
       }
       const eventService = {
-        sync: jest.fn().mockResolvedValue({
+        sync: vi.fn().mockResolvedValue({
           next_batch: 'sync-token',
           rooms: {}
         })
       }
       const httpClient = {
-        cancelAllRequests: jest.fn().mockResolvedValue(undefined)
+        cancelAllRequests: vi.fn().mockResolvedValue(undefined)
       }
 
       const client = new MatrixClient(
@@ -69,13 +69,13 @@ describe('MatrixClient', () => {
       ).resolves.toBeUndefined()
 
       await expect(client.stop()).resolves.toBeUndefined()
-      await expect(jest.runOnlyPendingTimersAsync()).resolves.toBeUndefined()
+      await vi.runOnlyPendingTimersAsync()
       await Promise.resolve()
 
       expect(unhandledRejections).toEqual([])
     } finally {
       process.off('unhandledRejection', onUnhandledRejection)
-      jest.useRealTimers()
+      vi.useRealTimers()
     }
   })
 
@@ -84,13 +84,13 @@ describe('MatrixClient', () => {
     async (property) => {
       const client = new MatrixClient(
         createStore() as any,
-        { onStateChanged: jest.fn() } as any,
+        { onStateChanged: vi.fn() } as any,
         {} as any,
         {} as any,
         {} as any,
         {} as any
       )
-      jest.spyOn(client, 'isConnected').mockRejectedValue(new Error('connection failed'))
+      vi.spyOn(client, 'isConnected').mockRejectedValue(new Error('connection failed'))
 
       await expect(client[property]).rejects.toThrow('connection failed')
     }
@@ -100,12 +100,12 @@ describe('MatrixClient', () => {
     const store = createStore()
     await store.update({ accessToken: 'access-token' })
     const eventEmitter = {
-      onStateChanged: jest.fn(),
-      on: jest.fn(),
-      removeListener: jest.fn()
+      onStateChanged: vi.fn(),
+      on: vi.fn(),
+      removeListener: vi.fn()
     }
     const eventService = {
-      sendMessage: jest.fn().mockResolvedValue({ event_id: '$event' })
+      sendMessage: vi.fn().mockResolvedValue({ event_id: '$event' })
     }
     const client = new MatrixClient(
       store as any,

@@ -33,7 +33,6 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
-    "@ecadlabs/beacon-blockchain-substrate": "4.8.4-ecad",
     "@ecadlabs/beacon-blockchain-tezos": "4.8.4-ecad",
     "@ecadlabs/beacon-core": "4.8.4-ecad",
     "@ecadlabs/beacon-dapp": "4.8.4-ecad",

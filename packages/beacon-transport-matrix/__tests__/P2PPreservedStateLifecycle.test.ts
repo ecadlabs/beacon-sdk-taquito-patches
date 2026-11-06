@@ -32,12 +32,13 @@ class HeldPreservedStorage extends LocalStorage {
 
 describe('preserved Matrix state during teardown', () => {
   beforeEach(() => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     localStorage.clear()
-    jest
-      .spyOn(P2PCommunicationClient.prototype, 'getRelayServer')
-      .mockResolvedValue({ server: 'relay.example', timestamp: 12345 })
-    jest.spyOn(MatrixUserService.prototype, 'login').mockResolvedValue({
+    vi.spyOn(P2PCommunicationClient.prototype, 'getRelayServer').mockResolvedValue({
+      server: 'relay.example',
+      timestamp: 12345
+    })
+    vi.spyOn(MatrixUserService.prototype, 'login').mockResolvedValue({
       user_id: '@sdk:relay.example',
       device_id: 'device',
       access_token: 'token'
@@ -45,17 +46,17 @@ describe('preserved Matrix state during teardown', () => {
   })
 
   afterEach(() => {
-    jest.restoreAllMocks()
-    jest.clearAllTimers()
-    jest.useRealTimers()
+    vi.restoreAllMocks()
+    vi.clearAllTimers()
+    vi.useRealTimers()
     localStorage.clear()
   })
 
   it('allows teardown after preserved-state initialization fails', async () => {
     const storage = new LocalStorage()
     const failure = new Error('preserved-state read failed')
-    jest.spyOn(storage, 'get').mockRejectedValue(failure)
-    const write = jest.spyOn(storage, 'set')
+    vi.spyOn(storage, 'get').mockRejectedValue(failure)
+    const write = vi.spyOn(storage, 'set')
     const client = MatrixClient.create({ baseUrl: 'https://relay.example', storage })
 
     await expect(client.start({ id: 'sdk', password: 'token', deviceId: 'device' })).rejects.toBe(
@@ -71,8 +72,8 @@ describe('preserved Matrix state during teardown', () => {
     { teardown: 'reset', rejects: true }
   ])('drains a held write before $teardown (rejects: $rejects)', async ({ teardown, rejects }) => {
     const storage = new HeldPreservedStorage()
-    const write = jest.spyOn(storage, 'set')
-    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
+    const write = vi.spyOn(storage, 'set')
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
     const client = new P2PCommunicationClient(
       'Test',
       await getKeypairFromSeed('preserved-race'),
@@ -80,8 +81,7 @@ describe('preserved Matrix state during teardown', () => {
       storage
     )
     const polling = new ExposedPromise<MatrixSyncResponse>()
-    jest
-      .spyOn(MatrixEventService.prototype, 'sync')
+    vi.spyOn(MatrixEventService.prototype, 'sync')
       .mockResolvedValueOnce({ next_batch: 'initial', rooms: {} })
       .mockImplementation(() => polling.promise)
     await client.start()
@@ -97,7 +97,7 @@ describe('preserved Matrix state during teardown', () => {
         join: { '!stale:relay.example': { state: { events: [] }, timeline: { events: [] } } }
       }
     })
-    await jest.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(0)
     await storage.entered.promise
     expect(write).toHaveBeenLastCalledWith(
       StorageKey.MATRIX_PRESERVED_STATE,

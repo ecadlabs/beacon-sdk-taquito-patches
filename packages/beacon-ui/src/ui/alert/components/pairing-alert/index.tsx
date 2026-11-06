@@ -12,7 +12,6 @@ import { useEffect } from 'react'
 import WCInitError from './components/wc-init-error'
 import QRCode from './components/qr-code'
 import MobilePairing from './components/mobile-pairing'
-import useSubstrateWallets from '../../hooks/useSubstrateWallets'
 
 const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
   const wcPayload = props.pairingPayload!.walletConnectSyncCode
@@ -21,11 +20,7 @@ const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
   const isMobile = useIsMobile()
   const { wallets, availableExtensions } = useWallets(
     props.pairingPayload?.networkType,
-    !props.substratePairing ? props.featuredWallets : undefined
-  )
-  const substrateWalltes = useSubstrateWallets(
-    props.pairingPayload?.networkType,
-    props.substratePairing ? props.featuredWallets : undefined
+    props.featuredWallets
   )
   const [
     wallet,
@@ -48,32 +43,17 @@ const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
     handleShowMoreContent,
     handleDisplayQRExtra,
     handleIsLoading
-  ] = useConnect(
-    isMobile,
-    wcPayload,
-    p2pPayload,
-    postPayload,
-    props.substratePairing ? substrateWalltes : wallets,
-    props.onClose
-  )
+  ] = useConnect(isMobile, wcPayload, p2pPayload, postPayload, wallets, props.onClose)
   const isOnline = navigator.onLine
-  const walletList = Array.from(
-    props.substratePairing ? substrateWalltes.values() : wallets.values()
-  )
+  const walletList = Array.from(wallets.values())
 
   useEffect(() => {
-    let size = wallets.size
-
-    if (props.substratePairing) {
-      size = substrateWalltes.size
-    }
-
-    if (size !== 1) {
+    if (wallets.size !== 1) {
       return
     }
 
     handleClickWallet(walletList[0].id, props)
-  }, [wallets, substrateWalltes])
+  }, [wallets])
 
   const QR: React.FC<{ isMobile: boolean }> = ({ isMobile }) => (
     <QRCode
@@ -168,11 +148,9 @@ const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
             {!isMobile &&
               wallet?.types.includes('extension') &&
               (() => {
-                const isExtensionInstalled = props.substratePairing
-                  ? false
-                  : availableExtensions.some(
-                      (ext) => ext.id === wallet.id || ext.id === wallet.firefoxId
-                    )
+                const isExtensionInstalled = availableExtensions.some(
+                  (ext) => ext.id === wallet.id || ext.id === wallet.firefoxId
+                )
 
                 return (
                   <Info
@@ -236,8 +214,7 @@ const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
               (wallet?.types.length as number) <= 1 && <QR isMobile={true} />}
             {isMobileOS(window) &&
               wallet?.types.includes('ios') &&
-              ((isWCWorking && wallet?.supportedInteractionStandards?.includes('wallet_connect')) ||
-              wallet?.name.toLowerCase().includes('acurast') ? (
+              (isWCWorking && wallet?.supportedInteractionStandards?.includes('wallet_connect') ? (
                 <MobileInfoCard />
               ) : (
                 <WCInitError title={`Connect with ${wallet?.name} Mobile`} />

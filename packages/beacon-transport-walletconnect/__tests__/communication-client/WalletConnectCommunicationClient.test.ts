@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest'
 // __tests__/WalletConnectCommunicationClient.test.ts
 
 import { SessionTypes, SignClientTypes } from '@walletconnect/types'
@@ -10,61 +11,69 @@ import {
 import SignClient from '@walletconnect/sign-client'
 import { WalletConnectCommunicationClient } from '../../src/communication-client/WalletConnectCommunicationClient'
 
-jest.mock('@ecadlabs/beacon-core', () => {
-  const actual = jest.requireActual('@ecadlabs/beacon-core')
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@ecadlabs/beacon-core')>()
   return {
     ...actual,
-    Logger: jest.fn().mockImplementation(() => ({
-      warn: jest.fn(),
-      error: jest.fn(),
-      debug: jest.fn(),
-      log: jest.fn()
-    })),
+    Logger: vi.fn().mockImplementation(function () {
+      return {
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        log: vi.fn()
+      }
+    }),
     ClientEvents: {
       WC_ACK_NOTIFICATION: 'WC_ACK_NOTIFICATION',
       CLOSE_ALERT: 'CLOSE_ALERT'
     },
-    WCStorage: jest.fn().mockImplementation(() => ({
-      onMessageHandler: undefined,
-      onErrorHandler: undefined,
-      resetState: jest.fn(),
-      notify: jest.fn()
-    })),
-    Serializer: jest.fn().mockImplementation(() => ({
-      serialize: jest.fn((x) => Promise.resolve(JSON.stringify(x))),
-      deserialize: jest.fn((x) => Promise.resolve(JSON.parse(x)))
-    }))
+    WCStorage: vi.fn().mockImplementation(function () {
+      return {
+        onMessageHandler: undefined,
+        onErrorHandler: undefined,
+        resetState: vi.fn(),
+        notify: vi.fn()
+      }
+    }),
+    Serializer: vi.fn().mockImplementation(function () {
+      return {
+        serialize: vi.fn((x) => Promise.resolve(JSON.stringify(x))),
+        deserialize: vi.fn((x) => Promise.resolve(JSON.parse(x)))
+      }
+    })
   }
 })
 
-jest.mock('@walletconnect/sign-client', () => ({
-  init: jest.fn(() =>
-    Promise.resolve({
-      session: { keys: [], get: jest.fn(), getAll: jest.fn(() => []) },
-      core: {
-        pairing: { getPairings: jest.fn(() => []) },
-        events: { removeAllListeners: jest.fn() },
-        relayer: {
-          transportClose: jest.fn(),
-          events: { removeAllListeners: jest.fn() },
-          provider: { events: { removeAllListeners: jest.fn() } },
-          subscriber: { events: { removeAllListeners: jest.fn() } }
+vi.mock('@walletconnect/sign-client', () => ({
+  default: {
+    init: vi.fn(() =>
+      Promise.resolve({
+        session: { keys: [], get: vi.fn(), getAll: vi.fn(() => []) },
+        core: {
+          pairing: { getPairings: vi.fn(() => []) },
+          events: { removeAllListeners: vi.fn() },
+          relayer: {
+            transportClose: vi.fn(),
+            events: { removeAllListeners: vi.fn() },
+            provider: { events: { removeAllListeners: vi.fn() } },
+            subscriber: { events: { removeAllListeners: vi.fn() } }
+          },
+          heartbeat: { stop: vi.fn() }
         },
-        heartbeat: { stop: jest.fn() }
-      },
-      request: jest.fn()
-    })
-  )
+        request: vi.fn()
+      })
+    )
+  }
 }))
 
-jest.mock('@walletconnect/utils', () => ({
-  getSdkError: jest.fn((code: string) => ({ code }))
+vi.mock('@walletconnect/utils', () => ({
+  getSdkError: vi.fn((code: string) => ({ code }))
 }))
 
-jest.mock('@ecadlabs/beacon-utils', () => ({
-  generateGUID: jest.fn().mockResolvedValue('guid'),
-  getAddressFromPublicKey: jest.fn().mockResolvedValue('tz1address'),
-  isPublicKeySC: jest.fn().mockReturnValue(true)
+vi.mock('@ecadlabs/beacon-utils', () => ({
+  generateGUID: vi.fn().mockResolvedValue('guid'),
+  getAddressFromPublicKey: vi.fn().mockResolvedValue('tz1address'),
+  isPublicKeySC: vi.fn().mockReturnValue(true)
 }))
 
 function getStringBetween(str: string | undefined, startChar: string, endChar: string): string {
@@ -83,33 +92,33 @@ function getStringBetween(str: string | undefined, startChar: string, endChar: s
 }
 
 const createResolvedSignClient = () => ({
-  on: jest.fn(),
-  session: { keys: [], get: jest.fn(), getAll: jest.fn(() => []) },
-  pairing: { getAll: jest.fn(() => []) },
+  on: vi.fn(),
+  session: { keys: [], get: vi.fn(), getAll: vi.fn(() => []) },
+  pairing: { getAll: vi.fn(() => []) },
   core: {
     pairing: {
-      getPairings: jest.fn(() => []),
-      ping: jest.fn().mockResolvedValue(undefined),
-      events: { on: jest.fn(), removeAllListeners: jest.fn() }
+      getPairings: vi.fn(() => []),
+      ping: vi.fn().mockResolvedValue(undefined),
+      events: { on: vi.fn(), removeAllListeners: vi.fn() }
     },
-    events: { removeAllListeners: jest.fn() },
+    events: { removeAllListeners: vi.fn() },
     relayer: {
-      transportClose: jest.fn(),
-      events: { removeAllListeners: jest.fn() },
+      transportClose: vi.fn(),
+      events: { removeAllListeners: vi.fn() },
       provider: {
-        events: { removeAllListeners: jest.fn() },
-        connection: { events: { removeAllListeners: jest.fn() } }
+        events: { removeAllListeners: vi.fn() },
+        connection: { events: { removeAllListeners: vi.fn() } }
       },
-      subscriber: { events: { removeAllListeners: jest.fn() } }
+      subscriber: { events: { removeAllListeners: vi.fn() } }
     },
-    heartbeat: { stop: jest.fn() }
+    heartbeat: { stop: vi.fn() }
   },
-  request: jest.fn()
+  request: vi.fn()
 })
 
 const createPairingSignClient = () => {
-  const approval = jest.fn(() => new Promise<SessionTypes.Struct>(() => {}))
-  const connect = jest.fn(() => {
+  const approval = vi.fn(() => new Promise<SessionTypes.Struct>(() => {}))
+  const connect = vi.fn(() => {
     const topic = `topic-${connect.mock.calls.length}`
 
     return Promise.resolve({
@@ -142,11 +151,11 @@ describe('getStringBetween', () => {
 
 describe('WalletConnectCommunicationClient basics', () => {
   const wcOptions = { network: 'mainnet' as NetworkType, opts: {} as SignClientTypes.Options }
-  const isLeader = jest.fn().mockResolvedValue(true)
+  const isLeader = vi.fn().mockResolvedValue(true)
   let client: WalletConnectCommunicationClient
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
     client = new WalletConnectCommunicationClient(wcOptions, isLeader)
   })
 
@@ -156,7 +165,7 @@ describe('WalletConnectCommunicationClient basics', () => {
   })
 
   it('listenForEncryptedMessage adds and dedups listeners', async () => {
-    const cb = jest.fn()
+    const cb = vi.fn()
     await client.listenForEncryptedMessage('key1', cb)
     expect((client as any).activeListeners.has('key1')).toBe(true)
     await client.listenForEncryptedMessage('key1', cb)
@@ -164,13 +173,13 @@ describe('WalletConnectCommunicationClient basics', () => {
   })
 
   it('listenForChannelOpening adds a channel listener', async () => {
-    const cb = jest.fn()
+    const cb = vi.fn()
     await client.listenForChannelOpening(cb)
     expect((client as any).channelOpeningListeners.has('channelOpening')).toBe(true)
   })
 
   it('tries fallback relayers when earlier relayer init attempts fail', async () => {
-    const signClient = SignClient as unknown as { init: jest.Mock }
+    const signClient = SignClient as unknown as { init: Mock }
     const configuredRelay = 'wss://configured-relay.example.com'
     const resolvedClient = createResolvedSignClient()
     const clientWithRelay = new WalletConnectCommunicationClient(
@@ -209,8 +218,8 @@ describe('WalletConnectCommunicationClient basics', () => {
   })
 
   it('times out a hung SignClient init attempt and tries the next relayer', async () => {
-    jest.useFakeTimers()
-    const signClient = SignClient as unknown as { init: jest.Mock }
+    vi.useFakeTimers()
+    const signClient = SignClient as unknown as { init: Mock }
     const resolvedClient = createResolvedSignClient()
 
     signClient.init
@@ -220,16 +229,16 @@ describe('WalletConnectCommunicationClient basics', () => {
     const relayer = (client as any).tryConnectToRelayer()
     await Promise.resolve()
 
-    jest.advanceTimersByTime(15000)
+    vi.advanceTimersByTime(15000)
     await Promise.resolve()
 
     await expect(relayer).resolves.toBe(resolvedClient)
     expect(signClient.init).toHaveBeenCalledTimes(2)
-    jest.useRealTimers()
+    vi.useRealTimers()
   })
 
   it('coalesces concurrent SignClient initialization', async () => {
-    const signClient = SignClient as unknown as { init: jest.Mock }
+    const signClient = SignClient as unknown as { init: Mock }
     const resolvedClient = createResolvedSignClient()
     signClient.init.mockResolvedValueOnce(resolvedClient)
 
@@ -242,7 +251,7 @@ describe('WalletConnectCommunicationClient basics', () => {
   })
 
   it('coalesces concurrent pairing request creation', async () => {
-    const init = jest
+    const init = vi
       .spyOn(client as any, 'init')
       .mockResolvedValue({ uri: 'wc:topic@2?symKey=abc', topic: 'topic' })
 
@@ -291,11 +300,11 @@ describe('WalletConnectCommunicationClient basics', () => {
   })
 
   it('reuses an initialized SignClient when creating the first force-new pairing request', async () => {
-    const signClient = SignClient as unknown as { init: jest.Mock }
-    const approval = jest.fn(() => new Promise<never>(() => {}))
+    const signClient = SignClient as unknown as { init: Mock }
+    const approval = vi.fn(() => new Promise<never>(() => {}))
     const resolvedClient = {
       ...createResolvedSignClient(),
-      connect: jest.fn().mockResolvedValue({
+      connect: vi.fn().mockResolvedValue({
         uri: 'wc:fresh-topic@2?symKey=fresh',
         approval
       })
@@ -329,7 +338,7 @@ describe('WalletConnectCommunicationClient basics', () => {
   })
 
   it('creates a fresh pairing URI instead of restoring a persisted session for pairing requests', async () => {
-    const signClient = SignClient as unknown as { init: jest.Mock }
+    const signClient = SignClient as unknown as { init: Mock }
     const restoredSession = {
       topic: 'old-session',
       expiry: Math.floor(Date.now() / 1000) + 3600,
@@ -341,15 +350,15 @@ describe('WalletConnectCommunicationClient basics', () => {
         }
       }
     }
-    const approval = jest.fn().mockResolvedValue(restoredSession)
+    const approval = vi.fn().mockResolvedValue(restoredSession)
     const resolvedClient = {
       ...createResolvedSignClient(),
       session: {
         keys: ['old-session'],
-        get: jest.fn(() => restoredSession),
-        getAll: jest.fn(() => [restoredSession])
+        get: vi.fn(() => restoredSession),
+        getAll: vi.fn(() => [restoredSession])
       },
-      connect: jest.fn().mockResolvedValue({
+      connect: vi.fn().mockResolvedValue({
         uri: 'wc:fresh-topic@2?symKey=fresh',
         approval
       })
@@ -366,34 +375,34 @@ describe('WalletConnectCommunicationClient basics', () => {
   })
 
   it('marks a restored session stale when validation ping hangs', async () => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     const restoredSession = {
       topic: 'old-session',
       expiry: Math.floor(Date.now() / 1000) + 3600
     }
     ;(client as any).signClient = {
       ...createResolvedSignClient(),
-      ping: jest.fn(() => new Promise(() => {}))
+      ping: vi.fn(() => new Promise(() => {}))
     }
 
     const validation = (client as any).isSessionValid(restoredSession)
     await Promise.resolve()
-    jest.advanceTimersByTime(5000)
+    vi.advanceTimersByTime(5000)
     await Promise.resolve()
 
     await expect(validation).resolves.toBe(false)
-    jest.useRealTimers()
+    vi.useRealTimers()
   })
 
   it('continues local SignClient cleanup when relayer transport close times out', async () => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     const resolvedClient = createResolvedSignClient()
     resolvedClient.core.relayer.transportClose.mockImplementation(() => new Promise(() => {}))
     ;(client as any).signClient = resolvedClient
 
     const close = client.closeSignClient()
     await Promise.resolve()
-    jest.advanceTimersByTime(10000)
+    vi.advanceTimersByTime(10000)
 
     await expect(close).resolves.toBeUndefined()
     expect(resolvedClient.core.events.removeAllListeners).toHaveBeenCalledTimes(1)
@@ -409,11 +418,11 @@ describe('WalletConnectCommunicationClient basics', () => {
     expect((client as any).signClient).toBeUndefined()
     expect((client as any).signClientPromise).toBeUndefined()
     expect((client as any).pairingRequestPromise).toBeUndefined()
-    jest.useRealTimers()
+    vi.useRealTimers()
   })
 
   it('notifies listeners immediately when an inbound session_delete has a hung pairing disconnect', async () => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     const resolvedClient = createResolvedSignClient()
     const session = {
       topic: 'session-topic',
@@ -422,10 +431,10 @@ describe('WalletConnectCommunicationClient basics', () => {
       peer: { metadata: { name: '', icons: [], redirect: {} } },
       sessionProperties: {}
     } as SessionTypes.Struct
-    resolvedClient.core.pairing.disconnect = jest.fn(() => new Promise(() => {}))
+    resolvedClient.core.pairing.disconnect = vi.fn(() => new Promise(() => {}))
     Reflect.set(client, 'signClient', resolvedClient)
     ;(client as any).session = session
-    const notifyListeners = jest.spyOn(client as any, 'notifyListeners')
+    const notifyListeners = vi.spyOn(client as any, 'notifyListeners')
 
     const disconnect = (client as any).disconnect(resolvedClient, {
       type: 'session',
@@ -438,11 +447,11 @@ describe('WalletConnectCommunicationClient basics', () => {
       id: 'guid',
       type: BeaconMessageType.Disconnect
     })
-    jest.advanceTimersByTime(10000)
+    vi.advanceTimersByTime(10000)
     await Promise.resolve()
     await Promise.resolve()
     await expect(disconnect).resolves.toBeUndefined()
-    jest.useRealTimers()
+    vi.useRealTimers()
   })
 
   it('unsubscribeFromEncryptedMessages clears all listeners', async () => {
@@ -467,11 +476,11 @@ describe('WalletConnectCommunicationClient basics', () => {
 
 describe('String message dispatching', () => {
   const wcOptions = { network: 'mainnet' as NetworkType, opts: {} as SignClientTypes.Options }
-  const isLeader = jest.fn().mockResolvedValue(true)
+  const isLeader = vi.fn().mockResolvedValue(true)
   let client: WalletConnectCommunicationClient
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
     client = new WalletConnectCommunicationClient(wcOptions, isLeader)
   })
 
@@ -483,14 +492,14 @@ describe('String message dispatching', () => {
 
   it('sendMessage dispatches PermissionRequest', async () => {
     const msg = { id: '1', type: BeaconMessageType.PermissionRequest, network: 'mainnet' }
-    jest.spyOn(client, 'requestPermissions').mockImplementationOnce(() => Promise.resolve())
+    vi.spyOn(client, 'requestPermissions').mockImplementationOnce(() => Promise.resolve())
     await client.sendMessage(JSON.stringify(msg))
     expect(client.requestPermissions).toHaveBeenCalled()
   })
 
   it('sendMessage dispatches OperationRequest', async () => {
     const msg = { id: '2', type: BeaconMessageType.OperationRequest, operationDetails: [] }
-    jest.spyOn(client, 'sendOperations').mockImplementationOnce(() => Promise.resolve())
+    vi.spyOn(client, 'sendOperations').mockImplementationOnce(() => Promise.resolve())
     await client.sendMessage(JSON.stringify(msg))
     expect(client.sendOperations).toHaveBeenCalled()
   })
@@ -505,7 +514,7 @@ describe('String message dispatching', () => {
       sourceAddress: 'tz1test',
       version: '3'
     }
-    jest.spyOn(client, 'signPayload').mockImplementationOnce(() => Promise.resolve())
+    vi.spyOn(client, 'signPayload').mockImplementationOnce(() => Promise.resolve())
     await client.sendMessage(JSON.stringify(msg))
     expect(client.signPayload).toHaveBeenCalled()
   })
@@ -549,26 +558,24 @@ describe('String message dispatching', () => {
       'session-topic-2',
       'edpktp3QT23n223n223n223n223n223n223n223n223n223n223n2'
     )
-    const signClient = SignClient as unknown as { init: jest.Mock }
+    const signClient = SignClient as unknown as { init: Mock }
     const firstSignClient = {
       ...createResolvedSignClient(),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      connect: jest.fn().mockResolvedValue({
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue({
         uri: 'wc:pairing-topic-1@2?symKey=key-1',
         approval: () => Promise.resolve(firstSession)
       })
     }
     const secondSignClient = {
       ...createResolvedSignClient(),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      connect: jest.fn().mockResolvedValue({
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      connect: vi.fn().mockResolvedValue({
         uri: 'wc:pairing-topic-2@2?symKey=key-2',
         approval: () => Promise.resolve(secondSession)
       })
     }
-    signClient.init
-      .mockResolvedValueOnce(firstSignClient)
-      .mockResolvedValueOnce(secondSignClient)
+    signClient.init.mockResolvedValueOnce(firstSignClient).mockResolvedValueOnce(secondSignClient)
 
     const receivedMessages: Array<Record<string, unknown>> = []
     await client.listenForEncryptedMessage('dapp-listener', (serialized) => {
@@ -599,7 +606,7 @@ describe('String message dispatching', () => {
     })
 
     // Simulate DAppClient.disconnect(): transport close followed by outgoing Disconnect message
-    firstSignClient.session.getAll = jest.fn(() => [firstSession])
+    firstSignClient.session.getAll = vi.fn(() => [firstSession])
     await client.close()
     await client.sendMessage(
       JSON.stringify({
@@ -644,8 +651,8 @@ describe('String message dispatching', () => {
 
     const resolvedClient = {
       ...createResolvedSignClient(),
-      ping: jest.fn().mockResolvedValue(undefined),
-      request: jest.fn().mockResolvedValue({ signature: 'edsig-valid' })
+      ping: vi.fn().mockResolvedValue(undefined),
+      request: vi.fn().mockResolvedValue({ signature: 'edsig-valid' })
     }
     ;(client as any).signClient = resolvedClient
     ;(client as any).session = session

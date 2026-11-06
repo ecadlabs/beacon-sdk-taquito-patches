@@ -1,21 +1,21 @@
-/** @jest-environment node */
+/** @vitest-environment node */
 
 import { clearMockWindowState, windowRef } from '../src/MockWindow'
 
 describe('mock window listeners', () => {
   beforeEach(() => {
     clearMockWindowState()
-    jest.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'log').mockImplementation(() => {})
   })
 
   afterEach(() => {
     clearMockWindowState()
-    jest.restoreAllMocks()
+    vi.restoreAllMocks()
   })
 
   it('removes the requested listener when it is not the last listener', () => {
-    const first = jest.fn()
-    const last = jest.fn()
+    const first = vi.fn()
+    const last = vi.fn()
     windowRef.addEventListener('message', first)
     windowRef.addEventListener('message', last)
 
@@ -27,12 +27,12 @@ describe('mock window listeners', () => {
   })
 
   it('leaves registered listeners intact when removing an unknown listener', () => {
-    const first = jest.fn()
-    const last = jest.fn()
+    const first = vi.fn()
+    const last = vi.fn()
     windowRef.addEventListener('message', first)
     windowRef.addEventListener('message', last)
 
-    windowRef.removeEventListener('message', jest.fn())
+    windowRef.removeEventListener('message', vi.fn())
     windowRef.postMessage('payload', '*')
 
     expect(first).toHaveBeenCalledWith({ data: 'payload' })
@@ -40,7 +40,7 @@ describe('mock window listeners', () => {
   })
 
   it('forwards object payloads in the existing data envelope', () => {
-    const listener = jest.fn()
+    const listener = vi.fn()
     const payload = { target: 'extension', payload: 'ping' }
     windowRef.addEventListener('message', listener)
 
@@ -52,7 +52,7 @@ describe('mock window listeners', () => {
   })
 
   it('still calls other listeners when a listener removes itself during dispatch', () => {
-    const other = jest.fn()
+    const other = vi.fn()
     const selfRemoving = (): void => windowRef.removeEventListener('message', selfRemoving)
     windowRef.addEventListener('message', selfRemoving)
     windowRef.addEventListener('message', other)
@@ -63,8 +63,8 @@ describe('mock window listeners', () => {
   })
 
   it('does not call a listener removed by another listener during dispatch', () => {
-    const removed = jest.fn()
-    const survivor = jest.fn()
+    const removed = vi.fn()
+    const survivor = vi.fn()
     const removeOther = (): void => windowRef.removeEventListener('message', removed)
     windowRef.addEventListener('message', removeOther)
     windowRef.addEventListener('message', removed)

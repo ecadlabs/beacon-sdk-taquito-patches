@@ -10,9 +10,9 @@ import { SessionTypes, SignClientTypes } from '@walletconnect/types'
 import { WalletConnectCommunicationClient } from '../src/communication-client/WalletConnectCommunicationClient'
 import { WalletConnectTransport } from '../src/WalletConnectTransport'
 
-jest.mock('@walletconnect/sign-client', () => ({}))
-jest.mock('@walletconnect/utils', () => ({
-  getSdkError: jest.fn((code: string) => ({ code }))
+vi.mock('@walletconnect/sign-client', () => ({ default: {} }))
+vi.mock('@walletconnect/utils', () => ({
+  getSdkError: vi.fn((code: string) => ({ code }))
 }))
 
 describe('WalletConnectTransport', () => {
@@ -22,13 +22,12 @@ describe('WalletConnectTransport', () => {
     network: NetworkType.MAINNET,
     opts: {} as SignClientTypes.Options
   }
-  const isLeader = jest.fn().mockResolvedValue(true)
+  const isLeader = vi.fn().mockResolvedValue(true)
   const keyPair = {} as KeyPair
   const storage = {} as Storage
 
   let getInstanceSpy:
-    | jest.SpiedFunction<typeof WalletConnectCommunicationClient.getInstance>
-    | undefined
+    vi.SpiedFunction<typeof WalletConnectCommunicationClient.getInstance> | undefined
 
   const createSession = (): SessionTypes.Struct =>
     ({
@@ -46,10 +45,10 @@ describe('WalletConnectTransport', () => {
 
   const createTransport = (session: SessionTypes.Struct) => {
     const communicationClient = {
-      currentSession: jest.fn(() => session)
+      currentSession: vi.fn(() => session)
     } as unknown as WalletConnectCommunicationClient
 
-    getInstanceSpy = jest
+    getInstanceSpy = vi
       .spyOn(WalletConnectCommunicationClient, 'getInstance')
       .mockReturnValue(communicationClient)
 
@@ -60,7 +59,7 @@ describe('WalletConnectTransport', () => {
   }
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   afterEach(() => {
@@ -97,11 +96,11 @@ describe('WalletConnectTransport', () => {
   it('reports asynchronous message handler failures at the event boundary', async () => {
     let receive!: (message: string) => void | Promise<void>
     const communicationClient = {
-      listenForEncryptedMessage: jest.fn(async (_key: string, callback: typeof receive) => {
+      listenForEncryptedMessage: vi.fn(async (_key: string, callback: typeof receive) => {
         receive = callback
       })
     } as unknown as WalletConnectCommunicationClient
-    getInstanceSpy = jest
+    getInstanceSpy = vi
       .spyOn(WalletConnectCommunicationClient, 'getInstance')
       .mockReturnValue(communicationClient)
     const transport = new WalletConnectTransport(
@@ -118,7 +117,7 @@ describe('WalletConnectTransport', () => {
     })
     const failure = new Error('handler failed')
     const reported = new Promise<void>((resolve) => {
-      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => resolve())
+      vi.spyOn(Logger.prototype, 'error').mockImplementation(() => resolve())
     })
     try {
       await transport.addListener(async () => {
@@ -139,7 +138,7 @@ describe('WalletConnectTransport', () => {
       await reported
       expect(Logger.prototype.error).toHaveBeenCalledWith('listen', failure)
     } finally {
-      jest.restoreAllMocks()
+      vi.restoreAllMocks()
     }
   })
 })

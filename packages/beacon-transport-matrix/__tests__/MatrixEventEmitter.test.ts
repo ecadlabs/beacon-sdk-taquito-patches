@@ -32,8 +32,8 @@ describe('EventEmitter listener lifecycle', () => {
 
   it('disposes only the registered callback and tolerates repeated disposal', () => {
     const emitter = new EventEmitter<Events>()
-    const first = jest.fn()
-    const second = jest.fn()
+    const first = vi.fn()
+    const second = vi.fn()
     const dispose = emitter.on('message', first)
     emitter.on('message', second)
 
@@ -47,7 +47,7 @@ describe('EventEmitter listener lifecycle', () => {
 
   it('ignores removal of an absent listener', () => {
     const emitter = new EventEmitter<Events>()
-    const listener = jest.fn()
+    const listener = vi.fn()
     emitter.on('message', listener)
 
     emitter.removeListener('message', () => undefined)
@@ -59,7 +59,7 @@ describe('EventEmitter listener lifecycle', () => {
 
   it('removes one duplicate registration at a time', () => {
     const emitter = new EventEmitter<Events>()
-    const listener = jest.fn()
+    const listener = vi.fn()
     emitter.on('message', listener)
     emitter.on('message', listener)
 
@@ -71,8 +71,8 @@ describe('EventEmitter listener lifecycle', () => {
 
   it('clears one event without clearing another event', () => {
     const emitter = new EventEmitter<Events>()
-    const message = jest.fn()
-    const invite = jest.fn()
+    const message = vi.fn()
+    const invite = vi.fn()
     emitter.on('message', message)
     emitter.on('invite', invite)
 
@@ -86,9 +86,9 @@ describe('EventEmitter listener lifecycle', () => {
 
   it('clears all events and permits new subscriptions afterward', () => {
     const emitter = new EventEmitter<Events>()
-    const oldMessage = jest.fn()
-    const oldInvite = jest.fn()
-    const nextMessage = jest.fn()
+    const oldMessage = vi.fn()
+    const oldInvite = vi.fn()
+    const nextMessage = vi.fn()
     emitter.on('message', oldMessage)
     emitter.on('invite', oldInvite)
 
@@ -118,7 +118,7 @@ describe('EventEmitter listener lifecycle', () => {
 
   it('can cancel a once listener before delivery', () => {
     const emitter = new EventEmitter<Events>()
-    const listener = jest.fn()
+    const listener = vi.fn()
     const dispose = emitter.once('invite', listener)
 
     dispose()
@@ -155,8 +155,8 @@ describe('EventEmitter listener lifecycle', () => {
   it('logs a thrown callback error and continues delivery', () => {
     const emitter = new EventEmitter<Events>()
     const failure = new Error('listener failed')
-    const later = jest.fn()
-    const errorLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+    const later = vi.fn()
+    const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
     try {
       emitter.on('message', () => {
         throw failure
@@ -173,7 +173,7 @@ describe('EventEmitter listener lifecycle', () => {
 
   it('handles the toString event before registration and after clearing', () => {
     const emitter = new EventEmitter<{ toString: [text: string]; constructor: [value: number] }>()
-    const listener = jest.fn()
+    const listener = vi.fn()
 
     expect(() => emitter.emit('toString', 'before registration')).not.toThrow()
     expect(() => emitter.removeListener('toString', listener)).not.toThrow()
@@ -188,7 +188,7 @@ describe('EventEmitter listener lifecycle', () => {
 
   it('handles the constructor event before registration and after clearing all events', () => {
     const emitter = new EventEmitter<{ toString: [text: string]; constructor: [value: number] }>()
-    const listener = jest.fn()
+    const listener = vi.fn()
 
     expect(() => emitter.emit('constructor', 1)).not.toThrow()
     expect(() => emitter.removeListener('constructor', listener)).not.toThrow()
@@ -231,8 +231,8 @@ const textMessage = (body: string, timestamp: number): MatrixMessage<unknown> =>
 describe('MatrixClientEventEmitter state dispatch', () => {
   it('ignores updates without invitations or messages', () => {
     const emitter = new MatrixClientEventEmitter()
-    const invite = jest.fn()
-    const message = jest.fn()
+    const invite = vi.fn()
+    const message = vi.fn()
     emitter.on(MatrixClientEventType.INVITE, invite)
     emitter.on(MatrixClientEventType.MESSAGE, message)
 
@@ -304,7 +304,7 @@ describe('MatrixClientEventEmitter state dispatch', () => {
 
   it('preserves invitation members from reconstructed rooms', () => {
     const emitter = new MatrixClientEventEmitter()
-    const listener = jest.fn()
+    const listener = vi.fn()
     emitter.on(MatrixClientEventType.INVITE, listener)
     const rooms = MatrixRoom.fromSync({
       invite: {
@@ -401,8 +401,8 @@ describe('MatrixClientEventEmitter state dispatch', () => {
 
   it('supports disposal and once delivery through the inherited public interface', () => {
     const emitter = new MatrixClientEventEmitter()
-    const removed = jest.fn()
-    const once = jest.fn()
+    const removed = vi.fn()
+    const once = vi.fn()
     const dispose = emitter.on(MatrixClientEventType.INVITE, removed)
     emitter.once(MatrixClientEventType.INVITE, once)
     const rooms = [MatrixRoom.from('invited-room', MatrixRoomStatus.INVITED)]

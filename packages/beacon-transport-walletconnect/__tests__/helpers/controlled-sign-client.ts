@@ -59,41 +59,41 @@ export const mockRemote = {
   on: (name: string, callback: (event: unknown) => void) => {
     mockHandlers.set(name, callback)
   },
-  removeAllListeners: jest.fn(),
-  disconnect: jest.fn(async () => {}),
-  connect: jest.fn(async () => {
+  removeAllListeners: vi.fn(),
+  disconnect: vi.fn(async () => {}),
+  connect: vi.fn(async () => {
     const approval = deferred<SessionTypes.Struct>()
     mockApprovals.push(approval)
     return { uri: 'wc:pairing@2?symKey=test', approval: () => approval.promise }
   }),
-  ping: jest.fn(() => {
+  ping: vi.fn(() => {
     if (!mockHoldPing) return Promise.resolve()
     const ping = deferred<void>()
     mockPings.push(ping)
     return ping.promise
   }),
-  request: jest.fn((input: WireRequest) => {
+  request: vi.fn((input: WireRequest) => {
     const reply = deferred<Reply>()
     mockRequests.push({ input, reply })
     return reply.promise
   }),
   core: {
-    events: { removeAllListeners: jest.fn() },
-    heartbeat: { stop: jest.fn() },
+    events: { removeAllListeners: vi.fn() },
+    heartbeat: { stop: vi.fn() },
     relayer: {
-      transportClose: jest.fn(async () => {}),
-      events: { removeAllListeners: jest.fn() },
+      transportClose: vi.fn(async () => {}),
+      events: { removeAllListeners: vi.fn() },
       provider: {
-        events: { removeAllListeners: jest.fn() },
-        connection: { events: { removeAllListeners: jest.fn() } }
+        events: { removeAllListeners: vi.fn() },
+        connection: { events: { removeAllListeners: vi.fn() } }
       },
-      subscriber: { events: { removeAllListeners: jest.fn() } }
+      subscriber: { events: { removeAllListeners: vi.fn() } }
     },
     pairing: {
-      events: { on: jest.fn(), removeAllListeners: jest.fn() },
+      events: { on: vi.fn(), removeAllListeners: vi.fn() },
       getPairings: () => [],
-      ping: jest.fn(async () => {}),
-      disconnect: jest.fn(async () => {})
+      ping: vi.fn(async () => {}),
+      disconnect: vi.fn(async () => {})
     }
   }
 }
@@ -113,7 +113,7 @@ export function restoreSession(topic: string) {
 export function holdPings() {
   mockHoldPing = true
 }
-export const flush = () => jest.advanceTimersByTimeAsync(0)
+export const flush = () => vi.advanceTimersByTimeAsync(0)
 
 // Storage notifications are local to each test; no browser tabs or relay exist.
 export function installLocalChannel() {

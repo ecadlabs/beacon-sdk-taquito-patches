@@ -5,21 +5,23 @@ import { WalletsProps } from 'src/ui/common'
 // --- Mock the Wallet component ---
 // Replace the real Wallet component with a dummy that renders a div with data-testid="wallet".
 // It receives props and renders the wallet name and description, and attaches the onClick handler.
-jest.mock('../../src/components/wallet/index', () => {
-  return ({
-    name,
-    description,
-    onClick
-  }: {
-    name: string
-    description: string
-    onClick: () => void
-  }) => (
-    <div data-testid="wallet" onClick={onClick}>
-      <span>{name}</span>
-      <span>{description}</span>
-    </div>
-  )
+vi.mock('../../src/components/wallet/index', () => {
+  return {
+    default: ({
+      name,
+      description,
+      onClick
+    }: {
+      name: string
+      description: string
+      onClick: () => void
+    }) => (
+      <div data-testid="wallet" onClick={onClick}>
+        <span>{name}</span>
+        <span>{description}</span>
+      </div>
+    )
+  }
 })
 
 describe('Wallets Component', () => {
@@ -49,8 +51,8 @@ describe('Wallets Component', () => {
   ]
 
   // Dummy callback functions
-  const onClickWallet = jest.fn()
-  const onClickOther = jest.fn()
+  const onClickWallet = vi.fn()
+  const onClickOther = vi.fn()
 
   // A helper function to render the component with props
   const renderComponent = (props?: Partial<WalletsProps>) => {
@@ -66,7 +68,7 @@ describe('Wallets Component', () => {
   }
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   test('renders a list of Wallet components with the correct description', () => {

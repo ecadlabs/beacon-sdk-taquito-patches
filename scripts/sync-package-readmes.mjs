@@ -5,18 +5,13 @@ const repoRoot = process.cwd()
 const packagesRoot = path.join(repoRoot, 'packages')
 
 const primaryPackages = new Set(['beacon-sdk', 'beacon-dapp', 'beacon-wallet'])
-const addOnPackages = new Set([
-  'beacon-blockchain-substrate',
-  'beacon-blockchain-tezos',
-  'beacon-blockchain-tezos-sapling'
-])
+const addOnPackages = new Set(['beacon-blockchain-tezos', 'beacon-blockchain-tezos-sapling'])
 
 const repoUrl = 'https://github.com/ecadlabs/beacon-sdk-taquito-patches'
 const airgapUrl = 'https://github.com/airgap-it/beacon-sdk'
 const octezConnectUrl = 'https://github.com/trilitech/octez.connect'
 
 const packageDirs = [
-  'beacon-blockchain-substrate',
   'beacon-blockchain-tezos',
   'beacon-blockchain-tezos-sapling',
   'beacon-core',

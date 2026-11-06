@@ -1,3 +1,4 @@
+import type { Mocked, MockInstance } from 'vitest'
 // __tests__/client/WalletClient.test.ts
 
 import { Client, LocalStorage, Serializer } from '@ecadlabs/beacon-core'
@@ -5,7 +6,7 @@ import { BeaconMessageType, StorageKey, TransportStatus } from '@ecadlabs/beacon
 import { WalletClient } from '../../src/client/WalletClient'
 import { WalletP2PTransport } from '../../src/transports/WalletP2PTransport'
 
-const fetchMock = jest.fn()
+const fetchMock = vi.fn()
 const originalFetch = global.fetch
 beforeAll(() => {
   global.fetch = fetchMock as unknown as typeof fetch
@@ -26,49 +27,57 @@ const jsonResponse = <T>(data: T): Response =>
   }) as unknown as Response
 
 // Stub out all of beacon-utils, including generateGUID
-jest.mock('@ecadlabs/beacon-utils', () => ({
+vi.mock('@ecadlabs/beacon-utils', () => ({
   ExposedPromise: class {
     public promise = new Promise<boolean>(() => {})
-    public resolve = jest.fn()
+    public resolve = vi.fn()
   },
-  toHex: jest.fn().mockReturnValue('abcd'),
-  generateGUID: jest.fn().mockReturnValue('guid-123')
+  toHex: vi.fn().mockReturnValue('abcd'),
+  generateGUID: vi.fn().mockReturnValue('guid-123')
 }))
 
 // Stub everything from beacon-core *except* Client, so subclassing still works
-jest.mock('@ecadlabs/beacon-core', () => {
-  const actual = jest.requireActual('@ecadlabs/beacon-core')
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@ecadlabs/beacon-core')>()
   return {
     ...actual,
-    LocalStorage: jest.fn().mockImplementation(() => ({
-      get: jest.fn().mockResolvedValue([]),
-      set: jest.fn().mockResolvedValue(undefined)
-    })),
-    PermissionManager: jest.fn().mockImplementation(() => ({
-      getPermissions: jest.fn().mockResolvedValue([]),
-      getPermission: jest.fn(),
-      removePermissions: jest.fn(),
-      removePermission: jest.fn(),
-      removeAllPermissions: jest.fn()
-    })),
-    AppMetadataManager: jest.fn().mockImplementation(() => ({
-      getAppMetadataList: jest.fn(),
-      getAppMetadata: jest.fn(),
-      removeAppMetadata: jest.fn(),
-      removeAllAppMetadata: jest.fn()
-    })),
-    getSenderId: jest.fn().mockResolvedValue('sender-id'),
-    Logger: jest.fn().mockImplementation(() => ({
-      log: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn()
-    }))
+    LocalStorage: vi.fn().mockImplementation(function () {
+      return {
+        get: vi.fn().mockResolvedValue([]),
+        set: vi.fn().mockResolvedValue(undefined)
+      }
+    }),
+    PermissionManager: vi.fn().mockImplementation(function () {
+      return {
+        getPermissions: vi.fn().mockResolvedValue([]),
+        getPermission: vi.fn(),
+        removePermissions: vi.fn(),
+        removePermission: vi.fn(),
+        removeAllPermissions: vi.fn()
+      }
+    }),
+    AppMetadataManager: vi.fn().mockImplementation(function () {
+      return {
+        getAppMetadataList: vi.fn(),
+        getAppMetadata: vi.fn(),
+        removeAppMetadata: vi.fn(),
+        removeAllAppMetadata: vi.fn()
+      }
+    }),
+    getSenderId: vi.fn().mockResolvedValue('sender-id'),
+    Logger: vi.fn().mockImplementation(function () {
+      return {
+        log: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn()
+      }
+    })
   }
 })
 
-jest.mock('../../src/transports/WalletP2PTransport')
-jest.mock('../../src/interceptors/IncomingRequestInterceptor')
-jest.mock('../../src/interceptors/OutgoingResponseInterceptor')
+vi.mock('../../src/transports/WalletP2PTransport')
+vi.mock('../../src/interceptors/IncomingRequestInterceptor')
+vi.mock('../../src/interceptors/OutgoingResponseInterceptor')
 
 describe('WalletClient', () => {
   const backendUrl = 'https://my.backend'
@@ -76,25 +85,25 @@ describe('WalletClient', () => {
   const oracleUrl = 'https://oracle.test'
 
   let client: WalletClient
-  let storage: jest.Mocked<LocalStorage>
-  let initSpy: jest.SpyInstance<Promise<any>, [any?]>
+  let storage: Mocked<LocalStorage>
+  let initSpy: MockInstance<(...args: [any?]) => Promise<any>>
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
 
     // Silence the multiple‐instances warning in BeaconClient constructor
-    jest.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
 
     // Spy on super.init() so we don’t actually initialize anything real
-    initSpy = jest.spyOn(Client.prototype, 'init').mockResolvedValue('transport-type' as any)
+    initSpy = vi.spyOn(Client.prototype, 'init').mockResolvedValue('transport-type' as any)
 
     storage = new LocalStorage() as any
     client = new WalletClient({ name: 'test-client', storage })
 
     // *** Stub the keyPair getter so `await this.keyPair` in init() resolves immediately ***
-    jest
-      .spyOn(client as any, 'keyPair', 'get')
-      .mockReturnValue(Promise.resolve({ publicKey: 'pub', secretKey: 'sec' } as any))
+    vi.spyOn(client as any, 'keyPair', 'get').mockReturnValue(
+      Promise.resolve({ publicKey: 'pub', secretKey: 'sec' } as any)
+    )
   })
 
   describe('init()', () => {
@@ -228,12 +237,12 @@ describe('WalletClient', () => {
     it('forwards peer info to transport.addPeer()', async () => {
       const fakePeer = { id: '1', name: 'p', publicKey: 'pk', version: '2' } as any
       const extended = { senderId: 'sender-id', ...fakePeer }
-      jest.spyOn(client as any, 'getPeerInfo').mockResolvedValue(extended)
+      vi.spyOn(client as any, 'getPeerInfo').mockResolvedValue(extended)
 
-      const transportMock = { addPeer: jest.fn().mockResolvedValue(undefined) }
-      jest
-        .spyOn(client as any, 'transport', 'get')
-        .mockReturnValue(Promise.resolve(transportMock as any))
+      const transportMock = { addPeer: vi.fn().mockResolvedValue(undefined) }
+      vi.spyOn(client as any, 'transport', 'get').mockReturnValue(
+        Promise.resolve(transportMock as any)
+      )
 
       await client.addPeer(fakePeer)
       expect(transportMock.addPeer).toHaveBeenCalledWith(extended, true)
@@ -260,25 +269,25 @@ describe('WalletClient', () => {
 
       const transportMock = {
         connectionStatus: TransportStatus.CONNECTED,
-        getPeers: jest.fn().mockImplementation(async () => peers),
-        removePeer: jest.fn().mockImplementation(async (peer) => {
+        getPeers: vi.fn().mockImplementation(async () => peers),
+        removePeer: vi.fn().mockImplementation(async (peer) => {
           peers = peers.filter((existingPeer) => existingPeer.publicKey !== peer.publicKey)
         }),
-        disconnect: jest.fn()
+        disconnect: vi.fn()
       }
 
-      jest
-        .spyOn(client as any, 'transport', 'get')
-        .mockReturnValue(Promise.resolve(transportMock as any))
-      jest.spyOn(client as any, '_connect').mockResolvedValue(undefined)
+      vi.spyOn(client as any, 'transport', 'get').mockReturnValue(
+        Promise.resolve(transportMock as any)
+      )
+      vi.spyOn(client as any, '_connect').mockResolvedValue(undefined)
 
       return { peerA, peerB, transportMock }
     }
 
     it('handles inbound disconnect for one peer without tearing down the transport', async () => {
       const { peerA, peerB, transportMock } = createConnectedTransport()
-      const disconnectListener = jest.fn()
-      const newMessageCallback = jest.fn()
+      const disconnectListener = vi.fn()
+      const newMessageCallback = vi.fn()
 
       client.subscribeToDisconnect(disconnectListener)
 
@@ -303,11 +312,11 @@ describe('WalletClient', () => {
 
     it('handles flat v3 disconnect messages', async () => {
       const { peerA, peerB, transportMock } = createConnectedTransport()
-      const disconnectListener = jest.fn()
+      const disconnectListener = vi.fn()
 
       client.subscribeToDisconnect(disconnectListener)
 
-      await client.connect(jest.fn())
+      await client.connect(vi.fn())
       await (client as any).handleResponse(
         {
           id: 'disconnect-message',
@@ -326,11 +335,11 @@ describe('WalletClient', () => {
 
     it('handles wrapped v3 disconnect messages', async () => {
       const { peerA, peerB, transportMock } = createConnectedTransport()
-      const disconnectListener = jest.fn()
+      const disconnectListener = vi.fn()
 
       client.subscribeToDisconnect(disconnectListener)
 
-      await client.connect(jest.fn())
+      await client.connect(vi.fn())
       await (client as any).handleResponse(
         {
           id: 'disconnect-message',
@@ -351,11 +360,11 @@ describe('WalletClient', () => {
 
     it('does not notify disconnect listeners for an unknown sender', async () => {
       const { peerA, peerB, transportMock } = createConnectedTransport()
-      const disconnectListener = jest.fn()
+      const disconnectListener = vi.fn()
 
       client.subscribeToDisconnect(disconnectListener)
 
-      await client.connect(jest.fn())
+      await client.connect(vi.fn())
       await (client as any).handleResponse(
         {
           id: 'disconnect-message',
@@ -374,13 +383,13 @@ describe('WalletClient', () => {
 
     it('notifies disconnect listeners even if peer cleanup fails', async () => {
       const { peerA, transportMock } = createConnectedTransport()
-      const disconnectListener = jest.fn()
+      const disconnectListener = vi.fn()
       const cleanupError = new Error('cleanup failed')
 
       transportMock.removePeer.mockRejectedValueOnce(cleanupError)
       client.subscribeToDisconnect(disconnectListener)
 
-      await client.connect(jest.fn())
+      await client.connect(vi.fn())
       await expect(
         (client as any).handleResponse(
           {
@@ -399,13 +408,13 @@ describe('WalletClient', () => {
 
     it('continues notifying disconnect listeners after an async listener rejects', async () => {
       const { peerA } = createConnectedTransport()
-      const rejectedListener = jest.fn().mockRejectedValue(new Error('listener failed'))
-      const nextListener = jest.fn().mockResolvedValue(undefined)
+      const rejectedListener = vi.fn().mockRejectedValue(new Error('listener failed'))
+      const nextListener = vi.fn().mockResolvedValue(undefined)
 
       client.subscribeToDisconnect(rejectedListener)
       client.subscribeToDisconnect(nextListener)
 
-      await client.connect(jest.fn())
+      await client.connect(vi.fn())
       await (client as any).handleResponse(
         {
           id: 'disconnect-message',
@@ -422,15 +431,15 @@ describe('WalletClient', () => {
 
     it('continues notifying disconnect listeners after a sync listener throws', async () => {
       const { peerA } = createConnectedTransport()
-      const throwingListener = jest.fn(() => {
+      const throwingListener = vi.fn(() => {
         throw new Error('listener failed')
       })
-      const nextListener = jest.fn()
+      const nextListener = vi.fn()
 
       client.subscribeToDisconnect(throwingListener)
       client.subscribeToDisconnect(nextListener)
 
-      await client.connect(jest.fn())
+      await client.connect(vi.fn())
       await (client as any).handleResponse(
         {
           id: 'disconnect-message',
@@ -447,12 +456,12 @@ describe('WalletClient', () => {
 
     it('deduplicates disconnect subscriptions by listener identity', async () => {
       const { peerA } = createConnectedTransport()
-      const disconnectListener = jest.fn()
+      const disconnectListener = vi.fn()
 
       client.subscribeToDisconnect(disconnectListener)
       client.subscribeToDisconnect(disconnectListener)
 
-      await client.connect(jest.fn())
+      await client.connect(vi.fn())
       await (client as any).handleResponse(
         {
           id: 'disconnect-message',
@@ -468,12 +477,12 @@ describe('WalletClient', () => {
 
     it('unsubscribes disconnect listeners by identity', async () => {
       const { peerA } = createConnectedTransport()
-      const disconnectListener = jest.fn()
+      const disconnectListener = vi.fn()
 
       client.subscribeToDisconnect(disconnectListener)
       client.unsubscribeFromDisconnect(disconnectListener)
 
-      await client.connect(jest.fn())
+      await client.connect(vi.fn())
       await (client as any).handleResponse(
         {
           id: 'disconnect-message',
@@ -490,13 +499,13 @@ describe('WalletClient', () => {
   it('propagates response handling failures through its transport subscription', async () => {
     const transport = {
       connectionStatus: TransportStatus.NOT_CONNECTED,
-      connect: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      connect: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
-    jest.spyOn(client as any, 'transport', 'get').mockResolvedValue(transport)
+    vi.spyOn(client as any, 'transport', 'get').mockResolvedValue(transport)
     const failure = new Error('response handler failed')
-    ;(client as any).handleResponse = jest.fn().mockRejectedValue(failure)
-    const deserialize = jest
+    ;(client as any).handleResponse = vi.fn().mockRejectedValue(failure)
+    const deserialize = vi
       .spyOn(Serializer.prototype, 'deserialize')
       .mockResolvedValue({ id: 'request' } as any)
     try {
@@ -514,24 +523,24 @@ describe('WalletClient', () => {
     const transport = {
       type: 'p2p',
       connectionStatus: TransportStatus.NOT_CONNECTED,
-      addListener: jest.fn(async (listener: any) => {
+      addListener: vi.fn(async (listener: any) => {
         listeners.add(listener)
       }),
-      removeListener: jest.fn(async (listener: any) => {
+      removeListener: vi.fn(async (listener: any) => {
         listeners.delete(listener)
       }),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      connect: jest
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      connect: vi
         .fn()
         .mockRejectedValueOnce(new Error('retry connection'))
         .mockImplementationOnce(async () => {
           for (const listener of listeners) await listener('serialized', context)
         })
     }
-    jest.spyOn(client as any, 'transport', 'get').mockResolvedValue(transport)
-    const handler = jest.fn().mockResolvedValue(undefined)
+    vi.spyOn(client as any, 'transport', 'get').mockResolvedValue(transport)
+    const handler = vi.fn().mockResolvedValue(undefined)
     ;(client as any).handleResponse = handler
-    const deserialize = jest
+    const deserialize = vi
       .spyOn(Serializer.prototype, 'deserialize')
       .mockResolvedValue(request as any)
     try {

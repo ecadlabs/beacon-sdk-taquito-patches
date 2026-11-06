@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react'
-import '@testing-library/jest-dom'
+import '@testing-library/jest-dom/vitest'
 import Info from '../../src/components/info/index'
 import { InfoProps } from '../../src/ui/common'
 
@@ -58,8 +58,8 @@ describe('Info Component', () => {
   })
 
   test('renders buttons and handles click events', () => {
-    const primaryClick = jest.fn()
-    const secondaryClick = jest.fn()
+    const primaryClick = vi.fn()
+    const secondaryClick = vi.fn()
 
     const props: InfoProps = {
       ...defaultProps,
@@ -102,7 +102,7 @@ describe('Info Component', () => {
   })
 
   test('renders QR code button and handles click event', () => {
-    const qrClick = jest.fn()
+    const qrClick = vi.fn()
     const props: InfoProps = {
       ...defaultProps,
       onShowQRCodeClick: qrClick

@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest'
 // __tests__/communication-client/PostMessageClient.test.ts
 
 import { windowRef, Serializer } from '@ecadlabs/beacon-core'
@@ -10,21 +11,23 @@ import {
 import { PostMessageClient } from '../src/PostMessageClient'
 
 // --- 1) Mocks for @ecadlabs/beacon-core ---
-jest.mock('@ecadlabs/beacon-core', () => {
-  const actual = jest.requireActual('@ecadlabs/beacon-core')
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@ecadlabs/beacon-core')>()
 
   const windowRef = {
-    postMessage: jest.fn(),
-    addEventListener: jest.fn(),
-    removeEventListener: jest.fn(),
+    postMessage: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
     location: { origin: 'http://test-origin' }
   }
 
-  const Serializer = jest.fn().mockImplementation(() => ({
-    serialize: jest.fn().mockResolvedValue('serialized-payload')
-  }))
+  const Serializer = vi.fn().mockImplementation(function () {
+    return {
+      serialize: vi.fn().mockResolvedValue('serialized-payload')
+    }
+  })
 
-  const getSenderId = jest.fn().mockResolvedValue('sender-id')
+  const getSenderId = vi.fn().mockResolvedValue('sender-id')
 
   class MessageBasedClient {
     public keyPair: any
@@ -43,11 +46,11 @@ jest.mock('@ecadlabs/beacon-core', () => {
 })
 
 // --- 2) Mocks for @ecadlabs/beacon-utils ---
-jest.mock('@ecadlabs/beacon-utils', () => {
-  const actual = jest.requireActual('@ecadlabs/beacon-utils')
+vi.mock('@ecadlabs/beacon-utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@ecadlabs/beacon-utils')>()
   return {
     ...actual,
-    openCryptobox: jest.fn(),
+    openCryptobox: vi.fn(),
     secretbox_NONCEBYTES: 8,
     secretbox_MACBYTES: 16
   }
@@ -58,7 +61,7 @@ describe('PostMessageClient', () => {
   const fakeKeyPair: any = { publicKey: 'pub', secretKey: 'sec' }
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
     client = new PostMessageClient('my-app', fakeKeyPair)
   })
 
@@ -71,8 +74,8 @@ describe('PostMessageClient', () => {
 
   describe('listenForEncryptedMessage()', () => {
     it('adds a listener and calls back when decrypt succeeds', async () => {
-      const cb = jest.fn()
-      client.decryptMessage = jest.fn().mockResolvedValue('decrypted-text')
+      const cb = vi.fn()
+      client.decryptMessage = vi.fn().mockResolvedValue('decrypted-text')
 
       await client.listenForEncryptedMessage('sender-pub', cb)
       expect((client as any).activeListeners.has('sender-pub')).toBe(true)
@@ -85,8 +88,8 @@ describe('PostMessageClient', () => {
     })
 
     it('does not register the same listener twice', async () => {
-      const cb = jest.fn()
-      client.decryptMessage = jest.fn().mockResolvedValue('x')
+      const cb = vi.fn()
+      client.decryptMessage = vi.fn().mockResolvedValue('x')
 
       await client.listenForEncryptedMessage('sender-pub', cb)
       await client.listenForEncryptedMessage('sender-pub', cb)
@@ -95,8 +98,8 @@ describe('PostMessageClient', () => {
     })
 
     it('silently ignores decryption errors', async () => {
-      const cb = jest.fn()
-      client.decryptMessage = jest.fn().mockRejectedValue(new Error('fail'))
+      const cb = vi.fn()
+      client.decryptMessage = vi.fn().mockRejectedValue(new Error('fail'))
 
       await client.listenForEncryptedMessage('sender-pub', cb)
       const listener = (client as any).activeListeners.get('sender-pub')!
@@ -107,8 +110,8 @@ describe('PostMessageClient', () => {
   })
 
   it('propagates an asynchronous message handler failure after decryption', async () => {
-    client.decryptMessage = jest.fn().mockResolvedValue('decrypted-text')
-    const handler = jest.fn().mockRejectedValue(new Error('handler failed'))
+    client.decryptMessage = vi.fn().mockResolvedValue('decrypted-text')
+    const handler = vi.fn().mockRejectedValue(new Error('handler failed'))
     await client.listenForEncryptedMessage('sender-pub', handler)
     const listener = (client as any).activeListeners.get('sender-pub')!
 
@@ -119,7 +122,7 @@ describe('PostMessageClient', () => {
 
   describe('sendMessage()', () => {
     beforeEach(() => {
-      client.encryptMessage = jest.fn().mockResolvedValue('enc-payload')
+      client.encryptMessage = vi.fn().mockResolvedValue('enc-payload')
     })
 
     it('encrypts and posts with extensionId', async () => {
@@ -154,19 +157,19 @@ describe('PostMessageClient', () => {
 
   describe('listenForChannelOpening()', () => {
     it('registers a message listener', async () => {
-      const cb = jest.fn()
+      const cb = vi.fn()
       await client.listenForChannelOpening(cb)
       expect(windowRef.addEventListener).toHaveBeenCalledWith('message', expect.any(Function))
     })
 
     it('decrypts a valid channel-open event and calls back', async () => {
       const raw = { id: 'id1', name: 'n', publicKey: 'p', version: 'v' }
-      ;(openCryptobox as jest.Mock).mockResolvedValueOnce(JSON.stringify(raw))
+      ;(openCryptobox as Mock).mockResolvedValueOnce(JSON.stringify(raw))
 
-      const cb = jest.fn()
+      const cb = vi.fn()
       await client.listenForChannelOpening(cb)
 
-      const listener = (windowRef.addEventListener as jest.Mock).mock.calls.find(
+      const listener = (windowRef.addEventListener as Mock).mock.calls.find(
         ([e]) => e === 'message'
       )![1] as (e: any) => Promise<void>
 
@@ -195,9 +198,9 @@ describe('PostMessageClient', () => {
     })
 
     it('ignores events from the wrong source or origin', async () => {
-      const cb = jest.fn()
+      const cb = vi.fn()
       await client.listenForChannelOpening(cb)
-      const listener = (windowRef.addEventListener as jest.Mock).mock.calls.find(
+      const listener = (windowRef.addEventListener as Mock).mock.calls.find(
         ([e]) => e === 'message'
       )![1] as (e: any) => Promise<void>
 
@@ -211,14 +214,16 @@ describe('PostMessageClient', () => {
 
   describe('sendPairingRequest()', () => {
     it('serializes the pairing request and posts it', async () => {
-      ;(client.getPairingRequestInfo as jest.Mock) = jest.fn().mockResolvedValue({ foo: 'bar' })
-      ;(Serializer as jest.Mock).mockImplementationOnce(() => ({
-        serialize: jest.fn().mockResolvedValue('ser-payload')
-      }))
+      ;(client.getPairingRequestInfo as Mock) = vi.fn().mockResolvedValue({ foo: 'bar' })
+      ;(Serializer as Mock).mockImplementationOnce(function () {
+        return {
+          serialize: vi.fn().mockResolvedValue('ser-payload')
+        }
+      })
 
       await client.sendPairingRequest('ext-id')
 
-      expect((Serializer as jest.Mock).mock.results[0].value.serialize).toHaveBeenCalledWith({
+      expect((Serializer as Mock).mock.results[0].value.serialize).toHaveBeenCalledWith({
         foo: 'bar'
       })
       expect(windowRef.postMessage).toHaveBeenCalledWith(

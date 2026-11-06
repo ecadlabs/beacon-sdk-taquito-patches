@@ -1,15 +1,16 @@
+import type { Mock } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import QR from '../../src/components/qr/index'
 import { getTzip10Link } from '../../src/utils/get-tzip10-link'
 import { getQrData } from '../../src/utils/qr'
 
 // --- Mocks --- //
-jest.mock('../../src/utils/get-tzip10-link', () => ({
-  getTzip10Link: jest.fn()
+vi.mock('../../src/utils/get-tzip10-link', () => ({
+  getTzip10Link: vi.fn()
 }))
 
-jest.mock('../../src/utils/qr', () => ({
-  getQrData: jest.fn()
+vi.mock('../../src/utils/qr', () => ({
+  getQrData: vi.fn()
 }))
 
 describe('QR Component', () => {
@@ -20,25 +21,21 @@ describe('QR Component', () => {
 
   beforeEach(() => {
     // When getTzip10Link is called, return a dummy payload.
-    ;(getTzip10Link as jest.Mock).mockReturnValue(tzip10Payload)
+    ;(getTzip10Link as Mock).mockReturnValue(tzip10Payload)
     // When getQrData is called, return our dummy SVG.
-    ;(getQrData as jest.Mock).mockReturnValue(dummySvg)
+    ;(getQrData as Mock).mockReturnValue(dummySvg)
 
     // Set up a mock for navigator.clipboard.writeText.
     Object.assign(navigator, {
       clipboard: {
-        writeText: jest.fn().mockResolvedValue(undefined)
+        writeText: vi.fn().mockResolvedValue(undefined)
       }
     })
-
-    // Use fake timers so we can test the timeout behavior.
-    jest.useFakeTimers()
   })
 
   afterEach(() => {
-    jest.runOnlyPendingTimers()
-    jest.useRealTimers()
-    jest.resetAllMocks()
+    vi.useRealTimers()
+    vi.resetAllMocks()
   })
 
   test('renders desktop view correctly', async () => {
@@ -65,7 +62,7 @@ describe('QR Component', () => {
   })
 
   test('renders mobile view with "Learn more" when onClickLearnMore is provided', async () => {
-    const onClickLearnMore = jest.fn()
+    const onClickLearnMore = vi.fn()
     render(
       <QR
         isWalletConnect={true}
@@ -92,7 +89,8 @@ describe('QR Component', () => {
   })
 
   test('handles copy to clipboard and shows "Copied!" message', async () => {
-    const onClickQrCode = jest.fn()
+    vi.useFakeTimers()
+    const onClickQrCode = vi.fn()
     render(
       <QR
         isWalletConnect={false}
@@ -117,20 +115,19 @@ describe('QR Component', () => {
     // Verify that navigator.clipboard.writeText was called with the correct code.
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(code)
 
-    // After clicking, the UI should change to show the "Copied!" message.
-    await waitFor(() => {
-      expect(screen.getByText(/Copied!/i)).toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
     })
+    // After clicking, the UI should change to show the "Copied!" message.
+    expect(screen.getByText(/Copied!/i)).toBeInTheDocument()
 
     // Wrap timer advancement in act to flush pending state updates.
     act(() => {
-      jest.advanceTimersByTime(3000)
+      vi.advanceTimersByTime(3000)
     })
 
     // After the timeout, the UI should show "Copy to clipboard" again.
-    await waitFor(() => {
-      expect(screen.getByText(/Copy to clipboard/i)).toBeInTheDocument()
-    })
+    expect(screen.getByText(/Copy to clipboard/i)).toBeInTheDocument()
   })
 
   test('uses getTzip10Link and getQrData correctly based on isMobile prop', async () => {

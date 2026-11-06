@@ -22,14 +22,16 @@ import {
 } from '../helpers/controlled-sign-client'
 
 // Babel does not inline const enums from built dependencies. Load the source enum.
-jest.mock('@ecadlabs/beacon-core', () => ({
-  ...jest.requireActual('@ecadlabs/beacon-core'),
-  ...jest.requireActual('../../../beacon-core/src/transports/clients/ClientEvents')
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
+  ...(await vi.importActual<
+    typeof import('../../../beacon-core/src/transports/clients/ClientEvents')
+  >('../../../beacon-core/src/transports/clients/ClientEvents'))
 }))
 
 type Kind = 'sign' | 'operation'
-jest.mock('@walletconnect/sign-client', () => ({ init: async () => mockRemote }))
-jest.mock('@walletconnect/utils', () => ({
+vi.mock('@walletconnect/sign-client', () => ({ default: { init: async () => mockRemote } }))
+vi.mock('@walletconnect/utils', () => ({
   getSdkError: () => ({ code: 6000, message: 'User disconnected.' })
 }))
 // Only SignClient is controlled. Restoration, close, serialization and delivery
@@ -40,8 +42,8 @@ describe('WalletConnect request ownership (#102)', () => {
   let client: WalletConnectCommunicationClient
   let responses: unknown[]
   beforeEach(async () => {
-    jest.useFakeTimers()
-    jest.clearAllMocks()
+    vi.useFakeTimers()
+    vi.clearAllMocks()
     resetWire()
     responses = []
     client = new WalletConnectCommunicationClient(
@@ -55,8 +57,8 @@ describe('WalletConnect request ownership (#102)', () => {
   })
   afterEach(async () => {
     await client.close()
-    jest.clearAllTimers()
-    jest.useRealTimers()
+    vi.clearAllTimers()
+    vi.useRealTimers()
   })
   async function listen() {
     await client.listenForEncryptedMessage('wallet', (encoded) => {
@@ -289,7 +291,7 @@ describe('WalletConnect request ownership (#102)', () => {
     )
     await flush()
     expect(mockApprovals).toHaveLength(1)
-    await jest.advanceTimersByTimeAsync(60_001)
+    await vi.advanceTimersByTimeAsync(60_001)
     expect(responses).toEqual([expected('permission-timeout', 'sign', true)])
     mockApprovals[0].resolve(session('late-after-timeout'))
     await flush()
@@ -445,7 +447,7 @@ describe('WalletConnect request ownership (#102)', () => {
       await flush()
       expect(mockRequests).toHaveLength(0)
     } finally {
-      await jest.advanceTimersByTimeAsync(10_001)
+      await vi.advanceTimersByTimeAsync(10_001)
       await closing
     }
     expect(responses).toEqual([expected('decoding-client', 'sign', true)])
@@ -480,7 +482,7 @@ describe('WalletConnect request ownership (#102)', () => {
   })
 
   it('does not reset pairing when a selected session closes', async () => {
-    const reset = jest.fn()
+    const reset = vi.fn()
     client.eventHandlers.set(ClientEvents.RESET_STATE, reset)
     const handler = mockHandlers.get('session_delete')
     if (!handler) throw new Error('Missing session_delete registration')
@@ -499,7 +501,7 @@ describe('WalletConnect request ownership (#102)', () => {
     mockApprovals[0].resolve(session('initial-pairing'))
     await flush()
     expect(client.currentSession()?.topic).toBe('initial-pairing')
-    const reset = jest.fn()
+    const reset = vi.fn()
     client.eventHandlers.set(ClientEvents.RESET_STATE, reset)
     const handler = mockHandlers.get('session_delete')
     if (!handler) throw new Error('Missing session_delete registration')
@@ -510,7 +512,7 @@ describe('WalletConnect request ownership (#102)', () => {
   })
 
   it('discards invalid initial approval and permits a later valid pairing', async () => {
-    const closeAlert = jest.fn()
+    const closeAlert = vi.fn()
     client.eventHandlers.set(ClientEvents.CLOSE_ALERT, closeAlert)
     await client.listenForChannelOpening(() => true)
     await client.init(true)

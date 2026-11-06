@@ -5,13 +5,13 @@ import Alert from '../../src/components/alert'
 // --- Mocks ---
 
 // Force useIsMobile to return false (simulate a desktop environment)
-jest.mock('../../src/ui/alert/hooks/useIsMobile', () => ({
+vi.mock('../../src/ui/alert/hooks/useIsMobile', () => ({
   __esModule: true,
   default: () => false
 }))
 
 // Mock the icon components so we can easily query for them.
-jest.mock('../../src/components/icons', () => ({
+vi.mock('../../src/components/icons', () => ({
   __esModule: true,
   CloseIcon: () => <span data-testid="close-icon">CloseIcon</span>,
   LeftIcon: () => <span data-testid="left-icon">LeftIcon</span>,
@@ -19,7 +19,7 @@ jest.mock('../../src/components/icons', () => ({
 }))
 
 // Mock the Loader component.
-jest.mock('../../src/components/loader', () => ({
+vi.mock('../../src/components/loader', () => ({
   __esModule: true,
   default: () => <div data-testid="loader">Loader</div>
 }))
@@ -30,18 +30,18 @@ describe('Alert Component', () => {
   // Default props used for most tests
   const defaultProps = {
     open: true,
-    onCloseClick: jest.fn(),
+    onCloseClick: vi.fn(),
     onBackClick: undefined,
     loading: false,
     extraContent: 'Extra information',
     showMore: false,
-    onClickShowMore: jest.fn(),
+    onClickShowMore: vi.fn(),
     children: <div data-testid="alert-child">Alert Content</div>,
     closeOnBackdropClick: true
   }
 
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   test('renders with "show" classes when open', () => {
@@ -82,7 +82,7 @@ describe('Alert Component', () => {
   })
 
   test('renders the back icon when onBackClick is provided and triggers callback on click', () => {
-    const onBackClickMock = jest.fn()
+    const onBackClickMock = vi.fn()
     const props = { ...defaultProps, onBackClick: onBackClickMock }
     render(<Alert {...props} />)
     // The left icon should now be rendered since onBackClick is provided.

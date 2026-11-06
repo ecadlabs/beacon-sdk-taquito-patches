@@ -73,7 +73,7 @@ describe('Client transport subscription', () => {
   })
 
   afterEach(() => {
-    jest.restoreAllMocks()
+    vi.restoreAllMocks()
     ;(windowRef as any).beaconCreatedClientInstance = false
   })
 
@@ -81,9 +81,9 @@ describe('Client transport subscription', () => {
     const storage = new LocalStorage('client-message-test')
     const transport = new TestTransport(storage)
     const failure = new Error('response failed')
-    const handler = jest.fn().mockRejectedValue(failure)
+    const handler = vi.fn().mockRejectedValue(failure)
     const client = new TestClient({ name: 'test', storage }, handler)
-    const deserialize = jest.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
+    const deserialize = vi.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
     await client.register(transport)
 
     await expect(transport.deliver('serialized-message', context)).rejects.toBe(failure)
@@ -95,12 +95,12 @@ describe('Client transport subscription', () => {
   it('retries failed listener registration without caching the failed subscription', async () => {
     const storage = new LocalStorage('client-registration-test')
     const transport = new TestTransport(storage)
-    const handler = jest.fn().mockResolvedValue(undefined)
+    const handler = vi.fn().mockResolvedValue(undefined)
     const client = new TestClient({ name: 'test', storage }, handler)
     const failure = new Error('registration failed')
-    const registration = jest.spyOn(transport, 'addListener').mockRejectedValueOnce(failure)
-    const removal = jest.spyOn(transport, 'removeListener')
-    jest.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
+    const registration = vi.spyOn(transport, 'addListener').mockRejectedValueOnce(failure)
+    const removal = vi.spyOn(transport, 'removeListener')
+    vi.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
 
     await expect(client.register(transport)).rejects.toBe(failure)
     await expect(client.register(transport)).resolves.toBeUndefined()
@@ -114,9 +114,9 @@ describe('Client transport subscription', () => {
   it('delivers once after concurrent registrations and removes the subscription on cleanup', async () => {
     const storage = new LocalStorage('client-concurrent-registration-test')
     const transport = new TestTransport(storage)
-    const handler = jest.fn().mockResolvedValue(undefined)
+    const handler = vi.fn().mockResolvedValue(undefined)
     const client = new TestClient({ name: 'test', storage }, handler)
-    jest.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
+    vi.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
 
     await Promise.all([client.register(transport), client.register(transport)])
     await transport.deliver('serialized-message', context)
@@ -130,9 +130,9 @@ describe('Client transport subscription', () => {
   it('finishes queued registration before cleanup without leaving a late subscription', async () => {
     const storage = new LocalStorage('client-pending-registration-test')
     const transport = new TestTransport(storage)
-    const handler = jest.fn().mockResolvedValue(undefined)
+    const handler = vi.fn().mockResolvedValue(undefined)
     const client = new TestClient({ name: 'test', storage }, handler)
-    jest.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
+    vi.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
     let finishRegistration!: () => void
     let registrationStarted!: () => void
     const registrationGate = new Promise<void>((resolve) => {
@@ -142,7 +142,7 @@ describe('Client transport subscription', () => {
       registrationStarted = resolve
     })
     const originalAddListener = transport.addListener.bind(transport)
-    const registration = jest
+    const registration = vi
       .spyOn(transport, 'addListener')
       .mockImplementationOnce(async (listener) => {
         registrationStarted()
@@ -171,11 +171,11 @@ describe('Client transport subscription', () => {
   it('allows queued registration to succeed after an earlier registration rejects', async () => {
     const storage = new LocalStorage('client-queued-retry-test')
     const transport = new TestTransport(storage)
-    const handler = jest.fn().mockResolvedValue(undefined)
+    const handler = vi.fn().mockResolvedValue(undefined)
     const client = new TestClient({ name: 'test', storage }, handler)
     const failure = new Error('registration failed')
-    jest.spyOn(transport, 'addListener').mockRejectedValueOnce(failure)
-    jest.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
+    vi.spyOn(transport, 'addListener').mockRejectedValueOnce(failure)
+    vi.spyOn(Serializer.prototype, 'deserialize').mockResolvedValue(message)
 
     const first = client.register(transport)
     const next = client.register(transport)

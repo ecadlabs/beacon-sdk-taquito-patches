@@ -84,12 +84,7 @@ const useConnect = (
         }
       }
       setIsLoading(false)
-    } else if (
-      isMobileOS(window) &&
-      selectedWallet?.types.includes('ios') &&
-      isMobile &&
-      !selectedWallet?.name.toLowerCase().includes('acurast')
-    ) {
+    } else if (isMobileOS(window) && selectedWallet?.types.includes('ios') && isMobile) {
       setQRCode('')
 
       if (config.pairingPayload) {

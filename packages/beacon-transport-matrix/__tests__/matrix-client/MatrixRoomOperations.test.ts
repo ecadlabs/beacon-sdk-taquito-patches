@@ -38,7 +38,7 @@ const createReadyClient = async () => {
     http
   )
   // Login/polling readiness is a precondition; this suite exercises room operations.
-  jest.spyOn(client, 'isConnected').mockResolvedValue(undefined)
+  vi.spyOn(client, 'isConnected').mockResolvedValue(undefined)
   return { client, roomService, eventService, store }
 }
 
@@ -47,7 +47,7 @@ describe('Matrix room operation completion', () => {
 
   afterEach(() => {
     localStorage.clear()
-    jest.restoreAllMocks()
+    vi.restoreAllMocks()
   })
 
   it.each(['IDs', 'instances'] as const)(
@@ -58,7 +58,7 @@ describe('Matrix room operation completion', () => {
       const second = deferred<MatrixRoomInviteResponse>()
       const started = deferred<void>()
       let calls = 0
-      const invite = jest.spyOn(roomService, 'inviteToRoom').mockImplementation(() => {
+      const invite = vi.spyOn(roomService, 'inviteToRoom').mockImplementation(() => {
         calls += 1
         if (calls === 2) {
           started.resolve(undefined)
@@ -97,9 +97,9 @@ describe('Matrix room operation completion', () => {
     const second = deferred<MatrixRoomInviteResponse>()
     const started = deferred<void>()
     const failure = new Error('Invitation denied')
-    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
     let calls = 0
-    jest.spyOn(roomService, 'inviteToRoom').mockImplementation(() => {
+    vi.spyOn(roomService, 'inviteToRoom').mockImplementation(() => {
       calls += 1
       if (calls === 2) {
         started.resolve(undefined)
@@ -128,7 +128,7 @@ describe('Matrix room operation completion', () => {
     const { client, roomService } = await createReadyClient()
     const response = deferred<MatrixRoomJoinResponse>()
     const started = deferred<void>()
-    jest.spyOn(roomService, 'joinRoom').mockImplementation(() => {
+    vi.spyOn(roomService, 'joinRoom').mockImplementation(() => {
       started.resolve(undefined)
       return response.promise
     })
@@ -148,7 +148,7 @@ describe('Matrix room operation completion', () => {
 
   it('does not join a room when stopped after readiness resolves', async () => {
     const { client, roomService } = await createReadyClient()
-    const join = jest.spyOn(roomService, 'joinRoom').mockResolvedValue({ room_id: '!room:relay' })
+    const join = vi.spyOn(roomService, 'joinRoom').mockResolvedValue({ room_id: '!room:relay' })
     const operation = client.joinRooms('!room:relay')
     const rejection = expect(operation).rejects.toMatchObject({ name: 'AbortError' })
 
@@ -163,12 +163,12 @@ describe('Matrix room operation completion', () => {
     const updating = deferred<void>()
     const release = deferred<void>()
     const update = store.update.bind(store)
-    jest.spyOn(store, 'update').mockImplementation(async (state) => {
+    vi.spyOn(store, 'update').mockImplementation(async (state) => {
       updating.resolve(undefined)
       await release.promise
       await update(state)
     })
-    const send = jest.spyOn(eventService, 'sendMessage').mockResolvedValue({ event_id: '$event' })
+    const send = vi.spyOn(eventService, 'sendMessage').mockResolvedValue({ event_id: '$event' })
     const operation = client.sendTextMessage('!room:relay', 'hello')
     const rejection = expect(operation).rejects.toMatchObject({ name: 'AbortError' })
 

@@ -26,7 +26,8 @@
   },
   "scripts": {
     "tsc": "rollup -c",
-    "test": "jest"
+    "test": "vitest run",
+    "test-ci": "vitest run --coverage"
   },
   "bugs": {
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"

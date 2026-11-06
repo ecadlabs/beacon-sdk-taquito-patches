@@ -3,11 +3,13 @@ import QRCode from '../../../src/ui/alert/components/pairing-alert/components/qr
 import { MergedWallet } from '../../../src/utils/wallets'
 import { AlertState } from '../../../src/ui/common'
 
-jest.mock('../../../src/components/qr', () => (props: { isWalletConnect: boolean; code: string }) => (
-  <div data-testid="qr" data-walletconnect={props.isWalletConnect ? 'true' : 'false'}>
-    {props.code}
-  </div>
-))
+vi.mock('../../../src/components/qr', () => ({
+  default: (props: { isWalletConnect: boolean; code: string }) => (
+    <div data-testid="qr" data-walletconnect={props.isWalletConnect ? 'true' : 'false'}>
+      {props.code}
+    </div>
+  )
+}))
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void
@@ -36,7 +38,7 @@ const wallet = (
 describe('Pairing alert QRCode', () => {
   it('does not substitute the Matrix pairing QR for a WalletConnect wallet', async () => {
     const p2pPairing = deferred<string>()
-    const handleIsLoading = jest.fn()
+    const handleIsLoading = vi.fn()
 
     render(
       <QRCode
@@ -44,7 +46,7 @@ describe('Pairing alert QRCode', () => {
         isWCWorking
         isMobile={false}
         defaultPairing={p2pPairing.promise}
-        handleUpdateState={jest.fn<void, [AlertState]>()}
+        handleUpdateState={vi.fn<(...args: [AlertState]) => void>()}
         handleIsLoading={handleIsLoading}
       />
     )
@@ -59,7 +61,7 @@ describe('Pairing alert QRCode', () => {
   })
 
   it('uses the Matrix pairing QR as the default for Beacon-only wallets', async () => {
-    const handleIsLoading = jest.fn()
+    const handleIsLoading = vi.fn()
 
     render(
       <QRCode
@@ -67,7 +69,7 @@ describe('Pairing alert QRCode', () => {
         isWCWorking={false}
         isMobile={false}
         defaultPairing={Promise.resolve('p2p-code')}
-        handleUpdateState={jest.fn<void, [AlertState]>()}
+        handleUpdateState={vi.fn<(...args: [AlertState]) => void>()}
         handleIsLoading={handleIsLoading}
       />
     )

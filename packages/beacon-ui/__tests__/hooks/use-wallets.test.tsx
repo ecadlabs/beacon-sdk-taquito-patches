@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import useWallets from '../../src/ui/alert/hooks/useWallets'
 import { getAvailableExtensions } from '../../src/utils/extensions'
@@ -6,8 +7,8 @@ import { NetworkType } from '@ecadlabs/beacon-types'
 // =====================================================================
 // Mock the wallet utilities with a simple transformation so that the final
 // wallet objects match the MergedWallet interface.
-jest.mock('../../src/utils/wallets', () => ({
-  parseWallets: jest.fn((wallets) =>
+vi.mock('../../src/utils/wallets', () => ({
+  parseWallets: vi.fn((wallets) =>
     wallets.map((wallet: any) => ({
       id: wallet.id,
       key: wallet.key,
@@ -21,61 +22,65 @@ jest.mock('../../src/utils/wallets', () => ({
       supportedInteractionStandards: wallet.supportedInteractionStandards
     }))
   ),
-  mergeWallets: jest.fn((wallets: any) => wallets),
-  arrangeTopWallets: jest.fn((wallets: any, _featuredWallets: any) => wallets)
+  mergeWallets: vi.fn((wallets: any) => wallets),
+  arrangeTopWallets: vi.fn((wallets: any, _featuredWallets: any) => wallets)
 }))
 
 // =====================================================================
 // Provide dummy wallet lists for testing.
-const dummyDesktopList = [
-  {
-    key: 'desktopWallet',
-    name: 'Desktop Wallet',
-    shortName: 'Desktop',
-    logo: 'desktop.png',
-    supportedInteractionStandards: [],
-    downloadLink: 'http://download.desktop',
-    deepLink: 'desktop://app'
-  }
-]
-
-const dummyExtensionList = [
-  {
-    id: 'extWallet',
-    key: 'extWallet',
-    shortName: 'Extension',
-    logo: 'ext.png',
-    supportedInteractionStandards: [],
-    link: 'http://extension.link'
-  }
-]
-
-const dummyIOSList = [
-  {
-    key: 'iosWallet',
-    shortName: 'iOS',
-    logo: 'ios.png',
-    supportedInteractionStandards: [],
-    universalLink: 'http://ios.universal',
-    deepLink: 'ios://app'
-  }
-]
-
-const dummyWebList = [
-  {
-    key: 'webWallet',
-    shortName: 'Web',
-    logo: 'web.png',
-    supportedInteractionStandards: [],
-    links: {
-      mainnet: 'http://web.mainnet',
-      ghostnet: 'http://web.testnet'
+const { dummyDesktopList, dummyExtensionList, dummyIOSList, dummyWebList } = vi.hoisted(() => {
+  const dummyDesktopList = [
+    {
+      key: 'desktopWallet',
+      name: 'Desktop Wallet',
+      shortName: 'Desktop',
+      logo: 'desktop.png',
+      supportedInteractionStandards: [],
+      downloadLink: 'http://download.desktop',
+      deepLink: 'desktop://app'
     }
-  }
-]
+  ]
+
+  const dummyExtensionList = [
+    {
+      id: 'extWallet',
+      key: 'extWallet',
+      shortName: 'Extension',
+      logo: 'ext.png',
+      supportedInteractionStandards: [],
+      link: 'http://extension.link'
+    }
+  ]
+
+  const dummyIOSList = [
+    {
+      key: 'iosWallet',
+      shortName: 'iOS',
+      logo: 'ios.png',
+      supportedInteractionStandards: [],
+      universalLink: 'http://ios.universal',
+      deepLink: 'ios://app'
+    }
+  ]
+
+  const dummyWebList = [
+    {
+      key: 'webWallet',
+      shortName: 'Web',
+      logo: 'web.png',
+      supportedInteractionStandards: [],
+      links: {
+        mainnet: 'http://web.mainnet',
+        ghostnet: 'http://web.testnet'
+      }
+    }
+  ]
+
+  return { dummyDesktopList, dummyExtensionList, dummyIOSList, dummyWebList }
+})
 
 // Mock the module that exports the wallet lists.
-jest.mock('../../src/ui/alert/wallet-lists', () => ({
+vi.mock('../../src/ui/alert/wallet-lists', () => ({
   desktopList: dummyDesktopList,
   extensionList: dummyExtensionList,
   iOSList: dummyIOSList,
@@ -84,26 +89,26 @@ jest.mock('../../src/ui/alert/wallet-lists', () => ({
 
 // =====================================================================
 // Mock extension discovery so we can control the returned available extensions.
-jest.mock('../../src/utils/extensions', () => ({
-  getAvailableExtensions: jest.fn()
+vi.mock('../../src/utils/extensions', () => ({
+  getAvailableExtensions: vi.fn()
 }))
 
 // =====================================================================
 // Create a controlled mock for windowRef event listeners.
 let messageHandler: any = null
-const mockAddEventListener = jest.fn((event, handler) => {
+const mockAddEventListener = vi.fn((event, handler) => {
   if (event === 'message') {
     messageHandler = handler
   }
 })
-const mockRemoveEventListener = jest.fn((event, handler) => {
+const mockRemoveEventListener = vi.fn((event, handler) => {
   if (event === 'message' && messageHandler === handler) {
     messageHandler = null
   }
 })
 
-// Renamed variables starting with "mock" are allowed in module factory.
-jest.mock('@ecadlabs/beacon-core', () => ({
+// Defer access to listener mocks until the hook registers its callbacks.
+vi.mock('@ecadlabs/beacon-core', () => ({
   windowRef: {
     addEventListener: (event: any, handler: any) => mockAddEventListener(event, handler),
     removeEventListener: (event: any, handler: any) => mockRemoveEventListener(event, handler)
@@ -114,7 +119,7 @@ jest.mock('@ecadlabs/beacon-core', () => ({
 // Begin tests
 describe('useWallets hook', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
     messageHandler = null
   })
 
@@ -128,13 +133,13 @@ describe('useWallets hook', () => {
       link: 'http://new.link'
     }
 
-    ;(getAvailableExtensions as jest.Mock).mockResolvedValueOnce([fakeExtension])
+    ;(getAvailableExtensions as Mock).mockResolvedValueOnce([fakeExtension])
 
     // Render the hook.
     const { result } = renderHook(() => useWallets())
 
     // Wait for the async effect (fetching available extensions) to complete.
-    await waitFor(() => {
+    await waitFor(async () => {
       expect(result.current.wallets.size).toBe(5)
     })
 
@@ -161,7 +166,7 @@ describe('useWallets hook', () => {
 
   test('updates available extensions on "extensionsUpdated" message event', async () => {
     // Initially return an empty array.
-    ;(getAvailableExtensions as jest.Mock).mockResolvedValueOnce([])
+    ;(getAvailableExtensions as Mock).mockResolvedValueOnce([])
 
     const { result } = renderHook(() => useWallets())
 
@@ -180,7 +185,7 @@ describe('useWallets hook', () => {
       link: 'http://updated.link'
     }
     // Set up the mock to return the updated extension.
-    ;(getAvailableExtensions as jest.Mock).mockResolvedValueOnce([updatedExtension])
+    ;(getAvailableExtensions as Mock).mockResolvedValueOnce([updatedExtension])
 
     // Simulate dispatching a message event.
     await act(async () => {
@@ -197,11 +202,11 @@ describe('useWallets hook', () => {
 
   test('respects networkType parameter for web wallets', async () => {
     // For this test, pass networkType as 'testnet' to match our dummy webList.
-    ;(getAvailableExtensions as jest.Mock).mockResolvedValueOnce([])
+    ;(getAvailableExtensions as Mock).mockResolvedValueOnce([])
 
     const { result } = renderHook(() => useWallets(NetworkType.GHOSTNET))
 
-    await waitFor(() => {
+    await waitFor(async () => {
       const walletMap = result.current.wallets
       const webWallet = walletMap.get('webWallet')
       return Boolean(webWallet && webWallet.links[0] === 'http://web.testnet')
@@ -214,7 +219,7 @@ describe('useWallets hook', () => {
   })
 
   test('removes event listener on unmount', async () => {
-    ;(getAvailableExtensions as jest.Mock).mockResolvedValueOnce([])
+    ;(getAvailableExtensions as Mock).mockResolvedValueOnce([])
 
     const { unmount, result } = renderHook(() => useWallets())
     await waitFor(() => result.current.wallets instanceof Map)
@@ -226,16 +231,16 @@ describe('useWallets hook', () => {
   test('passes featuredWallets parameter to arrangeTopWallets', async () => {
     // This test checks that the featuredWallets parameter is passed along.
     const featuredWallets = ['custom1', 'custom2']
-    ;(getAvailableExtensions as jest.Mock).mockResolvedValueOnce([])
+    ;(getAvailableExtensions as Mock).mockResolvedValueOnce([])
 
     renderHook(() => useWallets(undefined, featuredWallets))
     // Wait for the effect to run.
-    await waitFor(() => {
-      const { arrangeTopWallets } = require('../../src/utils/wallets')
+    await waitFor(async () => {
+      const { arrangeTopWallets } = await import('../../src/utils/wallets')
       return arrangeTopWallets.mock.calls.length > 0
     })
 
-    const { arrangeTopWallets } = require('../../src/utils/wallets')
+    const { arrangeTopWallets } = await import('../../src/utils/wallets')
     expect(arrangeTopWallets).toHaveBeenCalledWith(expect.any(Array), featuredWallets)
   })
 })

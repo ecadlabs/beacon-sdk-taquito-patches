@@ -1,11 +1,12 @@
+import type { Mock } from 'vitest'
 import { Origin, PeerInfo, PeerInfoType, StorageKey } from '@ecadlabs/beacon-types'
 import { PeerManager } from '../../src/managers/PeerManager'
 import { Transport } from '../../src/transports/Transport'
 import { CommunicationClient } from '../../src/transports/clients/CommunicationClient'
 
-const mockLoggerWarn = jest.fn()
+const mockLoggerWarn = vi.fn()
 
-jest.mock('../../src/utils/Logger', () => ({
+vi.mock('../../src/utils/Logger', () => ({
   Logger: class {
     constructor(_name: string) {}
     debug() {}
@@ -20,7 +21,9 @@ jest.mock('../../src/utils/Logger', () => ({
 }))
 
 class TestCommunicationClient extends CommunicationClient {
-  constructor(private readonly sendMessageMock: jest.Mock<Promise<void>, [string, PeerInfoType?]>) {
+  constructor(
+    private readonly sendMessageMock: Mock<(...args: [string, PeerInfoType?]) => Promise<void>>
+  ) {
     super()
   }
 
@@ -53,7 +56,7 @@ describe('Transport', () => {
   it('continues broadcast sends when one peer rejects', async () => {
     const peers: PeerInfo[] = [createPeer('peer-1'), createPeer('peer-2'), createPeer('peer-3')]
     const rejection = new Error('peer-2 failed')
-    const sendMessage = jest.fn((message: string, peer?: PeerInfoType) => {
+    const sendMessage = vi.fn((message: string, peer?: PeerInfoType) => {
       if (peer?.publicKey === 'peer-2') {
         return Promise.reject(rejection)
       }
@@ -61,10 +64,10 @@ describe('Transport', () => {
       return Promise.resolve()
     })
     const peerManager = {
-      getPeers: jest.fn().mockResolvedValue(peers),
-      addPeer: jest.fn(),
-      removePeer: jest.fn(),
-      removeAllPeers: jest.fn()
+      getPeers: vi.fn().mockResolvedValue(peers),
+      addPeer: vi.fn(),
+      removePeer: vi.fn(),
+      removeAllPeers: vi.fn()
     } as unknown as PeerManager<StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP>
     const transport = new TestTransport(
       'test-transport',
@@ -84,7 +87,7 @@ describe('Transport', () => {
     })
     const transport = new TestTransport(
       'test-transport',
-      new TestCommunicationClient(jest.fn().mockResolvedValue(undefined)),
+      new TestCommunicationClient(vi.fn().mockResolvedValue(undefined)),
       {} as PeerManager<StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP>
     )
     await transport.addListener(() => processing)
@@ -104,10 +107,10 @@ describe('Transport', () => {
 
   it('rejects failed notifications without skipping other listeners', async () => {
     const failure = new Error('handler failed')
-    const nextListener = jest.fn()
+    const nextListener = vi.fn()
     const transport = new TestTransport(
       'test-transport',
-      new TestCommunicationClient(jest.fn().mockResolvedValue(undefined)),
+      new TestCommunicationClient(vi.fn().mockResolvedValue(undefined)),
       {} as PeerManager<StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP>
     )
     await transport.addListener(async () => {
@@ -121,10 +124,10 @@ describe('Transport', () => {
 
   it('also dispatches remaining listeners when the first throws synchronously', async () => {
     const failure = new Error('handler threw')
-    const nextListener = jest.fn()
+    const nextListener = vi.fn()
     const transport = new TestTransport(
       'test-transport',
-      new TestCommunicationClient(jest.fn().mockResolvedValue(undefined)),
+      new TestCommunicationClient(vi.fn().mockResolvedValue(undefined)),
       {} as PeerManager<StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP>
     )
     await transport.addListener(() => {

@@ -5,7 +5,7 @@ import { StorageValidator } from '../../src/storage/StorageValidator'
 describe('StorageValidator', () => {
   afterEach(() => {
     localStorage.clear()
-    jest.restoreAllMocks()
+    vi.restoreAllMocks()
   })
 
   it('accepts missing optional storage values', async () => {
@@ -54,7 +54,7 @@ describe('StorageValidator', () => {
   it('propagates storage read errors', async () => {
     const storage = new LocalStorage()
     const error = new Error('Storage unavailable')
-    jest.spyOn(storage, 'get').mockRejectedValue(error)
+    vi.spyOn(storage, 'get').mockRejectedValue(error)
 
     await expect(new StorageValidator(storage).validate()).rejects.toBe(error)
   })
