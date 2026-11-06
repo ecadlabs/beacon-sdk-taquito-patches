@@ -423,6 +423,7 @@ describe('WalletConnectCommunicationClient basics', () => {
       sessionProperties: {}
     } as SessionTypes.Struct
     resolvedClient.core.pairing.disconnect = jest.fn(() => new Promise(() => {}))
+    Reflect.set(client, 'signClient', resolvedClient)
     ;(client as any).session = session
     const notifyListeners = jest.spyOn(client as any, 'notifyListeners')
 
@@ -538,102 +539,6 @@ describe('String message dispatching', () => {
         address: 'tz1address'
       }
     }) as unknown as SessionTypes.Struct
-
-  describe('session ACK delivery', () => {
-    const event: SignClientTypes.EventArguments['session_event'] = {
-      id: 123,
-      topic: 'session-topic',
-      params: {
-        chainId: 'tezos:mainnet',
-        event: { name: 'requestAcknowledged', data: {} }
-      }
-    }
-    let onSessionEvent: (event: SignClientTypes.EventArguments['session_event']) => void
-    let received: jest.Mock
-
-    beforeEach(async () => {
-      const signClient = createResolvedSignClient()
-      // The mock supplies the event registration surface used by this client.
-      client['subscribeToSessionEvents'](signClient as unknown as SignClient)
-      onSessionEvent = signClient.on.mock.calls.find(([name]) => name === 'session_event')![1]
-      client['session'] = createApprovedSession('session-topic', 'wallet-public-key')
-      received = jest.fn()
-      await client.listenForEncryptedMessage('dapp-listener', received)
-      jest.spyOn(client, 'signPayload').mockResolvedValue(undefined)
-      await client.sendMessage(
-        JSON.stringify({ id: 'pending-request', type: BeaconMessageType.SignPayloadRequest })
-      )
-    })
-
-    const flushDelivery = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    }
-
-    it('delivers a valid ACK using the pending Beacon ID, not the event ID', async () => {
-      onSessionEvent(event)
-      await flushDelivery()
-
-      expect(received).toHaveBeenCalledTimes(1)
-      expect(JSON.parse(received.mock.calls[0][0])).toEqual({
-        id: 'pending-request',
-        type: BeaconMessageType.Acknowledge,
-        senderId: 'session-topic',
-        version: '2'
-      })
-    })
-
-    it('ignores an unrelated topic without consuming the pending request', async () => {
-      onSessionEvent({ ...event, topic: 'unrelated-topic' })
-      await flushDelivery()
-      expect(received).not.toHaveBeenCalled()
-
-      onSessionEvent(event)
-      await flushDelivery()
-      expect(received).toHaveBeenCalledTimes(1)
-      expect(JSON.parse(received.mock.calls[0][0])).toMatchObject({ id: 'pending-request' })
-    })
-
-    it('ignores a late ACK from the previous session after session replacement', async () => {
-      client['session'] = createApprovedSession('replacement-topic', 'other-wallet-public-key')
-      await client.sendMessage(
-        JSON.stringify({ id: 'replacement-request', type: BeaconMessageType.SignPayloadRequest })
-      )
-      onSessionEvent(event)
-      await flushDelivery()
-      expect(received).not.toHaveBeenCalled()
-
-      onSessionEvent({ ...event, topic: 'replacement-topic' })
-      await flushDelivery()
-      expect(received).toHaveBeenCalledTimes(1)
-      expect(JSON.parse(received.mock.calls[0][0])).toMatchObject({
-        id: 'replacement-request',
-        senderId: 'replacement-topic'
-      })
-    })
-
-    it('ignores an ACK without an active session even if an ID remains queued', async () => {
-      client['session'] = undefined
-      onSessionEvent(event)
-      await flushDelivery()
-      expect(received).not.toHaveBeenCalled()
-    })
-
-    it('ignores an ACK when no requests remain', async () => {
-      client['messageIds'] = []
-      onSessionEvent(event)
-      await flushDelivery()
-      expect(received).not.toHaveBeenCalled()
-    })
-
-    it('ignores other session events while a request is pending', async () => {
-      onSessionEvent({
-        ...event,
-        params: { ...event.params, event: { name: 'accountsChanged', data: [] } }
-      })
-      await flushDelivery()
-      expect(received).not.toHaveBeenCalled()
-    })
-  })
 
   it('correlates a reconnect PermissionResponse to the new PermissionRequest after close and Disconnect', async () => {
     const firstSession = createApprovedSession(

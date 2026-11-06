@@ -271,6 +271,8 @@ export class DAppClient extends Client {
 
   private readonly acknowledgedRequests = new Set<string>()
   private readonly openRequestTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly requestCleanups = new Map<string, () => void>()
+
   private readonly requestTimeoutMs: number
 
   /**
@@ -3308,7 +3310,25 @@ export class DAppClient extends Client {
       const walletInfo = await this.getWalletInfo(peer, account)
 
       logger.log('makeRequest', 'sending message', request)
-      await (await this.transport).send(payload, peer)
+      const transport = await this.transport
+      if (exposed && !this.openRequests.has(request.id)) {
+        return exposed.promise
+      }
+      if (exposed && transport instanceof WalletConnectTransport) {
+        this.requestCleanups.set(request.id, () => transport.cancelRequest(request.id))
+      }
+      await transport.send(payload, peer)
+      // send may yield before the adapter registers ownership. A timeout during
+      // that await must also cancel work registered after the timeout callback.
+      if (
+        exposed &&
+        !this.openRequests.has(request.id) &&
+        transport instanceof WalletConnectTransport
+      ) {
+        transport.cancelRequest(request.id)
+
+        return exposed.promise
+      }
       if (
         request.type !== BeaconMessageType.PermissionRequest ||
         (this._activeAccount.isResolved() && (await this._activeAccount.promise))
@@ -3771,6 +3791,9 @@ export class DAppClient extends Client {
   }
 
   private clearOpenRequest(id: string): void {
+    this.requestCleanups.get(id)?.()
+    this.requestCleanups.delete(id)
+    this.acknowledgedRequests.delete(id)
     this.clearOpenRequestTimeout(id)
     this.openRequests.delete(id)
     this.openRequestsOtherTabs.delete(id)

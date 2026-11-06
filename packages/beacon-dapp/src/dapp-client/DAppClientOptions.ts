@@ -145,7 +145,17 @@ export interface DAppClientOptions {
 
   /**
    * Maximum time in milliseconds to wait for a wallet acknowledge or response before rejecting
-   * the request. Set to 0 or a negative value to disable request timeouts.
+   * the request (default: 60_000). WalletConnect's legacy requestAcknowledged events
+   * cannot identify a Beacon request, so they do not acknowledge requests or disable
+   * this deadline. Set a longer finite value for slow signing/operation approvals, for
+   * example 120_000. Correlated WalletConnect ACKs require future wallet capability
+   * negotiation; neither a ping nor the outer event ID supplies that correlation.
+   * Permission renewal is also bounded by this deadline; initial pairing starts
+   * before it. Session establishment additionally has separate adapter timeouts.
+   * Timeout or ABORTED revocation does not cancel the wallet action: an operation
+   * may still be injected.
+   * Check its chain status before retrying to avoid submitting it twice.
+   * Set to 0 or a negative value to opt out of bounded request completion.
    */
   requestTimeoutMs?: number
 }

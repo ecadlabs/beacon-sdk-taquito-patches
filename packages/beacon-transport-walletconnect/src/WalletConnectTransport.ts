@@ -134,6 +134,11 @@ export class WalletConnectTransport<
     ]
   }
 
+  /** @internal Release adapter ownership when a public request finishes or expires. */
+  public cancelRequest(id: string): void {
+    this.client.cancelRequest(id)
+  }
+
   public async disconnect(): Promise<void> {
     await this.client.close()
 
