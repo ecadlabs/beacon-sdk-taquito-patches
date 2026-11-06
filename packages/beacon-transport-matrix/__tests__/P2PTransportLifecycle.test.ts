@@ -8,9 +8,9 @@ import { MatrixUserService } from '../src/matrix-client/services/MatrixUserServi
 import { MatrixEventService } from '../src/matrix-client/services/MatrixEventService'
 import { MatrixLoginResponse } from '../src/matrix-client/models/api/MatrixLogin'
 
-jest.mock('@ecadlabs/beacon-utils', () => {
-  const actual = jest.requireActual('@ecadlabs/beacon-utils')
-  return { ...actual, generateGUID: jest.fn(actual.generateGUID) }
+vi.mock('@ecadlabs/beacon-utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@ecadlabs/beacon-utils')>()
+  return { ...actual, generateGUID: vi.fn(actual.generateGUID) }
 })
 
 const loginResponse = (token: string): MatrixLoginResponse => ({
@@ -21,13 +21,13 @@ const loginResponse = (token: string): MatrixLoginResponse => ({
 
 describe('P2PTransport canceled startup', () => {
   beforeEach(() => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     localStorage.clear()
   })
 
   afterEach(() => {
-    jest.restoreAllMocks()
-    jest.useRealTimers()
+    vi.restoreAllMocks()
+    vi.useRealTimers()
     localStorage.clear()
   })
 
@@ -52,24 +52,24 @@ describe('P2PTransport canceled startup', () => {
       )
       const entered = new ExposedPromise<void>()
       const oldLogin = new ExposedPromise<MatrixLoginResponse>()
-      jest.spyOn(P2PCommunicationClient.prototype, 'getRelayServer').mockResolvedValue({
+      vi.spyOn(P2PCommunicationClient.prototype, 'getRelayServer').mockResolvedValue({
         server: 'relay.example',
         timestamp: 12345
       })
-      const login = jest
+      const login = vi
         .spyOn(MatrixUserService.prototype, 'login')
         .mockImplementationOnce(() => {
           entered.resolve()
           return oldLogin.promise
         })
         .mockResolvedValue(loginResponse('new-token'))
-      const sync = jest
+      const sync = vi
         .spyOn(MatrixEventService.prototype, 'sync')
         .mockImplementation(async (token) => ({
           next_batch: token,
           rooms: {}
         }))
-      const stop = jest.spyOn(MatrixHttpClient.prototype, 'cancelAllRequests')
+      const stop = vi.spyOn(MatrixHttpClient.prototype, 'cancelAllRequests')
       const oldConnection = oldTransport.connect()
       await entered.promise
       try {
@@ -129,15 +129,14 @@ describe('P2PTransport canceled startup', () => {
     )
     const entered = new ExposedPromise<void>()
     const oldSync = new ExposedPromise<Awaited<ReturnType<MatrixEventService['sync']>>>()
-    jest.spyOn(P2PCommunicationClient.prototype, 'getRelayServer').mockResolvedValue({
+    vi.spyOn(P2PCommunicationClient.prototype, 'getRelayServer').mockResolvedValue({
       server: 'relay.example',
       timestamp: 12345
     })
-    jest
-      .spyOn(MatrixUserService.prototype, 'login')
+    vi.spyOn(MatrixUserService.prototype, 'login')
       .mockResolvedValueOnce(loginResponse('old-token'))
       .mockResolvedValue(loginResponse('new-token'))
-    const sync = jest
+    const sync = vi
       .spyOn(MatrixEventService.prototype, 'sync')
       .mockImplementationOnce(() => {
         entered.resolve()
@@ -189,18 +188,19 @@ describe('P2PTransport canceled startup', () => {
       Awaited<ReturnType<P2PCommunicationClient['getBeaconInfo']>>
     >()
     const info = { region: 'europe-west', known_servers: [], timestamp: 12345 }
-    const beaconInfo = jest
+    const beaconInfo = vi
       .spyOn(P2PCommunicationClient.prototype, 'getBeaconInfo')
       .mockImplementation(() => {
         entered.resolve()
         return oldInfo.promise
       })
-    const login = jest
+    const login = vi
       .spyOn(MatrixUserService.prototype, 'login')
       .mockResolvedValue(loginResponse('new-token'))
-    jest
-      .spyOn(MatrixEventService.prototype, 'sync')
-      .mockResolvedValue({ next_batch: 'new-sync', rooms: {} })
+    vi.spyOn(MatrixEventService.prototype, 'sync').mockResolvedValue({
+      next_batch: 'new-sync',
+      rooms: {}
+    })
     const oldConnection = oldTransport.connect()
     await entered.promise
     try {
@@ -240,22 +240,22 @@ describe('P2PTransport canceled startup', () => {
     )
     const entered = new ExposedPromise<void>()
     const oldSeed = new ExposedPromise<string>()
-    jest.mocked(generateGUID).mockImplementationOnce(() => {
+    vi.mocked(generateGUID).mockImplementationOnce(() => {
       entered.resolve()
       return oldSeed.promise
     })
-    jest.spyOn(P2PCommunicationClient.prototype, 'getRelayServer').mockResolvedValue({
+    vi.spyOn(P2PCommunicationClient.prototype, 'getRelayServer').mockResolvedValue({
       server: 'relay.example',
       timestamp: 12345
     })
-    jest
-      .spyOn(MatrixUserService.prototype, 'login')
+    vi.spyOn(MatrixUserService.prototype, 'login')
       .mockRejectedValueOnce({ errcode: 'M_USER_DEACTIVATED' })
       .mockResolvedValue(loginResponse('new-token'))
-    jest
-      .spyOn(MatrixEventService.prototype, 'sync')
-      .mockResolvedValue({ next_batch: 'new-sync', rooms: {} })
-    const write = jest.spyOn(storage, 'set')
+    vi.spyOn(MatrixEventService.prototype, 'sync').mockResolvedValue({
+      next_batch: 'new-sync',
+      rooms: {}
+    })
+    const write = vi.spyOn(storage, 'set')
     const oldConnection = oldTransport.connect()
     await entered.promise
     try {

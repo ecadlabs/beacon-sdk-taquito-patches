@@ -3,7 +3,7 @@ import useDrag from '../../src/components/toast/hooks/useDrag'
 
 describe('useDrag hook', () => {
   test('handles dragging events correctly', () => {
-    const handler = jest.fn()
+    const handler = vi.fn()
 
     const TestComponent = () => {
       const bindDrag = useDrag(handler)
@@ -34,7 +34,7 @@ describe('useDrag hook', () => {
   })
 
   test('ignores mousemove events when not dragging', () => {
-    const handler = jest.fn()
+    const handler = vi.fn()
 
     const TestComponent = () => {
       const bindDrag = useDrag(handler)

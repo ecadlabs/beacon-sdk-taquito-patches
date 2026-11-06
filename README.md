@@ -59,7 +59,6 @@ Lower-level packages also published from this repo:
 - `@ecadlabs/beacon-transport-walletconnect`
 - `@ecadlabs/beacon-blockchain-tezos`
 - `@ecadlabs/beacon-blockchain-tezos-sapling`
-- `@ecadlabs/beacon-blockchain-substrate`
 
 ### How Taquito consumes this
 

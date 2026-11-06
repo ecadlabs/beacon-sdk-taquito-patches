@@ -5,21 +5,23 @@ import { MergedWallet } from 'src/utils/wallets'
 // --- Mock the Wallet component ---
 // Replace the real Wallet component with a dummy that renders a div with data-testid="wallet"
 // and displays the wallet name and description.
-jest.mock('../../src/components/wallet', () => {
-  return ({
-    name,
-    description,
-    onClick
-  }: {
-    name: string
-    description: string
-    onClick: () => void
-  }) => (
-    <div data-testid="wallet" onClick={onClick}>
-      <span>{name}</span>
-      <span>{description}</span>
-    </div>
-  )
+vi.mock('../../src/components/wallet', () => {
+  return {
+    default: ({
+      name,
+      description,
+      onClick
+    }: {
+      name: string
+      description: string
+      onClick: () => void
+    }) => (
+      <div data-testid="wallet" onClick={onClick}>
+        <span>{name}</span>
+        <span>{description}</span>
+      </div>
+    )
+  }
 })
 
 describe('TopWallets Component', () => {
@@ -48,10 +50,10 @@ describe('TopWallets Component', () => {
   ]
 
   // Dummy callbacks
-  const onClickWallet = jest.fn()
+  const onClickWallet = vi.fn()
   const dummyOtherWallets = {
     images: ['other1.png', 'other2.png', 'other3.png'],
-    onClick: jest.fn()
+    onClick: vi.fn()
   }
 
   // Before each test, clear localStorage and reset mocks

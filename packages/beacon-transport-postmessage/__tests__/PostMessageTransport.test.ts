@@ -12,9 +12,9 @@ describe('PostMessageTransport.connect', () => {
       {} as any,
       StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
     )
-    jest.spyOn(transport, 'getPeers').mockResolvedValue([{ publicKey: 'peer-1' }] as any)
-    jest.spyOn(transport, 'listen').mockRejectedValue(new Error('listener failed'))
-    const cleanup = jest.spyOn((transport as any).client, 'unsubscribeFromEncryptedMessages')
+    vi.spyOn(transport, 'getPeers').mockResolvedValue([{ publicKey: 'peer-1' }] as any)
+    vi.spyOn(transport, 'listen').mockRejectedValue(new Error('listener failed'))
+    const cleanup = vi.spyOn((transport as any).client, 'unsubscribeFromEncryptedMessages')
 
     await expect(transport.connect()).rejects.toThrow('listener failed')
     expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
@@ -33,15 +33,16 @@ describe('PostMessageTransport.connect', () => {
       finishRegistration = resolve
     })
     const failure = new Error('listener failed')
-    jest
-      .spyOn(transport, 'getPeers')
-      .mockResolvedValue([{ publicKey: 'peer-1' }, { publicKey: 'peer-2' }] as any)
-    const listen = jest
+    vi.spyOn(transport, 'getPeers').mockResolvedValue([
+      { publicKey: 'peer-1' },
+      { publicKey: 'peer-2' }
+    ] as any)
+    const listen = vi
       .spyOn(transport, 'listen')
       .mockRejectedValueOnce(failure)
       .mockReturnValueOnce(pendingRegistration)
       .mockResolvedValue(undefined)
-    const cleanup = jest
+    const cleanup = vi
       .spyOn((transport as any).client, 'unsubscribeFromEncryptedMessages')
       .mockResolvedValue(undefined)
     const connect = transport.connect()
@@ -69,12 +70,12 @@ describe('PostMessageTransport.connect', () => {
       StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
     )
 
-    jest.spyOn(transport, 'getPeers').mockRejectedValue(new Error('storage failed'))
+    vi.spyOn(transport, 'getPeers').mockRejectedValue(new Error('storage failed'))
     let finishCleanup!: () => void
     const pendingCleanup = new Promise<void>((resolve) => {
       finishCleanup = resolve
     })
-    const cleanup = jest
+    const cleanup = vi
       .spyOn((transport as any).client, 'unsubscribeFromEncryptedMessages')
       .mockReturnValue(pendingCleanup)
     const connect = transport.connect()
@@ -98,13 +99,13 @@ describe('PostMessageTransport.connect', () => {
       StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
     )
     let receive!: Parameters<PostMessageClient['listenForEncryptedMessage']>[1]
-    const registration = jest
+    const registration = vi
       .spyOn(PostMessageClient.prototype, 'listenForEncryptedMessage')
       .mockImplementation(async (_key, callback) => {
         receive = callback
       })
     const pending = new ExposedPromise<void>()
-    const listener = jest.fn(() => pending.promise)
+    const listener = vi.fn(() => pending.promise)
     const failure = new Error('listener failed')
     try {
       await transport.addListener(listener)

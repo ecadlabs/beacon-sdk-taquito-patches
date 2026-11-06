@@ -1,10 +1,11 @@
+import type { Mock } from 'vitest'
 // src/components/toast/index.test.tsx
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import Toast from '../../src/components/toast/index'
 
 // --- Mock external dependencies ---
 // Mock useDrag to return a function that, when called, returns an empty object.
-jest.mock('../../src/components/toast/hooks/useDrag', () => ({
+vi.mock('../../src/components/toast/hooks/useDrag', () => ({
   __esModule: true,
   default: () => {
     return () => ({})
@@ -12,8 +13,8 @@ jest.mock('../../src/components/toast/hooks/useDrag', () => ({
 }))
 
 // Mock isMobileOS so that by default it returns false (non-mobile).
-jest.mock('../../src/utils/platform', () => ({
-  isMobileOS: jest.fn(() => false)
+vi.mock('../../src/utils/platform', () => ({
+  isMobileOS: vi.fn(() => false)
 }))
 
 // Import the isMobileOS so we can override it in tests.
@@ -22,27 +23,27 @@ import { isMobileOS } from '../../src/utils/platform'
 describe('Toast Component', () => {
   beforeEach(() => {
     // Use fake timers for any setTimeout behavior.
-    jest.useFakeTimers()
+    vi.useFakeTimers()
   })
 
   afterEach(() => {
-    jest.runOnlyPendingTimers()
-    jest.useRealTimers()
-    jest.resetAllMocks()
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+    vi.resetAllMocks()
   })
 
   test('renders toast with show class when open is true and hide class when false', () => {
     const { rerender, container } = render(
-      <Toast label="Test Toast" open={true} onClickClose={jest.fn()} />
+      <Toast label="Test Toast" open={true} onClickClose={vi.fn()} />
     )
     expect(container.firstChild).toHaveClass('toast-wrapper-show')
 
-    rerender(<Toast label="Test Toast" open={false} onClickClose={jest.fn()} />)
+    rerender(<Toast label="Test Toast" open={false} onClickClose={vi.fn()} />)
     expect(container.firstChild).toHaveClass('toast-wrapper-hide')
   })
 
   test('calls onClickClose when the close icon is clicked', () => {
-    const onClickClose = jest.fn()
+    const onClickClose = vi.fn()
     render(<Toast label="Test Toast" open={true} onClickClose={onClickClose} />)
 
     // The close icon is rendered inside a div with the "button-icon" class.
@@ -57,7 +58,7 @@ describe('Toast Component', () => {
 
   test('renders plain label if no wallet placeholder is present', () => {
     const label = 'Simple Toast Label'
-    render(<Toast label={label} open={true} onClickClose={jest.fn()} />)
+    render(<Toast label={label} open={true} onClickClose={vi.fn()} />)
     expect(screen.getByText(label)).toBeInTheDocument()
   })
 
@@ -68,7 +69,7 @@ describe('Toast Component', () => {
       name: 'TestWallet'
     }
     const { container } = render(
-      <Toast label={label} open={true} onClickClose={jest.fn()} walletInfo={walletInfo} />
+      <Toast label={label} open={true} onClickClose={vi.fn()} walletInfo={walletInfo} />
     )
     // Verify that the wallet icon is rendered (using its alt text)
     const walletIcon = screen.getByAltText(`${walletInfo.name} icon`)
@@ -89,11 +90,11 @@ describe('Toast Component', () => {
         text: 'Action 1',
         isBold: true,
         actionText: 'Click Me',
-        actionCallback: jest.fn()
+        actionCallback: vi.fn()
       }
     ]
     render(
-      <Toast label="Toast with actions" open={true} onClickClose={jest.fn()} actions={actions} />
+      <Toast label="Toast with actions" open={true} onClickClose={vi.fn()} actions={actions} />
     )
 
     // The action text and button should be visible.
@@ -111,11 +112,11 @@ describe('Toast Component', () => {
       {
         text: 'Action 1',
         actionText: 'Click Me',
-        actionCallback: jest.fn()
+        actionCallback: vi.fn()
       }
     ]
     render(
-      <Toast label="Request sent to user" open={true} onClickClose={jest.fn()} actions={actions} />
+      <Toast label="Request sent to user" open={true} onClickClose={vi.fn()} actions={actions} />
     )
 
     // Because the label includes "Request sent to", the useEffect hides actions initially.
@@ -123,22 +124,20 @@ describe('Toast Component', () => {
 
     // Advance timers by 3000ms so that showMoreInfo becomes true.
     act(() => {
-      jest.advanceTimersByTime(3000)
+      vi.advanceTimersByTime(3000)
     })
 
-    await waitFor(() => {
-      expect(screen.getByText('Action 1')).toBeInTheDocument()
-    })
+    expect(screen.getByText('Action 1')).toBeInTheDocument()
   })
 
   test('renders open wallet action button if not mobile and openWalletAction is provided', () => {
     // By default, our isMobileOS mock returns false (non-mobile).
-    const openWalletAction = jest.fn()
+    const openWalletAction = vi.fn()
     render(
       <Toast
         label="Test Toast"
         open={true}
-        onClickClose={jest.fn()}
+        onClickClose={vi.fn()}
         openWalletAction={openWalletAction}
       />
     )
@@ -154,13 +153,13 @@ describe('Toast Component', () => {
 
   test('does not render open wallet action button on mobile', () => {
     // Override the isMobileOS mock to simulate a mobile OS.
-    ;(isMobileOS as jest.Mock).mockReturnValue(true)
-    const openWalletAction = jest.fn()
+    ;(isMobileOS as Mock).mockReturnValue(true)
+    const openWalletAction = vi.fn()
     render(
       <Toast
         label="Test Toast"
         open={true}
-        onClickClose={jest.fn()}
+        onClickClose={vi.fn()}
         openWalletAction={openWalletAction}
       />
     )
@@ -171,7 +170,7 @@ describe('Toast Component', () => {
   test('applies default drag transform style', () => {
     // Since useDrag is mocked to return a function that returns an empty object,
     // the initial position remains [0, 0] so the transform should be translate3d(0px, 0px, 0)
-    const { container } = render(<Toast label="Test Toast" open={true} onClickClose={jest.fn()} />)
+    const { container } = render(<Toast label="Test Toast" open={true} onClickClose={vi.fn()} />)
     expect(container.firstChild).toHaveStyle('transform: translate3d(0px, 0px, 0)')
   })
 })

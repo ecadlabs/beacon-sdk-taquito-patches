@@ -3,13 +3,15 @@ import PairOther from '../../src/components/pair-other'
 import { PairOtherProps } from '../../src/ui/common'
 
 // Mock the QR component so that we can inspect its rendered output.
-jest.mock('../../src/components/qr', () => {
+vi.mock('../../src/components/qr', () => {
   // The mock receives props and renders a dummy element with the passed code and isWalletConnect info.
-  return (props: any) => (
-    <div data-testid="qr-component">
-      QR: {props.code} {props.isWalletConnect ? 'walletconnect' : 'p2p'}
-    </div>
-  )
+  return {
+    default: (props: any) => (
+      <div data-testid="qr-component">
+        QR: {props.code} {props.isWalletConnect ? 'walletconnect' : 'p2p'}
+      </div>
+    )
+  }
 })
 
 describe('PairOther Component', () => {
@@ -17,7 +19,7 @@ describe('PairOther Component', () => {
     walletList: [],
     p2pPayload: Promise.resolve('p2p-code'),
     wcPayload: Promise.resolve('wc-code'),
-    onClickLearnMore: jest.fn()
+    onClickLearnMore: vi.fn()
   }
 
   test('renders selection view with both buttons when payloads are provided', async () => {
@@ -38,7 +40,7 @@ describe('PairOther Component', () => {
       walletList: [],
       p2pPayload: Promise.resolve('p2p-code'),
       wcPayload: new Promise<string>(() => {}),
-      onClickLearnMore: jest.fn()
+      onClickLearnMore: vi.fn()
     }
 
     render(<PairOther {...props} />)
@@ -82,7 +84,7 @@ describe('PairOther Component', () => {
       walletList: [],
       p2pPayload: Promise.resolve(''),
       wcPayload: Promise.resolve(''),
-      onClickLearnMore: jest.fn()
+      onClickLearnMore: vi.fn()
     }
 
     render(<PairOther {...props} />)

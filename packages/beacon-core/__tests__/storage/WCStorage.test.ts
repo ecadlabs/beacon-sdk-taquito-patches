@@ -1,13 +1,15 @@
 import { WCStorage } from '../../src/storage/WCStorage'
 
-const mockIndexedDBGet = jest.fn()
-const mockIndexedDBClearStore = jest.fn()
+const mockIndexedDBGet = vi.fn()
+const mockIndexedDBClearStore = vi.fn()
 
-jest.mock('../../src/storage/IndexedDBStorage', () => ({
-  IndexedDBStorage: jest.fn().mockImplementation(() => ({
-    get: mockIndexedDBGet,
-    clearStore: mockIndexedDBClearStore
-  }))
+vi.mock('../../src/storage/IndexedDBStorage', () => ({
+  IndexedDBStorage: vi.fn().mockImplementation(function () {
+    return {
+      get: mockIndexedDBGet,
+      clearStore: mockIndexedDBClearStore
+    }
+  })
 }))
 
 class MockBroadcastChannel extends EventTarget implements BroadcastChannel {
@@ -37,7 +39,7 @@ describe('WCStorage', () => {
   })
 
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   afterAll(() => {

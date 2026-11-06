@@ -3,7 +3,7 @@ import Wallet from '../../src/components/wallet/index'
 import { WalletProps } from 'src/ui/common'
 
 describe('Wallet Component', () => {
-  const onClick = jest.fn()
+  const onClick = vi.fn()
   const defaultProps: WalletProps = {
     name: 'Test Wallet',
     image: 'test-wallet.png',
@@ -11,7 +11,7 @@ describe('Wallet Component', () => {
   }
 
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   test('renders wallet main layout when small is false', () => {

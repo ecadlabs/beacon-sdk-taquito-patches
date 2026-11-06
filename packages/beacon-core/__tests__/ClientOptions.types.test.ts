@@ -12,7 +12,7 @@ it('accepts legacy enableMetrics flags in both public option types', () => {
       config,
       JSON.stringify({
         extends: path.join(root, 'tsconfig.json'),
-        compilerOptions: { noEmit: true },
+        compilerOptions: { noEmit: true, types: ['node', 'chrome'] },
         files: [path.join(root, 'test-fixtures/client-options/legacy-metrics.ts')],
         include: []
       })

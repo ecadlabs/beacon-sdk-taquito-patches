@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest'
 import { renderHook, act, cleanup, waitFor } from '@testing-library/react'
 import useConnect from '../../src/ui/alert/hooks/useConnect'
 import { StorageKey, ExtensionMessageTarget, NetworkType } from '@ecadlabs/beacon-types'
@@ -6,22 +7,22 @@ import getDefaultLogo from '../../src/ui/alert/getDefautlLogo'
 import { OSLink } from '../../src/utils/wallets'
 import { AlertState } from '../../src/ui/common'
 
-jest.mock('../../src/utils/get-tzip10-link', () => ({
-  getTzip10Link: jest.fn().mockReturnValue('https://example.com/tzip10')
+vi.mock('../../src/utils/get-tzip10-link', () => ({
+  getTzip10Link: vi.fn().mockReturnValue('https://example.com/tzip10')
 }))
 
-jest.mock('../../src/utils/platform', () => ({
-  isTwBrowser: jest.fn().mockReturnValue(false),
-  isAndroid: jest.fn().mockReturnValue(false),
-  isMobileOS: jest.fn().mockReturnValue(false),
-  isIOS: jest.fn().mockReturnValue(false)
+vi.mock('../../src/utils/platform', () => ({
+  isTwBrowser: vi.fn().mockReturnValue(false),
+  isAndroid: vi.fn().mockReturnValue(false),
+  isMobileOS: vi.fn().mockReturnValue(false),
+  isIOS: vi.fn().mockReturnValue(false)
 }))
 
-HTMLAnchorElement.prototype.click = jest.fn()
-global.window.URL.createObjectURL = jest.fn()
+HTMLAnchorElement.prototype.click = vi.fn()
+global.window.URL.createObjectURL = vi.fn()
 
 // Mock window.open properly
-const windowOpenMock = jest.fn()
+const windowOpenMock = vi.fn()
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void
@@ -41,16 +42,16 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  jest.clearAllMocks()
+  vi.clearAllMocks()
 })
 
 describe('useConnect hook', () => {
   let wallets: Map<string, any>
-  let onCloseHandler: jest.Mock
+  let onCloseHandler: Mock
 
   beforeEach(() => {
     wallets = new Map()
-    onCloseHandler = jest.fn()
+    onCloseHandler = vi.fn()
   })
 
   it('should initialize with default values', async () => {
@@ -122,7 +123,7 @@ describe('useConnect hook', () => {
 
     // Mock window.open to return a fake new-tab object.
     const newTabMock = { opener: {}, location: { href: '' } }
-    const windowOpenMock = jest.fn().mockReturnValue(newTabMock)
+    const windowOpenMock = vi.fn().mockReturnValue(newTabMock)
     window.open = windowOpenMock
 
     const { result } = renderHook(() =>
@@ -200,7 +201,7 @@ describe('useConnect hook', () => {
       })
     })
 
-    const postMessageSpy = jest.spyOn(windowRef, 'postMessage').mockImplementation(() => {})
+    const postMessageSpy = vi.spyOn(windowRef, 'postMessage').mockImplementation(() => {})
 
     await act(async () => {
       await result.current[11]()
@@ -269,7 +270,7 @@ describe('useConnect hook', () => {
       })
     })
 
-    const windowOpenSpy = jest.spyOn(window, 'open').mockImplementation(() => null)
+    const windowOpenSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
 
     // handleClickInstallExtension is synchronous.
     act(() => {
@@ -317,7 +318,7 @@ describe('useConnect hook', () => {
       })
     })
 
-    const windowOpenSpy = jest.spyOn(window, 'open').mockImplementation(() => null)
+    const windowOpenSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
 
     await act(async () => {
       await result.current[13]()
@@ -370,7 +371,7 @@ describe('useConnect hook', () => {
       })
     })
 
-    const windowOpenSpy = jest.spyOn(window, 'open').mockImplementation(() => null)
+    const windowOpenSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
 
     act(() => {
       result.current[14]()
@@ -578,7 +579,7 @@ describe('useConnect hook', () => {
     }
     wallets.set('wallet-newtab-invalid', newTabWallet)
     const newTabMock = { opener: {}, location: { href: '' } }
-    const windowOpenMock = jest.fn().mockReturnValue(newTabMock)
+    const windowOpenMock = vi.fn().mockReturnValue(newTabMock)
     window.open = windowOpenMock
 
     const { result } = renderHook(() =>
@@ -662,10 +663,11 @@ describe('useConnect hook', () => {
 
     // --- Return a real anchor element ---
     const fakeAnchor = document.createElement('a')
-    const setAttributeSpy = jest.spyOn(fakeAnchor, 'setAttribute')
-    const dispatchEventSpy = jest.spyOn(fakeAnchor, 'dispatchEvent')
+    fakeAnchor.addEventListener('click', (event) => event.preventDefault())
+    const setAttributeSpy = vi.spyOn(fakeAnchor, 'setAttribute')
+    const dispatchEventSpy = vi.spyOn(fakeAnchor, 'dispatchEvent')
     const originalCreateElement = document.createElement.bind(document)
-    const createElementSpy = jest
+    const createElementSpy = vi
       .spyOn(document, 'createElement')
       .mockImplementation((tag: string) => {
         if (tag === 'a') {
@@ -739,7 +741,7 @@ describe('useConnect hook', () => {
 
   afterEach(() => {
     cleanup()
-    jest.clearAllMocks()
-    jest.restoreAllMocks()
+    vi.clearAllMocks()
+    vi.restoreAllMocks()
   })
 })

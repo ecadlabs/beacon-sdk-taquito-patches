@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "types": ["node", "chrome"],
     "target": "es5",
     "module": "commonjs",
     "outDir": "./dist/cjs"

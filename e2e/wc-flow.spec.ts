@@ -90,6 +90,11 @@ test('should send 1 mutez on second tab', async () => {
 test('should send 1 mutez on both tabs', async () => {
   const dapp2 = await dappCtx.newPage()
   await dapp2.goto('http://localhost:1234/dapp.html')
+  await expect(dapp2.locator('#activeAccount')).toHaveText('tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb')
+
+  // Pairing consumes one of the leader's two requests per five seconds.
+  // Expire that request before both tabs send operations through the leader.
+  await dapp.waitForTimeout(5_100)
 
   // #sendToSelf
   await dapp.click('#sendToSelf')
@@ -111,7 +116,7 @@ test('should send 1 mutez on both tabs', async () => {
     })
   }
 
-  await Promise.all([step1, step2])
+  await Promise.all([step1(), step2()])
 })
 
 test('should disconnect on both tabs', async () => {

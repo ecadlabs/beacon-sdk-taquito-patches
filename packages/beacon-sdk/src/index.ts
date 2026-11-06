@@ -1,4 +1,3 @@
-export * from '@ecadlabs/beacon-blockchain-substrate'
 export * from '@ecadlabs/beacon-blockchain-tezos'
 export * from '@ecadlabs/beacon-core'
 export * from '@ecadlabs/beacon-dapp'

@@ -11,7 +11,7 @@ describe('Matrix preserved room state', () => {
 
   afterEach(() => {
     localStorage.clear()
-    jest.restoreAllMocks()
+    vi.restoreAllMocks()
   })
 
   it('persists only sync and room state without storing messages or mutating live rooms', async () => {
@@ -62,7 +62,7 @@ describe('Matrix preserved room state', () => {
 
   it('keeps non-preserved fields and empty sync updates from triggering a write', async () => {
     const storage = new LocalStorage()
-    const write = jest.spyOn(storage, 'set')
+    const write = vi.spyOn(storage, 'set')
     const store = new MatrixClientStore(storage)
 
     await store.update({ accessToken: 'access-token', userId: '@user:relay' })
@@ -79,7 +79,7 @@ describe('Matrix preserved room state', () => {
     const entered = new ExposedPromise<void>()
     const release = new ExposedPromise<void>()
     const set = storage.set.bind(storage)
-    jest.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
+    vi.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
       entered.resolve()
       await release.promise
       await set(key, value)
@@ -107,7 +107,7 @@ describe('Matrix preserved room state', () => {
     const entered = new ExposedPromise<void>()
     const release = new ExposedPromise<void>()
     const set = storage.set.bind(storage)
-    const write = jest.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
+    const write = vi.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
       entered.resolve()
       await release.promise
       await set(key, value)
@@ -143,7 +143,7 @@ describe('Matrix preserved room state', () => {
     const entered = new ExposedPromise<void>()
     const release = new ExposedPromise<void>()
     const set = storage.set.bind(storage)
-    const write = jest.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
+    const write = vi.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
       entered.resolve()
       await release.promise
       await set(key, value)
@@ -170,8 +170,8 @@ describe('Matrix preserved room state', () => {
     const entered = new ExposedPromise<void>()
     const release = new ExposedPromise<void>()
     const failure = new Error('held write failed')
-    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
-    jest.spyOn(storage, 'set').mockImplementationOnce(async () => {
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
+    vi.spyOn(storage, 'set').mockImplementationOnce(async () => {
       entered.resolve()
       await release.promise
       throw failure
@@ -192,8 +192,8 @@ describe('Matrix preserved room state', () => {
   it('logs storage-write failures while retaining the updated in-memory state', async () => {
     const storage = new LocalStorage()
     const failure = new Error('Storage write failed')
-    jest.spyOn(storage, 'set').mockRejectedValue(failure)
-    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
+    vi.spyOn(storage, 'set').mockRejectedValue(failure)
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
     const store = new MatrixClientStore(storage)
 
     await expect(store.update({ syncToken: 'next-sync' })).resolves.toBeUndefined()

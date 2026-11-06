@@ -21,9 +21,8 @@ const gate = (): Gate => ({ entered: new ExposedPromise(), release: new ExposedP
 let mockOpenGate: Gate | undefined
 let mockSenderIdGate: Gate | undefined
 
-jest.mock('@ecadlabs/beacon-utils', () => {
-  const actual =
-    jest.requireActual<typeof import('@ecadlabs/beacon-utils')>('@ecadlabs/beacon-utils')
+vi.mock('@ecadlabs/beacon-utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@ecadlabs/beacon-utils')>()
 
   return {
     ...actual,
@@ -40,8 +39,8 @@ jest.mock('@ecadlabs/beacon-utils', () => {
   }
 })
 
-jest.mock('@ecadlabs/beacon-core', () => {
-  const actual = jest.requireActual<typeof import('@ecadlabs/beacon-core')>('@ecadlabs/beacon-core')
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@ecadlabs/beacon-core')>()
 
   return {
     ...actual,
@@ -134,12 +133,13 @@ const messageSync = (body: string): MatrixSyncResponse => ({
 
 describe('P2P callbacks retired by stop', () => {
   beforeEach(() => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     localStorage.clear()
-    jest
-      .spyOn(P2PCommunicationClient.prototype, 'getRelayServer')
-      .mockResolvedValue({ server: 'relay.example', timestamp: 12345 })
-    jest.spyOn(MatrixUserService.prototype, 'login').mockResolvedValue({
+    vi.spyOn(P2PCommunicationClient.prototype, 'getRelayServer').mockResolvedValue({
+      server: 'relay.example',
+      timestamp: 12345
+    })
+    vi.spyOn(MatrixUserService.prototype, 'login').mockResolvedValue({
       user_id: '@sdk:relay.example',
       device_id: 'device',
       access_token: 'token'
@@ -148,9 +148,9 @@ describe('P2P callbacks retired by stop', () => {
   afterEach(() => {
     mockOpenGate = undefined
     mockSenderIdGate = undefined
-    jest.restoreAllMocks()
-    jest.clearAllTimers()
-    jest.useRealTimers()
+    vi.restoreAllMocks()
+    vi.clearAllTimers()
+    vi.useRealTimers()
     localStorage.clear()
   })
 
@@ -159,7 +159,7 @@ describe('P2P callbacks retired by stop', () => {
     const keys = await getKeypairFromSeed('callback-lifecycle')
     const client = new P2PCommunicationClient('Test', keys, 1, storage)
     const polling = new ExposedPromise<MatrixSyncResponse>()
-    const sync = jest
+    const sync = vi
       .spyOn(MatrixEventService.prototype, 'sync')
       .mockResolvedValueOnce(initial)
       .mockImplementation(() => polling.promise)
@@ -170,7 +170,7 @@ describe('P2P callbacks retired by stop', () => {
   it('does not restore a peer room when an old invite join finishes after stop and restart', async () => {
     const { client, storage, sync } = await create(inviteSync())
     const join = gate()
-    jest.spyOn(MatrixClient.prototype, 'joinRooms').mockImplementation(async () => {
+    vi.spyOn(MatrixClient.prototype, 'joinRooms').mockImplementation(async () => {
       join.entered.resolve()
       await join.release.promise
     })
@@ -195,7 +195,7 @@ describe('P2P callbacks retired by stop', () => {
   it('does not retry an old forbidden invite using a replacement Matrix client', async () => {
     const { client, sync } = await create(inviteSync())
     const entered = new ExposedPromise<void>()
-    const join = jest.spyOn(MatrixClient.prototype, 'joinRooms').mockImplementation(async () => {
+    const join = vi.spyOn(MatrixClient.prototype, 'joinRooms').mockImplementation(async () => {
       entered.resolve()
       throw Object.assign(new Error('Forbidden'), { errcode: 'M_FORBIDDEN' })
     })
@@ -206,7 +206,7 @@ describe('P2P callbacks retired by stop', () => {
       await client.stop()
       sync.mockResolvedValueOnce(emptySync())
       await client.start()
-      await jest.advanceTimersByTimeAsync(200)
+      await vi.advanceTimersByTimeAsync(200)
       expect(join).toHaveBeenCalledTimes(1)
     } finally {
       await client.stop()
@@ -216,7 +216,7 @@ describe('P2P callbacks retired by stop', () => {
   const openChannel = async () => {
     const setup = await create()
     await setup.client.start()
-    const callback = jest.fn()
+    const callback = vi.fn()
     await setup.client.listenForChannelOpening(callback)
     const peerKeys = await getKeypairFromSeed('callback-peer')
     const publicKey = Buffer.from(peerKeys.publicKey).toString('hex')
@@ -229,7 +229,7 @@ describe('P2P callbacks retired by stop', () => {
     }
     const payload = await sealCryptobox(JSON.stringify(pairing), setup.keys.publicKey)
     const body = `@channel-open:@${await getHexHash(Buffer.from(setup.keys.publicKey))}:${payload}`
-    await jest.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(0)
 
     return { ...setup, callback, pairing, body }
   }
@@ -274,7 +274,7 @@ describe('P2P callbacks retired by stop', () => {
     const { client, storage, polling, callback, body } = await openChannel()
     const pending = gate()
     const getPublicKey = client.getPublicKey.bind(client)
-    jest.spyOn(client, 'getPublicKey').mockImplementationOnce(async () => {
+    vi.spyOn(client, 'getPublicKey').mockImplementationOnce(async () => {
       const result = await getPublicKey()
       pending.entered.resolve()
       await pending.release.promise
@@ -299,14 +299,14 @@ describe('P2P callbacks retired by stop', () => {
     'does not leave an old peer mapping after an in-flight storage %s',
     async (stage) => {
       const { client, storage } = await create(inviteSync())
-      const write = jest.spyOn(storage, 'set')
+      const write = vi.spyOn(storage, 'set')
       const pending = gate()
       if (stage === 'read') {
         storage.readGate = pending
       } else {
         storage.writeGate = pending
       }
-      jest.spyOn(MatrixClient.prototype, 'joinRooms').mockResolvedValue(undefined)
+      vi.spyOn(MatrixClient.prototype, 'joinRooms').mockResolvedValue(undefined)
       await client.start()
       await pending.entered.promise
       const stopping = client.stop()
@@ -359,7 +359,7 @@ describe('P2P callbacks retired by stop', () => {
   it.each(updateMethods)('preserves asynchronous error boundaries for %s', async (method) => {
     const { client } = await create()
     const failure = new Error('Logger failed')
-    const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {
+    const log = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {
       throw failure
     })
     try {

@@ -22,8 +22,8 @@ import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
 import { DappP2PTransport } from '../../src/transports/DappP2PTransport'
 import { getDAppClientInstance } from '../../src/utils/get-instance'
 
-const mockLoggerWarn = jest.fn()
-const mockLoggerError = jest.fn()
+const mockLoggerWarn = vi.fn()
+const mockLoggerError = vi.fn()
 let mockBroadcastMessage: ((message: unknown) => Promise<void>) | undefined
 let storageChangedCallback:
   | ((event: {
@@ -39,26 +39,26 @@ let storageChangedCallback:
 //    so we can instantiate DAppClient without spinning up real transports, storage, etc.
 //
 
-jest.mock('@ecadlabs/beacon-ui', () => ({
-  setColorMode: jest.fn(),
-  getColorMode: jest.fn().mockReturnValue('light'),
-  setDesktopList: jest.fn(),
-  setExtensionList: jest.fn(),
-  setWebList: jest.fn(),
-  setiOSList: jest.fn(),
-  getiOSList: jest.fn().mockReturnValue([]),
-  getDesktopList: jest.fn().mockReturnValue([]),
-  getExtensionList: jest.fn().mockReturnValue([]),
-  getWebList: jest.fn().mockReturnValue([]),
-  isBrowser: jest.fn().mockReturnValue(true),
-  isDesktop: jest.fn().mockReturnValue(false),
-  isMobileOS: jest.fn().mockReturnValue(false),
-  isIOS: jest.fn().mockReturnValue(false),
-  closeToast: jest.fn()
+vi.mock('@ecadlabs/beacon-ui', () => ({
+  setColorMode: vi.fn(),
+  getColorMode: vi.fn().mockReturnValue('light'),
+  setDesktopList: vi.fn(),
+  setExtensionList: vi.fn(),
+  setWebList: vi.fn(),
+  setiOSList: vi.fn(),
+  getiOSList: vi.fn().mockReturnValue([]),
+  getDesktopList: vi.fn().mockReturnValue([]),
+  getExtensionList: vi.fn().mockReturnValue([]),
+  getWebList: vi.fn().mockReturnValue([]),
+  isBrowser: vi.fn().mockReturnValue(true),
+  isDesktop: vi.fn().mockReturnValue(false),
+  isMobileOS: vi.fn().mockReturnValue(false),
+  isIOS: vi.fn().mockReturnValue(false),
+  closeToast: vi.fn()
 }))
 
-jest.mock('@ecadlabs/beacon-core', () => {
-  const actual = jest.requireActual('@ecadlabs/beacon-core')
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@ecadlabs/beacon-core')>()
   return {
     ...actual,
     // A minimal in-memory LocalStorage stub. The constructor is fixture-only;
@@ -127,8 +127,8 @@ jest.mock('@ecadlabs/beacon-core', () => {
         return true
       }
     },
-    generateGUID: jest.fn().mockResolvedValue('guid'),
-    getSenderId: jest.fn().mockResolvedValue('senderId'),
+    generateGUID: vi.fn().mockResolvedValue('guid'),
+    getSenderId: vi.fn().mockResolvedValue('senderId'),
     Logger: class {
       constructor(_name: string) {}
       error(...args: unknown[]) {
@@ -168,9 +168,9 @@ jest.mock('@ecadlabs/beacon-core', () => {
   }
 })
 
-jest.mock('@walletconnect/sign-client', () => ({}))
-jest.mock('@walletconnect/types', () => ({}))
-jest.mock('@walletconnect/utils', () => ({ getSdkError: jest.fn() }))
+vi.mock('@walletconnect/sign-client', () => ({ default: {} }))
+vi.mock('@walletconnect/types', () => ({}))
+vi.mock('@walletconnect/utils', () => ({ getSdkError: vi.fn() }))
 
 describe('DAppClient — basic unit tests', () => {
   let client: DAppClient
@@ -247,13 +247,13 @@ describe('DAppClient — basic unit tests', () => {
     // define a minimal fake chain
     const fakeChain = {
       identifier: 'chain-1',
-      getWalletLists: jest.fn().mockResolvedValue({
+      getWalletLists: vi.fn().mockResolvedValue({
         desktopList: [],
         extensionList: [],
         webList: [],
         iOSList: []
       }),
-      handleResponse: jest.fn()
+      handleResponse: vi.fn()
     }
     client.addBlockchain(fakeChain as any)
     expect((client as any).blockchains.has('chain-1')).toBe(true)
@@ -263,14 +263,14 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('handles raw v3 disconnect messages without a nested message wrapper', async () => {
-    const channelClosedHandler = jest.fn()
-    const removeAccountsForPeerIds = jest
+    const channelClosedHandler = vi.fn()
+    const removeAccountsForPeerIds = vi
       .spyOn(client as any, 'removeAccountsForPeerIds')
       .mockResolvedValue(undefined)
 
     ;(client as any).p2pTransport = {
-      getPeers: jest.fn().mockResolvedValue([]),
-      removePeer: jest.fn()
+      getPeers: vi.fn().mockResolvedValue([]),
+      removePeer: vi.fn()
     }
 
     client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
@@ -297,8 +297,8 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('emits one acknowledge event for duplicate acknowledge messages on an open request', async () => {
-    const acknowledgeHandler = jest.fn()
-    const getWalletInfo = jest.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
+    const acknowledgeHandler = vi.fn()
+    const getWalletInfo = vi.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
 
     ;(client as any).openRequests.set(
       'request-id',
@@ -329,8 +329,8 @@ describe('DAppClient — basic unit tests', () => {
   it('emits one acknowledge event for duplicate v3 wrapped acknowledge messages', async () => {
     await seedPeerStorage()
 
-    const acknowledgeHandler = jest.fn()
-    const getWalletInfo = jest.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
+    const acknowledgeHandler = vi.fn()
+    const getWalletInfo = vi.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
 
     ;(client as any).openRequests.set(
       'wrapper-request-id',
@@ -394,18 +394,18 @@ describe('DAppClient — basic unit tests', () => {
         walletKey: 'wallet-key'
       }
     }
-    const makeRequest = jest
+    const makeRequest = vi
       .spyOn(client as any, 'makeRequest')
       .mockReturnValue(deferredRequest.promise)
-    jest.spyOn(client as any, 'checkMakeRequest').mockResolvedValue(true)
-    jest.spyOn(client as any, 'getOwnAppMetadata').mockResolvedValue({
+    vi.spyOn(client as any, 'checkMakeRequest').mockResolvedValue(true)
+    vi.spyOn(client as any, 'getOwnAppMetadata').mockResolvedValue({
       senderId: 'dapp-sender-id',
       name: 'TestApp'
     })
-    jest.spyOn(client as any, 'onNewAccount').mockResolvedValue(output.accountInfo)
-    jest.spyOn(client as any, 'notifySuccess').mockResolvedValue(undefined)
-    jest.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
-    jest.spyOn((client as any).accountManager, 'addAccount').mockResolvedValue(undefined)
+    vi.spyOn(client as any, 'onNewAccount').mockResolvedValue(output.accountInfo)
+    vi.spyOn(client as any, 'notifySuccess').mockResolvedValue(undefined)
+    vi.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
+    vi.spyOn((client as any).accountManager, 'addAccount').mockResolvedValue(undefined)
 
     const firstRequest = client.requestPermissions()
     const secondRequest = client.requestPermissions()
@@ -429,7 +429,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('rejects concurrent permission requests with different scopes', async () => {
-    jest.spyOn(client as any, 'getOwnAppMetadata').mockReturnValue(new Promise(() => {}))
+    vi.spyOn(client as any, 'getOwnAppMetadata').mockReturnValue(new Promise(() => {}))
 
     const firstRequest = client.requestPermissions({
       scopes: [PermissionScope.SIGN]
@@ -445,7 +445,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('validates concurrent permission request input before coalescing', async () => {
-    jest.spyOn(client as any, 'getOwnAppMetadata').mockReturnValue(new Promise(() => {}))
+    vi.spyOn(client as any, 'getOwnAppMetadata').mockReturnValue(new Promise(() => {}))
 
     const firstRequest = client.requestPermissions()
     const invalidRequest = client.requestPermissions({
@@ -492,20 +492,20 @@ describe('DAppClient — basic unit tests', () => {
         walletKey: 'wallet-key'
       }
     }
-    const makeRequest = jest
+    const makeRequest = vi
       .spyOn(client as any, 'makeRequest')
       .mockReturnValueOnce(rejectedRequest.promise)
       .mockReturnValueOnce(successfulRequest.promise)
-    jest.spyOn(client as any, 'checkMakeRequest').mockResolvedValue(true)
-    jest.spyOn(client as any, 'getOwnAppMetadata').mockResolvedValue({
+    vi.spyOn(client as any, 'checkMakeRequest').mockResolvedValue(true)
+    vi.spyOn(client as any, 'getOwnAppMetadata').mockResolvedValue({
       senderId: 'dapp-sender-id',
       name: 'TestApp'
     })
-    jest.spyOn(client as any, 'runRequestErrorSideEffects').mockResolvedValue(undefined)
-    jest.spyOn(client as any, 'onNewAccount').mockResolvedValue(output.accountInfo)
-    jest.spyOn(client as any, 'notifySuccess').mockResolvedValue(undefined)
-    jest.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
-    jest.spyOn((client as any).accountManager, 'addAccount').mockResolvedValue(undefined)
+    vi.spyOn(client as any, 'runRequestErrorSideEffects').mockResolvedValue(undefined)
+    vi.spyOn(client as any, 'onNewAccount').mockResolvedValue(output.accountInfo)
+    vi.spyOn(client as any, 'notifySuccess').mockResolvedValue(undefined)
+    vi.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
+    vi.spyOn((client as any).accountManager, 'addAccount').mockResolvedValue(undefined)
 
     const firstRequest = client.requestPermissions()
 
@@ -582,18 +582,18 @@ describe('DAppClient — basic unit tests', () => {
   it('destroys all internal transports, not only the selected transport', async () => {
     const createTransport = (type: TransportType) => ({
       type,
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     })
     const postMessageTransport = createTransport(TransportType.POST_MESSAGE)
     const p2pTransport = createTransport(TransportType.P2P)
     const walletConnectTransport = {
       ...createTransport(TransportType.WALLETCONNECT),
-      doClientCleanup: jest.fn().mockResolvedValue(undefined)
+      doClientCleanup: vi.fn().mockResolvedValue(undefined)
     }
-    const closeMultiTabChannel = jest.fn().mockResolvedValue(undefined)
+    const closeMultiTabChannel = vi.fn().mockResolvedValue(undefined)
     let rejectInit!: (reason: unknown) => void
     const initPromise = new Promise<TransportType>((_resolve, reject) => {
       rejectInit = reject
@@ -615,10 +615,9 @@ describe('DAppClient — basic unit tests', () => {
     await (client as any).setTransport(p2pTransport)
     ;(client as any)._initPromise = initPromise
     ;(client as any)._initReject = rejectInit
-    ;(client as any)._initSubstratePairing = false
     ;(client as any)._requestPermissionsPromise = initPromise
     ;(client as any)._requestPermissionsKey = 'sign'
-    const removeAllPeers = jest.spyOn(client, 'removeAllPeers')
+    const removeAllPeers = vi.spyOn(client, 'removeAllPeers')
 
     await client.destroy()
     await initRejection
@@ -640,44 +639,33 @@ describe('DAppClient — basic unit tests', () => {
     expect((client as any).walletConnectTransport).toBeUndefined()
     expect((client as any)._initPromise).toBeUndefined()
     expect((client as any)._initReject).toBeUndefined()
-    expect((client as any)._initSubstratePairing).toBeUndefined()
     expect((client as any)._requestPermissionsPromise).toBeUndefined()
     expect((client as any)._requestPermissionsKey).toBeUndefined()
   })
 
-  it('rejects a pending init with different pairing options', async () => {
-    ;(client as any)._initPromise = new Promise(() => {})
-    ;(client as any)._initReject = jest.fn()
-    ;(client as any)._initSubstratePairing = false
-
-    await expect((client as any).init(undefined, true)).rejects.toThrow(
-      'Cannot start a permission request with different pairing options while another pairing is pending'
-    )
-  })
-
   it('does not create a WalletConnect pairing request before the WC payload is awaited', async () => {
-    const pairInitHandler = jest.fn()
+    const pairInitHandler = vi.fn()
     const createBaseTransport = (type: TransportType) => ({
       type,
       connectionStatus: TransportStatus.CONNECTED,
-      connect: jest.fn().mockResolvedValue(undefined),
-      listenForNewPeer: jest.fn().mockResolvedValue(undefined),
-      stopListeningForNewPeers: jest.fn().mockResolvedValue(undefined),
-      getPairingRequestInfo: jest.fn().mockResolvedValue({}),
-      getPeers: jest.fn().mockResolvedValue([]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      connect: vi.fn().mockResolvedValue(undefined),
+      listenForNewPeer: vi.fn().mockResolvedValue(undefined),
+      stopListeningForNewPeers: vi.fn().mockResolvedValue(undefined),
+      getPairingRequestInfo: vi.fn().mockResolvedValue({}),
+      getPeers: vi.fn().mockResolvedValue([]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     })
     const postMessageTransport = createBaseTransport(TransportType.POST_MESSAGE)
     const p2pTransport = createBaseTransport(TransportType.P2P)
     const walletConnectTransport = {
       ...createBaseTransport(TransportType.WALLETCONNECT),
-      getPairingRequestInfo: jest.fn().mockResolvedValue({ uri: 'wc:test-topic@2?symKey=test' })
+      getPairingRequestInfo: vi.fn().mockResolvedValue({ uri: 'wc:test-topic@2?symKey=test' })
     }
-    const initInternalTransports = jest
+    const initInternalTransports = vi
       .spyOn(client as any, 'initInternalTransports')
       .mockImplementation(async function (this: any) {
         this.postMessageTransport = postMessageTransport
@@ -723,7 +711,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('emits channel close events before transport has resolved', async () => {
-    const channelClosedHandler = jest.fn()
+    const channelClosedHandler = vi.fn()
 
     client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
@@ -739,16 +727,16 @@ describe('DAppClient — basic unit tests', () => {
   it('does not notify wallet peers when cleaning up after a transport channel close', async () => {
     const staleAccount = createStoredAccount()
     const peer = createV480P2PPeer()
-    const channelClosedHandler = jest.fn()
+    const channelClosedHandler = vi.fn()
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([peer]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([peer]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
 
     client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
@@ -769,12 +757,12 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
     const pendingRequest = new ExposedPromise<unknown, any>()
     const pendingRejection = pendingRequest.promise.catch((error) => error)
@@ -802,8 +790,8 @@ describe('DAppClient — basic unit tests', () => {
       storage: { delete: (key: StorageKey) => Promise<void> }
       events: { emit: (event: BeaconEvent, payload?: unknown) => Promise<void> }
     }
-    const storageDelete = jest.spyOn(testClient.storage, 'delete')
-    const emit = jest.spyOn(testClient.events, 'emit')
+    const storageDelete = vi.spyOn(testClient.storage, 'delete')
+    const emit = vi.spyOn(testClient.events, 'emit')
 
     await client.clearActiveAccount()
 
@@ -822,8 +810,8 @@ describe('DAppClient — basic unit tests', () => {
       }
       events: { emit: (event: BeaconEvent, payload?: unknown) => Promise<void> }
     }
-    const storageDelete = jest.spyOn(testClient.storage, 'delete')
-    const emit = jest.spyOn(testClient.events, 'emit')
+    const storageDelete = vi.spyOn(testClient.storage, 'delete')
+    const emit = vi.spyOn(testClient.events, 'emit')
 
     await storageChangedCallback?.({
       eventType: 'entryModified',
@@ -854,7 +842,7 @@ describe('DAppClient — basic unit tests', () => {
 
     await testClient.storage.set(StorageKey.ACTIVE_ACCOUNT, account.accountIdentifier)
     await testClient.storage.set(StorageKey.ACCOUNTS, [account])
-    const initialize = jest.spyOn(client, 'initInternalTransports').mockResolvedValue(undefined)
+    const initialize = vi.spyOn(client, 'initInternalTransports').mockResolvedValue(undefined)
 
     await storageChangedCallback?.({
       eventType: 'entryModified',
@@ -881,7 +869,7 @@ describe('DAppClient — basic unit tests', () => {
     testClient._activeAccount = ExposedPromise.resolve(account)
     await testClient.storage.set(StorageKey.ACTIVE_ACCOUNT, account.accountIdentifier)
     await testClient.storage.set(StorageKey.ACCOUNTS, [account])
-    const setActiveAccount = jest.spyOn(testClient, 'setActiveAccount').mockResolvedValue(undefined)
+    const setActiveAccount = vi.spyOn(testClient, 'setActiveAccount').mockResolvedValue(undefined)
 
     await storageChangedCallback?.({
       eventType: 'entryModified',
@@ -898,12 +886,12 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
     let rejectInit!: (reason: unknown) => void
     const initPromise = new Promise<TransportType>((_resolve, reject) => {
@@ -917,7 +905,6 @@ describe('DAppClient — basic unit tests', () => {
     await (client as any).setTransport(transport)
     ;(client as any)._initPromise = initPromise
     ;(client as any)._initReject = rejectInit
-    ;(client as any)._initSubstratePairing = false
     ;(client as any)._requestPermissionsPromise = initPromise
     ;(client as any)._requestPermissionsKey = 'sign'
 
@@ -926,7 +913,6 @@ describe('DAppClient — basic unit tests', () => {
 
     expect((client as any)._initPromise).toBeUndefined()
     expect((client as any)._initReject).toBeUndefined()
-    expect((client as any)._initSubstratePairing).toBeUndefined()
     expect((client as any)._requestPermissionsPromise).toBeUndefined()
     expect((client as any)._requestPermissionsKey).toBeUndefined()
   })
@@ -935,18 +921,18 @@ describe('DAppClient — basic unit tests', () => {
     const createTransport = (type: TransportType) => ({
       type,
       connectionStatus: TransportStatus.CONNECTING,
-      getPeers: jest.fn().mockResolvedValue([]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     })
     const postMessageTransport = createTransport(TransportType.POST_MESSAGE)
     const p2pTransport = createTransport(TransportType.P2P)
     const walletConnectTransport = {
       ...createTransport(TransportType.WALLETCONNECT),
-      doClientCleanup: jest.fn().mockResolvedValue(undefined)
+      doClientCleanup: vi.fn().mockResolvedValue(undefined)
     }
 
     ;(client as any).postMessageTransport = postMessageTransport
@@ -976,15 +962,15 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockReturnValue(getPeersPromise),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockReturnValue(getPeersPromise),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
 
-    ;(client as any).removeAccountsForPeers = jest.fn().mockResolvedValue(undefined)
+    ;(client as any).removeAccountsForPeers = vi.fn().mockResolvedValue(undefined)
     await (client as any).setTransport(transport)
 
     const firstDisconnect = client.disconnect()
@@ -1003,7 +989,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('disconnect clears the in-flight promise when internal cleanup throws synchronously', async () => {
-    const disconnectInternal = jest
+    const disconnectInternal = vi
       .spyOn(client as any, 'disconnectInternal')
       .mockImplementationOnce(() => {
         throw new Error('sync disconnect failure')
@@ -1025,15 +1011,15 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockReturnValue(getPeersPromise),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockReturnValue(getPeersPromise),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
 
-    ;(client as any).removeAccountsForPeers = jest.fn().mockResolvedValue(undefined)
+    ;(client as any).removeAccountsForPeers = vi.fn().mockResolvedValue(undefined)
     await (client as any).setTransport(transport)
 
     const firstDisconnect = client.disconnect({ notifyPeers: false })
@@ -1074,18 +1060,18 @@ describe('DAppClient — basic unit tests', () => {
     const createTransport = (type: TransportType) => ({
       type,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     })
     const postMessageTransport = createTransport(TransportType.POST_MESSAGE)
     const p2pTransport = createTransport(TransportType.P2P)
     const walletConnectTransport = {
       ...createTransport(TransportType.WALLETCONNECT),
-      doClientCleanup: jest.fn().mockResolvedValue(undefined)
+      doClientCleanup: vi.fn().mockResolvedValue(undefined)
     }
     postMessageTransport.getPeers.mockResolvedValue([postMessagePeer])
     p2pTransport.getPeers.mockResolvedValue([p2pPeer])
@@ -1117,18 +1103,18 @@ describe('DAppClient — basic unit tests', () => {
     const createTransport = (type: TransportType) => ({
       type,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     })
     const postMessageTransport = createTransport(TransportType.POST_MESSAGE)
     const p2pTransport = createTransport(TransportType.P2P)
     const walletConnectTransport = {
       ...createTransport(TransportType.WALLETCONNECT),
-      doClientCleanup: jest.fn().mockResolvedValue(undefined)
+      doClientCleanup: vi.fn().mockResolvedValue(undefined)
     }
 
     ;(client as any).postMessageTransport = postMessageTransport
@@ -1155,22 +1141,22 @@ describe('DAppClient — basic unit tests', () => {
     const postMessageTransport = {
       type: TransportType.POST_MESSAGE,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockRejectedValue(new Error('postmessage cleanup failed')),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockRejectedValue(new Error('postmessage cleanup failed')),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
     const p2pTransport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
 
     ;(client as any).postMessageTransport = postMessageTransport
@@ -1194,15 +1180,15 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([peer]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockReturnValue(sendPromise),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([peer]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockReturnValue(sendPromise),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
 
-    ;(client as any).removeAccountsForPeers = jest.fn().mockResolvedValue(undefined)
+    ;(client as any).removeAccountsForPeers = vi.fn().mockResolvedValue(undefined)
     await (client as any).setTransport(transport)
 
     const disconnect = client.disconnect().then(() => 'resolved')
@@ -1232,12 +1218,12 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([peer]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([peer]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
 
     await (client as any).storage.set(StorageKey.ACCOUNTS, [])
@@ -1256,17 +1242,17 @@ describe('DAppClient — basic unit tests', () => {
     const createTransport = () => ({
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([peer]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([peer]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     })
     const firstTransport = createTransport()
     const secondTransport = createTransport()
 
-    ;(client as any).removeAccountsForPeers = jest.fn().mockResolvedValue(undefined)
+    ;(client as any).removeAccountsForPeers = vi.fn().mockResolvedValue(undefined)
     ;(client as any).p2pTransport = firstTransport
     await (client as any).setTransport(secondTransport)
 
@@ -1282,12 +1268,12 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
 
     await (client as any).storage.delete(StorageKey.ACTIVE_ACCOUNT)
@@ -1307,16 +1293,16 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockImplementation(() => {
+      getPeers: vi.fn().mockResolvedValue([]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockImplementation(() => {
         transport.connectionStatus = TransportStatus.NOT_CONNECTED
 
         return Promise.resolve()
       }),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
 
     await (client as any).storage.delete(StorageKey.ACTIVE_ACCOUNT)
@@ -1338,12 +1324,12 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([peer]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockRejectedValue(new Error('peer offline')),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([peer]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockRejectedValue(new Error('peer offline')),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
     const pendingRequest = new ExposedPromise<unknown, any>()
     const pendingRejection = pendingRequest.promise.catch((error) => error)
@@ -1389,12 +1375,12 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.NOT_CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
 
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
@@ -1422,13 +1408,13 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.WALLETCONNECT,
       connectionStatus: TransportStatus.CONNECTED,
-      getPeers: jest.fn().mockResolvedValue([peer]),
-      removeAllPeers: jest.fn().mockResolvedValue(undefined),
-      send: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      doClientCleanup: jest.fn().mockResolvedValue(undefined),
-      removeListener: jest.fn().mockResolvedValue(undefined),
-      addListener: jest.fn().mockResolvedValue(undefined)
+      getPeers: vi.fn().mockResolvedValue([peer]),
+      removeAllPeers: vi.fn().mockResolvedValue(undefined),
+      send: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      doClientCleanup: vi.fn().mockResolvedValue(undefined),
+      removeListener: vi.fn().mockResolvedValue(undefined),
+      addListener: vi.fn().mockResolvedValue(undefined)
     }
     Object.setPrototypeOf(transport, WalletConnectTransport.prototype)
 
@@ -1474,7 +1460,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('rejects open requests when the wallet peer never answers', async () => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     ;(window as any).beaconCreatedClientInstance = false
     const timeoutClient = new DAppClient({
       name: 'TimeoutApp',
@@ -1483,17 +1469,17 @@ describe('DAppClient — basic unit tests', () => {
       requestTimeoutMs: 10
     })
     timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
-    const channelClosedHandler = jest.fn()
+    const channelClosedHandler = vi.fn()
     timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
     const operationRequest = new ExposedPromise<unknown, unknown>()
-    const rejection = jest.fn()
+    const rejection = vi.fn()
     void operationRequest.promise.catch(rejection)
 
     try {
       ;(timeoutClient as any).addOpenRequest('ghost-request-id', operationRequest)
 
-      jest.advanceTimersByTime(10)
+      vi.advanceTimersByTime(10)
       await Promise.resolve()
 
       expect(rejection).toHaveBeenCalledWith(
@@ -1506,12 +1492,12 @@ describe('DAppClient — basic unit tests', () => {
       expect((timeoutClient as any).openRequests.has('ghost-request-id')).toBe(false)
       expect(channelClosedHandler).toHaveBeenCalledTimes(1)
     } finally {
-      jest.useRealTimers()
+      vi.useRealTimers()
     }
   })
 
   it('clears delegated open requests when another tab receives the wallet response', async () => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     ;(window as any).beaconCreatedClientInstance = false
     const timeoutClient = new DAppClient({
       name: 'TimeoutApp',
@@ -1520,9 +1506,9 @@ describe('DAppClient — basic unit tests', () => {
       requestTimeoutMs: 10
     })
     timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
-    const channelClosedHandler = jest.fn()
+    const channelClosedHandler = vi.fn()
     timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
-    const postMessage = jest.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
+    const postMessage = vi.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
 
     try {
       ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-request-id')
@@ -1556,17 +1542,17 @@ describe('DAppClient — basic unit tests', () => {
       expect((timeoutClient as any).openRequests.has('delegated-request-id')).toBe(false)
       expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(false)
 
-      jest.advanceTimersByTime(10)
+      vi.advanceTimersByTime(10)
       await Promise.resolve()
 
       expect(channelClosedHandler).not.toHaveBeenCalled()
     } finally {
-      jest.useRealTimers()
+      vi.useRealTimers()
     }
   })
 
   it('keeps delegated acknowledged requests open without timing them out', async () => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     ;(window as any).beaconCreatedClientInstance = false
     const timeoutClient = new DAppClient({
       name: 'TimeoutApp',
@@ -1575,12 +1561,12 @@ describe('DAppClient — basic unit tests', () => {
       requestTimeoutMs: 10
     })
     timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
-    const channelClosedHandler = jest.fn()
+    const channelClosedHandler = vi.fn()
     timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
-    const postMessage = jest.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
+    const postMessage = vi.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
 
     const operationRequest = new ExposedPromise<unknown, unknown>()
-    const rejection = jest.fn()
+    const rejection = vi.fn()
     void operationRequest.promise.catch(rejection)
 
     try {
@@ -1600,7 +1586,7 @@ describe('DAppClient — basic unit tests', () => {
         }
       )
 
-      jest.advanceTimersByTime(10)
+      vi.advanceTimersByTime(10)
       await Promise.resolve()
 
       expect(postMessage).toHaveBeenCalledWith(
@@ -1619,7 +1605,7 @@ describe('DAppClient — basic unit tests', () => {
       ).toBe(true)
     } finally {
       ;(timeoutClient as any).clearOpenRequest('delegated-acknowledged-request-id')
-      jest.useRealTimers()
+      vi.useRealTimers()
     }
   })
 
@@ -1633,10 +1619,10 @@ describe('DAppClient — basic unit tests', () => {
     })
     timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
 
-    const postMessage = jest.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
-    jest.spyOn((timeoutClient as any).multiTabChannel, 'isLeader').mockReturnValue(true)
+    const postMessage = vi.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
+    vi.spyOn((timeoutClient as any).multiTabChannel, 'isLeader').mockReturnValue(true)
     ;(timeoutClient as any)._transport = ExposedPromise.resolve({
-      waitForResolution: jest.fn().mockResolvedValue(undefined)
+      waitForResolution: vi.fn().mockResolvedValue(undefined)
     })
 
     const sendFailure: ErrorResponse = {
@@ -1646,7 +1632,7 @@ describe('DAppClient — basic unit tests', () => {
       senderId: '',
       version: '2'
     }
-    jest.spyOn(timeoutClient as any, 'makeRequest').mockRejectedValue(sendFailure)
+    vi.spyOn(timeoutClient as any, 'makeRequest').mockRejectedValue(sendFailure)
 
     await (timeoutClient as any).prepareRequest({
       id: 'delegated-send-failure-id',
@@ -1694,7 +1680,7 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      send: jest.fn().mockRejectedValue(sendError)
+      send: vi.fn().mockRejectedValue(sendError)
     }
     const peer = {
       type: 'p2p-pairing-response',
@@ -1707,13 +1693,13 @@ describe('DAppClient — basic unit tests', () => {
     ;(timeoutClient as any)._activePeer = ExposedPromise.resolve(peer)
     ;(timeoutClient as any)._transport = ExposedPromise.resolve(transport)
 
-    jest.spyOn(timeoutClient as any, 'init').mockResolvedValue(TransportType.P2P)
-    jest.spyOn(timeoutClient as any, 'transport', 'get').mockReturnValue(Promise.resolve(transport))
-    jest.spyOn(timeoutClient as any, 'checkPermissions').mockResolvedValue(true)
-    jest.spyOn(timeoutClient as any, 'addRequestAndCheckIfRateLimited').mockResolvedValue(false)
-    jest.spyOn(timeoutClient as any, 'getActiveAccount').mockResolvedValue(undefined)
-    jest.spyOn(timeoutClient as any, 'getPeer').mockResolvedValue(peer)
-    jest.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
+    vi.spyOn(timeoutClient as any, 'init').mockResolvedValue(TransportType.P2P)
+    vi.spyOn(timeoutClient as any, 'transport', 'get').mockReturnValue(Promise.resolve(transport))
+    vi.spyOn(timeoutClient as any, 'checkPermissions').mockResolvedValue(true)
+    vi.spyOn(timeoutClient as any, 'addRequestAndCheckIfRateLimited').mockResolvedValue(false)
+    vi.spyOn(timeoutClient as any, 'getActiveAccount').mockResolvedValue(undefined)
+    vi.spyOn(timeoutClient as any, 'getPeer').mockResolvedValue(peer)
+    vi.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
 
     await expect(
       (timeoutClient as any).makeRequest({
@@ -1730,8 +1716,8 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('restores an upstream v4.8.0-style P2P persisted session without deactivating it', async () => {
-    const activeAccountHandler = jest.fn()
-    const invalidAccountHandler = jest.fn()
+    const activeAccountHandler = vi.fn()
+    const invalidAccountHandler = vi.fn()
     const storedAccount = createStoredAccount()
     const p2pPeer = createV480P2PPeer()
     const storage = new LocalStorage({
@@ -1740,12 +1726,12 @@ describe('DAppClient — basic unit tests', () => {
       [StorageKey.PERMISSION_LIST]: [createV480Permission()],
       [StorageKey.TRANSPORT_P2P_PEERS_DAPP]: [p2pPeer]
     })
-    const initInternalTransports = jest
+    const initInternalTransports = vi
       .spyOn(DAppClient.prototype as any, 'initInternalTransports')
       .mockImplementation(async function (this: any) {
         this.p2pTransport = {
           connectionStatus: TransportStatus.CONNECTED,
-          getPeers: jest.fn().mockResolvedValue([p2pPeer])
+          getPeers: vi.fn().mockResolvedValue([p2pPeer])
         }
       })
 
@@ -1802,7 +1788,7 @@ describe('DAppClient — basic unit tests', () => {
 
   it('reuses one SDK secret recovery when transport init races after storage was cleared', async () => {
     await (client as any).storage.delete(StorageKey.BEACON_SDK_SECRET_SEED)
-    const initSDK = jest.spyOn(client as any, 'initSDK')
+    const initSDK = vi.spyOn(client as any, 'initSDK')
 
     const [firstSeed, secondSeed] = await Promise.all([
       (client as any).getOrCreateSDKSecretSeed(),
@@ -1828,9 +1814,9 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('emits account deactivated and clears the active pointer when the stored active account is missing', async () => {
-    const invalidAccountHandler = jest.fn()
-    const legacyInvalidAccountHandler = jest.fn()
-    const activeAccountHandler = jest.fn()
+    const invalidAccountHandler = vi.fn()
+    const legacyInvalidAccountHandler = vi.fn()
+    const activeAccountHandler = vi.fn()
     const storedAccount = createStoredAccount()
     const storage = new LocalStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'missing-account-id',
@@ -1871,7 +1857,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('keeps non-active accounts after repairing a missing active account', async () => {
-    const invalidAccountHandler = jest.fn()
+    const invalidAccountHandler = vi.fn()
     const storedAccount = createStoredAccount()
     const secondaryAccount = {
       ...createStoredAccount(),
@@ -1912,8 +1898,8 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('treats a literal undefined active-account sentinel as silent state repair', async () => {
-    const invalidAccountHandler = jest.fn()
-    const activeAccountHandler = jest.fn()
+    const invalidAccountHandler = vi.fn()
+    const activeAccountHandler = vi.fn()
     const storage = new LocalStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'undefined',
       [StorageKey.BEACON_SDK_SECRET_SEED]: 'seed',
@@ -1955,12 +1941,12 @@ describe('DAppClient — basic unit tests', () => {
 
   it('repairs a normalized undefined active-account sentinel when accounts remain in real storage', async () => {
     localStorage.clear()
-    const invalidAccountHandler = jest.fn()
-    const activeAccountHandler = jest.fn()
+    const invalidAccountHandler = vi.fn()
+    const activeAccountHandler = vi.fn()
     const storedAccount = createStoredAccount()
-    const { LocalStorage: RealLocalStorage } = jest.requireActual(
-      '@ecadlabs/beacon-core'
-    ) as typeof import('@ecadlabs/beacon-core')
+    const { LocalStorage: RealLocalStorage } = (await vi.importActual<
+      typeof import('@ecadlabs/beacon-core')
+    >('@ecadlabs/beacon-core')) as typeof import('@ecadlabs/beacon-core')
     const storage = new RealLocalStorage()
 
     await storage.set(StorageKey.ACTIVE_ACCOUNT, 'undefined')
@@ -1995,7 +1981,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('continues a permission request after repairing a missing active account', async () => {
-    const invalidAccountHandler = jest.fn()
+    const invalidAccountHandler = vi.fn()
     const storage = new LocalStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'undefined',
       [StorageKey.BEACON_SDK_SECRET_SEED]: 'seed',
@@ -2036,19 +2022,19 @@ describe('DAppClient — basic unit tests', () => {
         }
       }
     })
-    const hideUI = jest.spyOn(storedStateClient as any, 'hideUI')
-    const makeRequest = jest
+    const hideUI = vi.spyOn(storedStateClient as any, 'hideUI')
+    const makeRequest = vi
       .spyOn(storedStateClient as any, 'makeRequest')
       .mockResolvedValue(permissionResult)
-    jest.spyOn(storedStateClient as any, 'checkMakeRequest').mockResolvedValue(true)
-    jest.spyOn(storedStateClient as any, 'getOwnAppMetadata').mockResolvedValue({
+    vi.spyOn(storedStateClient as any, 'checkMakeRequest').mockResolvedValue(true)
+    vi.spyOn(storedStateClient as any, 'getOwnAppMetadata').mockResolvedValue({
       senderId: 'dapp-sender-id',
       name: 'RepairThenConnectApp'
     })
-    jest.spyOn(storedStateClient as any, 'onNewAccount').mockResolvedValue(accountInfo)
-    jest.spyOn(storedStateClient as any, 'notifySuccess').mockResolvedValue(undefined)
-    jest.spyOn(storedStateClient as any, 'getWalletInfo').mockResolvedValue({})
-    jest.spyOn((storedStateClient as any).accountManager, 'addAccount').mockResolvedValue(undefined)
+    vi.spyOn(storedStateClient as any, 'onNewAccount').mockResolvedValue(accountInfo)
+    vi.spyOn(storedStateClient as any, 'notifySuccess').mockResolvedValue(undefined)
+    vi.spyOn(storedStateClient as any, 'getWalletInfo').mockResolvedValue({})
+    vi.spyOn((storedStateClient as any).accountManager, 'addAccount').mockResolvedValue(undefined)
 
     const restored: unknown = Reflect.get(storedStateClient, 'activeAccountLoaded')
     if (!(restored instanceof Promise)) {
@@ -2072,34 +2058,19 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('deletes active-account storage when the active account is cleared', async () => {
-    const storedAccount = createStoredAccount()
-    const storage = new LocalStorage({
-      [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
-      [StorageKey.ACCOUNTS]: [storedAccount]
-    })
+    const { startupClient, storage, release, startup, account } = await delayedStartup()
+    release.resolve()
+    await startup
+    await expect(startupClient.getActiveAccount()).resolves.toEqual(account)
 
-    ;(window as any).beaconCreatedClientInstance = false
-    const storedStateClient = new DAppClient({
-      name: 'ClearActiveAccountStorageApp',
-      storage,
-      preferredNetwork: NetworkType.MAINNET,
-      disableDefaultEvents: true,
-      eventHandlers: {
-        [BeaconEvent.ACTIVE_ACCOUNT_SET]: {
-          handler: jest.fn()
-        }
-      }
-    })
+    await startupClient.clearActiveAccount()
 
-    await (storedStateClient as any).storageValidated
-    await storedStateClient.clearActiveAccount()
-
-    await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+    await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
     await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
   })
 
   it('emits account deactivated and clears state when stored accounts are malformed', async () => {
-    const invalidAccountHandler = jest.fn()
+    const invalidAccountHandler = vi.fn()
     const storage = new LocalStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'stored-account-id',
       [StorageKey.ACCOUNTS]: {
@@ -2132,7 +2103,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('clears invalid storage without account deactivated event when validation fails with no active account', async () => {
-    const invalidAccountHandler = jest.fn()
+    const invalidAccountHandler = vi.fn()
     const storedAccount = createStoredAccount()
     const storage = new LocalStorage({
       [StorageKey.ACCOUNTS]: [storedAccount]
@@ -2160,7 +2131,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('emits account deactivated once when active-account restore and validation both fail', async () => {
-    const invalidAccountHandler = jest.fn()
+    const invalidAccountHandler = vi.fn()
     const storage = new LocalStorage({
       [StorageKey.ACTIVE_ACCOUNT]: 'missing-account-id',
       [StorageKey.ACCOUNTS]: [createStoredAccount()]
@@ -2192,7 +2163,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('emits account deactivated with storage validation reason when restored storage stays invalid', async () => {
-    const invalidAccountHandler = jest.fn()
+    const invalidAccountHandler = vi.fn()
     const storedAccount = createStoredAccount()
     const storage = new LocalStorage({
       [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
@@ -2201,17 +2172,17 @@ describe('DAppClient — basic unit tests', () => {
     const firstValidation = new ExposedPromise<boolean>()
     ;(storage as any).validateResults = [firstValidation.promise, false]
     const p2pPeer = createV480P2PPeer()
-    const disconnectP2P = jest.fn().mockResolvedValue(undefined)
-    const initInternalTransports = jest
+    const disconnectP2P = vi.fn().mockResolvedValue(undefined)
+    const initInternalTransports = vi
       .spyOn(DAppClient.prototype as any, 'initInternalTransports')
       .mockImplementation(async function (this: any) {
         this.p2pTransport = {
           connectionStatus: TransportStatus.CONNECTED,
-          getPeers: jest.fn().mockResolvedValue([p2pPeer]),
+          getPeers: vi.fn().mockResolvedValue([p2pPeer]),
           disconnect: disconnectP2P
         }
       })
-    const getWalletInfo = jest
+    const getWalletInfo = vi
       .spyOn(DAppClient.prototype as any, 'getWalletInfo')
       .mockResolvedValue({ name: 'Wallet', type: 'web' })
 
@@ -2255,7 +2226,7 @@ describe('DAppClient — basic unit tests', () => {
       preferredNetwork: NetworkType.MAINNET,
       disableDefaultEvents: true
     })
-    const invalidAccountHandler = jest.fn()
+    const invalidAccountHandler = vi.fn()
     await storedStateClient.subscribeToEvent(
       BeaconEvent.INVALID_ACCOUNT_DEACTIVATED,
       invalidAccountHandler
@@ -2281,7 +2252,7 @@ describe('DAppClient — basic unit tests', () => {
     const transport = {
       type: TransportType.P2P,
       connectionStatus: TransportStatus.CONNECTED,
-      send: jest.fn().mockRejectedValue(sendError)
+      send: vi.fn().mockRejectedValue(sendError)
     }
     const peer = {
       type: 'p2p-pairing-response',
@@ -2294,12 +2265,12 @@ describe('DAppClient — basic unit tests', () => {
     ;(timeoutClient as any)._activePeer = ExposedPromise.resolve(peer)
     ;(timeoutClient as any)._transport = ExposedPromise.resolve(transport)
 
-    jest.spyOn(timeoutClient as any, 'init').mockResolvedValue(TransportType.P2P)
-    jest.spyOn(timeoutClient as any, 'transport', 'get').mockReturnValue(Promise.resolve(transport))
-    jest.spyOn(timeoutClient as any, 'addRequestAndCheckIfRateLimited').mockResolvedValue(false)
-    jest.spyOn(timeoutClient as any, 'getActiveAccount').mockResolvedValue(undefined)
-    jest.spyOn(timeoutClient as any, 'getPeer').mockResolvedValue(peer)
-    jest.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
+    vi.spyOn(timeoutClient as any, 'init').mockResolvedValue(TransportType.P2P)
+    vi.spyOn(timeoutClient as any, 'transport', 'get').mockReturnValue(Promise.resolve(transport))
+    vi.spyOn(timeoutClient as any, 'addRequestAndCheckIfRateLimited').mockResolvedValue(false)
+    vi.spyOn(timeoutClient as any, 'getActiveAccount').mockResolvedValue(undefined)
+    vi.spyOn(timeoutClient as any, 'getPeer').mockResolvedValue(peer)
+    vi.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
 
     await expect(
       (timeoutClient as any).makeRequestV3({
@@ -2314,7 +2285,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('clears delegated request markers when the delegated request times out', async () => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     ;(window as any).beaconCreatedClientInstance = false
     const timeoutClient = new DAppClient({
       name: 'TimeoutApp',
@@ -2331,19 +2302,19 @@ describe('DAppClient — basic unit tests', () => {
       ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-request-id')
       ;(timeoutClient as any).addOpenRequest('delegated-request-id', operationRequest)
 
-      jest.advanceTimersByTime(10)
+      vi.advanceTimersByTime(10)
       await Promise.resolve()
 
       expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(false)
     } finally {
-      jest.useRealTimers()
+      vi.useRealTimers()
     }
   })
 
   it.each(['valid', 'unknown', 'closed'])(
     'handles a %s ACK without clearing unrelated request timeouts',
     async (ackKind) => {
-      jest.useFakeTimers()
+      vi.useFakeTimers()
       ;(window as any).beaconCreatedClientInstance = false
       const timeoutClient = new DAppClient({
         name: 'TimeoutApp',
@@ -2352,12 +2323,12 @@ describe('DAppClient — basic unit tests', () => {
         requestTimeoutMs: 10
       })
       timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
-      const channelClosedHandler = jest.fn()
+      const channelClosedHandler = vi.fn()
       timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
-      jest.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
+      vi.spyOn(timeoutClient as any, 'getWalletInfo').mockResolvedValue({})
 
       const operationRequest = new ExposedPromise<unknown, unknown>()
-      const rejection = jest.fn()
+      const rejection = vi.fn()
       void operationRequest.promise.catch(rejection)
 
       try {
@@ -2381,7 +2352,7 @@ describe('DAppClient — basic unit tests', () => {
           }
         )
 
-        jest.advanceTimersByTime(10)
+        vi.advanceTimersByTime(10)
         await Promise.resolve()
 
         if (ackKind === 'valid') {
@@ -2400,13 +2371,13 @@ describe('DAppClient — basic unit tests', () => {
         }
       } finally {
         ;(timeoutClient as any).clearOpenRequest('acknowledged-request-id')
-        jest.useRealTimers()
+        vi.useRealTimers()
       }
     }
   )
 
   it('does not time out the walletconnect session_update marker', async () => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     ;(window as any).beaconCreatedClientInstance = false
     const timeoutClient = new DAppClient({
       name: 'TimeoutApp',
@@ -2415,17 +2386,17 @@ describe('DAppClient — basic unit tests', () => {
       requestTimeoutMs: 10
     })
     timeoutClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
-    const channelClosedHandler = jest.fn()
+    const channelClosedHandler = vi.fn()
     timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
     const sessionUpdate = new ExposedPromise<unknown, unknown>()
-    const rejection = jest.fn()
+    const rejection = vi.fn()
     void sessionUpdate.promise.catch(rejection)
 
     try {
       ;(timeoutClient as any).addOpenRequest('session_update', sessionUpdate)
 
-      jest.advanceTimersByTime(10)
+      vi.advanceTimersByTime(10)
       await Promise.resolve()
 
       expect(rejection).not.toHaveBeenCalled()
@@ -2433,7 +2404,7 @@ describe('DAppClient — basic unit tests', () => {
       expect((timeoutClient as any).openRequests.has('session_update')).toBe(true)
     } finally {
       ;(timeoutClient as any).clearOpenRequest('session_update')
-      jest.useRealTimers()
+      vi.useRealTimers()
     }
   })
   const delayedStartup = async () => {
@@ -2450,21 +2421,21 @@ describe('DAppClient — basic unit tests', () => {
       storage,
       {}
     )
-    jest.spyOn(transport, 'connect').mockImplementation(async () => {
+    vi.spyOn(transport, 'connect').mockImplementation(async () => {
       entered.resolve()
       await release.promise
     })
-    jest
-      .spyOn(transport, 'getPeers')
-      .mockResolvedValue([{ ...createV480P2PPeer(), type: 'p2p-pairing-response' }])
-    jest.spyOn(transport, 'removeAllPeers').mockResolvedValue(undefined)
-    jest.spyOn(transport, 'disconnect').mockResolvedValue(undefined)
-    jest.spyOn(transport, 'removePeer').mockResolvedValue(undefined)
+    vi.spyOn(transport, 'getPeers').mockResolvedValue([
+      { ...createV480P2PPeer(), type: 'p2p-pairing-response' }
+    ])
+    vi.spyOn(transport, 'removeAllPeers').mockResolvedValue(undefined)
+    vi.spyOn(transport, 'disconnect').mockResolvedValue(undefined)
+    vi.spyOn(transport, 'removePeer').mockResolvedValue(undefined)
     let incoming: Parameters<DappP2PTransport['addListener']>[0] | undefined
-    jest.spyOn(transport, 'addListener').mockImplementation(async (listener) => {
+    vi.spyOn(transport, 'addListener').mockImplementation(async (listener) => {
       incoming = listener
     })
-    const selected = jest.fn()
+    const selected = vi.fn()
     class StartupClient extends DAppClient {
       public async initInternalTransports(): Promise<void> {
         this.p2pTransport = transport
@@ -2494,7 +2465,7 @@ describe('DAppClient — basic unit tests', () => {
         throw new Error('Expected the public transport message subscription')
       }
       const { Serializer } =
-        jest.requireActual<typeof import('@ecadlabs/beacon-core')>('@ecadlabs/beacon-core')
+        await vi.importActual<typeof import('@ecadlabs/beacon-core')>('@ecadlabs/beacon-core')
       await incoming(
         await new Serializer().serialize({
           id: 'peer-disconnect',
@@ -2520,7 +2491,7 @@ describe('DAppClient — basic unit tests', () => {
   const holdNextConnection = (transport: DappP2PTransport) => {
     const entered = new ExposedPromise<void>()
     const prepared = new ExposedPromise<void>()
-    jest.spyOn(transport, 'connect').mockImplementationOnce(async () => {
+    vi.spyOn(transport, 'connect').mockImplementationOnce(async () => {
       entered.resolve()
       await prepared.promise
     })
@@ -2607,7 +2578,7 @@ describe('DAppClient — basic unit tests', () => {
       const deleting = new ExposedPromise<void>()
       const deleted = new ExposedPromise<void>()
       const set = storage.set.bind(storage)
-      jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+      vi.spyOn(storage, 'set').mockImplementation(async (key, value) => {
         if (key === StorageKey.ACCOUNTS) {
           deleting.resolve()
           await deleted.promise
@@ -2681,7 +2652,7 @@ describe('DAppClient — basic unit tests', () => {
       const lookupFinished = new ExposedPromise<void>()
       const get = storage.get.bind(storage)
       let holdPointer = true
-      jest.spyOn(storage, 'get').mockImplementation(async (key) => {
+      vi.spyOn(storage, 'get').mockImplementation(async (key) => {
         const value = await get(key)
         if (key === StorageKey.ACTIVE_ACCOUNT && holdPointer) {
           holdPointer = false
@@ -2746,7 +2717,7 @@ describe('DAppClient — basic unit tests', () => {
       const entered = new ExposedPromise<void>()
       const removed = new ExposedPromise<void>()
       const set = storage.set.bind(storage)
-      jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+      vi.spyOn(storage, 'set').mockImplementation(async (key, value) => {
         if (key === StorageKey.ACCOUNTS) {
           entered.resolve()
           await removed.promise
@@ -2787,7 +2758,7 @@ describe('DAppClient — basic unit tests', () => {
 
   it('settles an existing account read when account-list recovery repairs pending startup', async () => {
     const { startupClient, storage, release } = await delayedStartup()
-    const settled = jest.fn()
+    const settled = vi.fn()
     const read = startupClient.getActiveAccount().then(settled)
     try {
       await storage.set(StorageKey.ACCOUNTS, [])
@@ -2833,7 +2804,7 @@ describe('DAppClient — basic unit tests', () => {
       }
     })
     await entered.promise
-    const settled = jest.fn()
+    const settled = vi.fn()
     const read = resettingClient.getActiveAccount().then(settled)
     lookup.reject(new Error('Storage read failed'))
     await reset.promise
@@ -2858,7 +2829,7 @@ describe('DAppClient — basic unit tests', () => {
 
   it('restores a valid account without rewriting the shared account pointer', async () => {
     const { startupClient, storage, selected, release, startup, account } = await delayedStartup()
-    const write = jest.spyOn(storage, 'set')
+    const write = vi.spyOn(storage, 'set')
     release.resolve()
     await expect(startup).resolves.toEqual(account)
     await expect(startupClient.getActiveAccount()).resolves.toEqual(account)
@@ -2901,7 +2872,7 @@ describe('DAppClient — basic unit tests', () => {
       } else {
         await storage.set(StorageKey.ACCOUNTS, [])
       }
-      const write = jest.spyOn(storage, 'set')
+      const write = vi.spyOn(storage, 'set')
       release.resolve()
       await expect(startup).resolves.toBeUndefined()
       await expect(startupClient.getActiveAccount()).resolves.toBeUndefined()
@@ -2935,7 +2906,7 @@ describe('DAppClient — basic unit tests', () => {
   it('does not publish startup state after destroy', async () => {
     const { startupClient, storage, release, startup, selected } = await delayedStartup()
     await startupClient.destroy()
-    const write = jest.spyOn(storage, 'set')
+    const write = vi.spyOn(storage, 'set')
     selected.mockClear()
     release.resolve()
     await expect(startup).resolves.toBeUndefined()
@@ -2966,7 +2937,7 @@ describe('DAppClient — basic unit tests', () => {
     const entered = new ExposedPromise<void>()
     const commit = new ExposedPromise<void>()
     const write = storage.set.bind(storage)
-    jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+    vi.spyOn(storage, 'set').mockImplementation(async (key, value) => {
       if (key === StorageKey.ACTIVE_ACCOUNT) {
         entered.resolve()
         await commit.promise
@@ -3036,7 +3007,7 @@ describe('DAppClient — basic unit tests', () => {
     const { startupClient, release, startup, transport } = await delayedStartup()
     await startupClient.disconnect({ notifyPeers: false })
     await expect(startupClient.init(transport)).resolves.toBe(TransportType.P2P)
-    const disconnect = jest.spyOn(transport, 'disconnect')
+    const disconnect = vi.spyOn(transport, 'disconnect')
     disconnect.mockClear()
     release.resolve()
     await startup
@@ -3076,7 +3047,7 @@ describe('DAppClient — basic unit tests', () => {
     selected.mockClear()
     const failure = new Error('account write failed')
     const write = storage.set.bind(storage)
-    jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+    vi.spyOn(storage, 'set').mockImplementation(async (key, value) => {
       if (key === StorageKey.ACTIVE_ACCOUNT) {
         throw failure
       }
@@ -3092,7 +3063,7 @@ describe('DAppClient — basic unit tests', () => {
   it('settles empty account state when the first explicit selection fails', async () => {
     const { startupClient, release, startup, account, transport } = await delayedStartup()
     const failure = new Error('connection failed')
-    jest.spyOn(transport, 'connect').mockRejectedValueOnce(failure)
+    vi.spyOn(transport, 'connect').mockRejectedValueOnce(failure)
     await expect(
       startupClient.setActiveAccount({ ...account, accountIdentifier: 'newer-account' })
     ).rejects.toBe(failure)
@@ -3126,7 +3097,7 @@ describe('DAppClient — basic unit tests', () => {
     const entered = new ExposedPromise<void>()
     const commit = new ExposedPromise<void>()
     const write = storage.set.bind(storage)
-    jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+    vi.spyOn(storage, 'set').mockImplementation(async (key, value) => {
       if (key === StorageKey.ACTIVE_ACCOUNT) {
         entered.resolve()
         await commit.promise
@@ -3141,9 +3112,9 @@ describe('DAppClient — basic unit tests', () => {
     ).resolves.toBe('pending')
     commit.resolve()
     await Promise.all([selection, destroy])
-    const writeCount = jest.mocked(storage.set).mock.calls.length
+    const writeCount = vi.mocked(storage.set).mock.calls.length
     await startup
-    expect(jest.mocked(storage.set).mock.calls).toHaveLength(writeCount)
+    expect(vi.mocked(storage.set).mock.calls).toHaveLength(writeCount)
   })
 
   it('keeps a pending stored selection when an unrelated account is removed', async () => {
@@ -3163,7 +3134,7 @@ describe('DAppClient — basic unit tests', () => {
     await storage.set(StorageKey.ACCOUNTS, [account, remote])
     await storage.set(StorageKey.ACTIVE_ACCOUNT, remote.accountIdentifier)
     const failure = new Error('remote transport failed')
-    jest.spyOn(transport, 'connect').mockRejectedValueOnce(failure)
+    vi.spyOn(transport, 'connect').mockRejectedValueOnce(failure)
     await storageChangedCallback?.({
       eventType: 'entryModified',
       key: StorageKey.ACTIVE_ACCOUNT,
@@ -3181,7 +3152,7 @@ describe('DAppClient — basic unit tests', () => {
     await startupClient.disconnect({ notifyPeers: false })
     const registered = new ExposedPromise<void>()
     const finishRegistration = new ExposedPromise<void>()
-    jest.spyOn(transport, 'addListener').mockImplementation(async () => {
+    vi.spyOn(transport, 'addListener').mockImplementation(async () => {
       registered.resolve()
       await finishRegistration.promise
     })
@@ -3217,7 +3188,7 @@ describe('DAppClient — basic unit tests', () => {
         public close(): void {}
       }
     })
-    const extensions = jest
+    const extensions = vi
       .spyOn(PostMessageTransport, 'getAvailableExtensions')
       .mockResolvedValue([])
     try {
@@ -3233,20 +3204,20 @@ describe('DAppClient — basic unit tests', () => {
         async () => true
       )
       for (const transport of [post, p2p, wc]) {
-        jest.spyOn(transport, 'connect').mockResolvedValue(undefined)
-        jest.spyOn(transport, 'disconnect').mockResolvedValue(undefined)
-        jest.spyOn(transport, 'getPeers').mockResolvedValue([])
-        jest.spyOn(transport, 'removeAllPeers').mockResolvedValue(undefined)
-        jest.spyOn(transport, 'stopListeningForNewPeers').mockResolvedValue(undefined)
+        vi.spyOn(transport, 'connect').mockResolvedValue(undefined)
+        vi.spyOn(transport, 'disconnect').mockResolvedValue(undefined)
+        vi.spyOn(transport, 'getPeers').mockResolvedValue([])
+        vi.spyOn(transport, 'removeAllPeers').mockResolvedValue(undefined)
+        vi.spyOn(transport, 'stopListeningForNewPeers').mockResolvedValue(undefined)
       }
-      jest.spyOn(post, 'getPairingRequestInfo').mockResolvedValue({
+      vi.spyOn(post, 'getPairingRequestInfo').mockResolvedValue({
         id: 'post',
         type: 'postmessage-pairing-request',
         name: 'Old pairing',
         publicKey: 'post-key',
         version: '4'
       })
-      jest.spyOn(p2p, 'getPairingRequestInfo').mockResolvedValue({
+      vi.spyOn(p2p, 'getPairingRequestInfo').mockResolvedValue({
         id: 'p2p',
         type: 'p2p-pairing-request',
         name: 'Old pairing',
@@ -3256,7 +3227,7 @@ describe('DAppClient — basic unit tests', () => {
       })
       let retained: Parameters<DappPostMessageTransport['listenForNewPeer']>[0] | undefined
       const registered = new ExposedPromise<void>()
-      jest.spyOn(post, 'listenForNewPeer').mockImplementation(async (callback) => {
+      vi.spyOn(post, 'listenForNewPeer').mockImplementation(async (callback) => {
         retained = callback
         registered.resolve()
       })
@@ -3277,7 +3248,7 @@ describe('DAppClient — basic unit tests', () => {
         disableDefaultEvents: true
       })
       await pairingClient.getActiveAccount()
-      const paired = jest.fn()
+      const paired = vi.fn()
       await pairingClient.subscribeToEvent(BeaconEvent.PAIR_SUCCESS, paired)
       const oldInit = expect(pairingClient.init()).rejects.toMatchObject({
         errorType: BeaconErrorType.ABORTED_ERROR
@@ -3288,7 +3259,7 @@ describe('DAppClient — basic unit tests', () => {
       const fresh = new DappP2PTransport('New init', keys, storage, {})
       await pairingClient.init(fresh)
       for (const transport of [post, p2p, wc]) {
-        jest.mocked(transport.stopListeningForNewPeers).mockClear()
+        vi.mocked(transport.stopListeningForNewPeers).mockClear()
       }
       if (!retained) {
         throw new Error('Missing retained pairing callback')
@@ -3307,12 +3278,12 @@ describe('DAppClient — basic unit tests', () => {
       for (const transport of [post, p2p, wc]) {
         expect(transport.stopListeningForNewPeers).not.toHaveBeenCalled()
       }
-      jest.spyOn(wc, 'forceUpdate').mockReturnValue(undefined)
+      vi.spyOn(wc, 'forceUpdate').mockReturnValue(undefined)
       const walletConnectAccount = createStoredAccount()
       walletConnectAccount.origin.type = Origin.WALLETCONNECT
       await pairingClient.setActiveAccount(walletConnectAccount)
       for (const transport of [post, p2p, wc]) {
-        jest.mocked(transport.disconnect).mockClear()
+        vi.mocked(transport.disconnect).mockClear()
       }
       await pairingClient.clearActiveAccount()
       for (const transport of [post, p2p, wc]) {
@@ -3388,7 +3359,7 @@ describe('DAppClient — basic unit tests', () => {
     await startup
     selected.mockClear()
     const failure = new Error('new selection failed')
-    jest.spyOn(transport, 'connect').mockRejectedValueOnce(failure)
+    vi.spyOn(transport, 'connect').mockRejectedValueOnce(failure)
     let attempted = false
     let selection: Promise<void> | undefined
     let rejected: unknown
@@ -3439,7 +3410,7 @@ describe('DAppClient — basic unit tests', () => {
     const { startupClient, release, startup, account } = await delayedStartup()
     const read = startupClient.getActiveAccount()
     const failure = new Error('account lookup failed')
-    jest.spyOn(startupClient, 'getAccount').mockRejectedValueOnce(failure)
+    vi.spyOn(startupClient, 'getAccount').mockRejectedValueOnce(failure)
     await storageChangedCallback?.({
       eventType: 'entryModified',
       key: StorageKey.ACTIVE_ACCOUNT,

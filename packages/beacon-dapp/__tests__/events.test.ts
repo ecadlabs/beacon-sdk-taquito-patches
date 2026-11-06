@@ -1,18 +1,18 @@
 import { openAlert } from '@ecadlabs/beacon-ui'
 import { BeaconEvent, defaultEventCallbacks } from '../src/events'
 
-jest.mock('@ecadlabs/beacon-ui', () => ({
-  closeAlert: jest.fn(),
-  closeToast: jest.fn(),
-  isMobile: jest.fn().mockReturnValue(false),
-  isMobileOS: jest.fn().mockReturnValue(false),
-  openAlert: jest.fn(),
-  openToast: jest.fn()
+vi.mock('@ecadlabs/beacon-ui', () => ({
+  closeAlert: vi.fn(),
+  closeToast: vi.fn(),
+  isMobile: vi.fn().mockReturnValue(false),
+  isMobileOS: vi.fn().mockReturnValue(false),
+  openAlert: vi.fn(),
+  openToast: vi.fn()
 }))
 
 describe('default event callbacks', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   it('shows a usable generic error without a retired reporting action', async () => {

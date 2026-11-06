@@ -2,13 +2,13 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import InfoAlert from '../../../src/ui/alert/components/info-alert'
 import { ConfigurableAlertProps } from '../../../src/ui/common'
 
-jest.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({
+vi.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({
   __esModule: true,
   default: () => false
 }))
 
 describe('InfoAlert Component', () => {
-  const onCloseMock = jest.fn()
+  const onCloseMock = vi.fn()
 
   const defaultProps: ConfigurableAlertProps = {
     title: 'Test Title',
@@ -20,7 +20,7 @@ describe('InfoAlert Component', () => {
   }
 
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   test('renders with provided title, body, and data', () => {

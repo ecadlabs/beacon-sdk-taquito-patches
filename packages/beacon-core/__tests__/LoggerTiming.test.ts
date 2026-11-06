@@ -1,4 +1,4 @@
-/** @jest-environment node */
+/** @vitest-environment node */
 
 import { Console } from 'node:console'
 import { Writable } from 'node:stream'
@@ -27,11 +27,11 @@ describe('logger timing', () => {
       }
     })
     const nativeConsole = new Console({ stdout: stream, stderr: stream })
-    jest.spyOn(console, 'time').mockImplementation(nativeConsole.time.bind(nativeConsole))
-    jest.spyOn(console, 'timeLog').mockImplementation(nativeConsole.timeLog.bind(nativeConsole))
-    jest.spyOn(console, 'timeEnd').mockImplementation(nativeConsole.timeEnd.bind(nativeConsole))
-    jest.spyOn(console, 'group').mockImplementation(() => undefined)
-    jest.spyOn(console, 'groupEnd').mockImplementation(() => undefined)
+    vi.spyOn(console, 'time').mockImplementation(nativeConsole.time.bind(nativeConsole))
+    vi.spyOn(console, 'timeLog').mockImplementation(nativeConsole.timeLog.bind(nativeConsole))
+    vi.spyOn(console, 'timeEnd').mockImplementation(nativeConsole.timeEnd.bind(nativeConsole))
+    vi.spyOn(console, 'group').mockImplementation(() => undefined)
+    vi.spyOn(console, 'groupEnd').mockImplementation(() => undefined)
     setLogger(new InternalLogger())
     setDebugEnabled(true)
   })
@@ -40,7 +40,7 @@ describe('logger timing', () => {
     stream.end()
     setLogger(new InternalLogger())
     setDebugEnabled(originalDebug)
-    jest.restoreAllMocks()
+    vi.restoreAllMocks()
   })
 
   it('logs a checkpoint for the named native timer and keeps its payload', () => {

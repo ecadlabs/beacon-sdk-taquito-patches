@@ -9,18 +9,18 @@ import {
 import { ExtensionMessageTarget } from '@ecadlabs/beacon-types'
 import { PostMessageClient } from '../src/PostMessageClient'
 
-jest.mock('@ecadlabs/beacon-core', () => ({
-  ...jest.requireActual('@ecadlabs/beacon-core'),
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
   windowRef: {
-    addEventListener: jest.fn(),
+    addEventListener: vi.fn(),
     location: { origin: 'https://dapp.example' }
   },
-  getSenderId: jest.fn().mockResolvedValue('beacon-sender-id')
+  getSenderId: vi.fn().mockResolvedValue('beacon-sender-id')
 }))
 
-jest.mock('@ecadlabs/beacon-utils', () => ({
-  ...jest.requireActual('@ecadlabs/beacon-utils'),
-  openCryptobox: jest.fn()
+vi.mock('@ecadlabs/beacon-utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@ecadlabs/beacon-utils')>()),
+  openCryptobox: vi.fn()
 }))
 
 const keyPair: KeyPair = {
@@ -46,7 +46,7 @@ const openingEvent = () => ({
 })
 
 const dispatchMessage = async (): Promise<void> => {
-  const listeners = jest
+  const listeners = vi
     .mocked(windowRef.addEventListener)
     .mock.calls.filter(([type]) => type === 'message')
     .map(([, listener]) => listener)
@@ -57,19 +57,19 @@ const dispatchMessage = async (): Promise<void> => {
 
 describe('PostMessageClient pairing callback failures', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
-    jest.mocked(openCryptobox).mockResolvedValue(JSON.stringify(pairingResponse))
+    vi.clearAllMocks()
+    vi.mocked(openCryptobox).mockResolvedValue(JSON.stringify(pairingResponse))
   })
 
-  afterEach(() => jest.restoreAllMocks())
+  afterEach(() => vi.restoreAllMocks())
 
   it.each(['throw', 'reject'])(
     'logs a callback that fails by %s and handles the next message',
     async (mode) => {
       const client = new PostMessageClient('Dapp', keyPair)
       const error = new Error('Cannot save pairing peer')
-      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
-      const callback = jest.fn()
+      const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+      const callback = vi.fn()
       if (mode === 'throw') {
         callback.mockImplementationOnce(() => {
           throw error
@@ -97,8 +97,8 @@ describe('PostMessageClient pairing callback failures', () => {
     const entered = new ExposedPromise<void>()
     const completion = new ExposedPromise<void>()
     const error = new Error('Cannot finish saving pairing peer')
-    const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
-    const callback = jest.fn(async () => {
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+    const callback = vi.fn(async () => {
       entered.resolve()
       await completion.promise
       throw error
@@ -118,12 +118,12 @@ describe('PostMessageClient pairing callback failures', () => {
     'ignores %s without calling or blaming the callback',
     async (mode) => {
       const client = new PostMessageClient('Dapp', keyPair)
-      const callback = jest.fn()
-      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+      const callback = vi.fn()
+      const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
       if (mode === 'cryptobox rejection') {
-        jest.mocked(openCryptobox).mockRejectedValueOnce(new Error('Other recipient'))
+        vi.mocked(openCryptobox).mockRejectedValueOnce(new Error('Other recipient'))
       } else {
-        jest.mocked(openCryptobox).mockResolvedValueOnce('invalid JSON')
+        vi.mocked(openCryptobox).mockResolvedValueOnce('invalid JSON')
       }
       await client.listenForChannelOpening(callback)
 

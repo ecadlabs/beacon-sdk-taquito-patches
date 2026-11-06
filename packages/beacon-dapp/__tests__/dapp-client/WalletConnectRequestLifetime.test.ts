@@ -1,3 +1,4 @@
+import type { MockInstance } from 'vitest'
 import { LocalStorage, Serializer } from '@ecadlabs/beacon-core'
 import {
   AccountInfo,
@@ -28,24 +29,33 @@ import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { BeaconEvent } from '../../src/events'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
 
-jest.mock('@ecadlabs/beacon-transport-walletconnect', () =>
-  jest.requireActual('../../../beacon-transport-walletconnect/src')
+vi.mock(
+  '@ecadlabs/beacon-transport-walletconnect',
+  async () =>
+    await vi.importActual<typeof import('../../../beacon-transport-walletconnect/src')>(
+      '../../../beacon-transport-walletconnect/src'
+    )
 )
-jest.mock('@walletconnect/sign-client', () => ({ init: async () => mockRemote }))
-jest.mock('@walletconnect/utils', () => ({
+vi.mock('@walletconnect/sign-client', () => ({ default: { init: async () => mockRemote } }))
+vi.mock('@walletconnect/utils', () => ({
   getSdkError: () => ({ code: 6000, message: 'Disconnected' })
 }))
-// Babel does not inline const enums from built dependencies. Load the source enum.
-jest.mock('@ecadlabs/beacon-core', () => ({
-  ...jest.requireActual('@ecadlabs/beacon-core'),
-  ...jest.requireActual('../../../beacon-core/src/transports/clients/ClientEvents')
+// Load source modules so Vitest can intercept their imports.
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
+  ...(await vi.importActual<
+    typeof import('../../../beacon-core/src/transports/clients/ClientEvents')
+  >('../../../beacon-core/src/transports/clients/ClientEvents')),
+  ...(await vi.importActual<typeof import('../../../beacon-core/src/utils/multi-tab-channel')>(
+    '../../../beacon-core/src/utils/multi-tab-channel'
+  ))
 }))
-jest.mock('@ecadlabs/beacon-ui', () => ({
-  ...jest.requireActual('@ecadlabs/beacon-ui'),
+vi.mock('@ecadlabs/beacon-ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@ecadlabs/beacon-ui')>()),
   isMobileOS: () => false,
   isDesktop: () => true
 }))
-jest.mock('broadcast-channel', () => ({
+vi.mock('broadcast-channel', () => ({
   BroadcastChannel: class {
     postMessage() {}
     close() {}
@@ -60,16 +70,17 @@ jest.mock('broadcast-channel', () => ({
 }))
 
 // These tests use public DAppClient requests and disconnect, real transport routing
-// and real timers under Jest's clock. No open-request map or timeout is injected.
+// and real timers under Vitest's clock. No open-request map or timeout is injected.
 describe('WalletConnect public request lifetime (#102)', () => {
   installLocalChannel()
   let dapp: DAppClient
   let delivered: unknown[]
   let adapter: WalletConnectCommunicationClient
   const serializer = new Serializer()
-  let sent: jest.SpyInstance<
-    ReturnType<DappWalletConnectTransport['send']>,
-    Parameters<DappWalletConnectTransport['send']>
+  let sent: MockInstance<
+    (
+      ...args: Parameters<DappWalletConnectTransport['send']>
+    ) => ReturnType<DappWalletConnectTransport['send']>
   >
   const selected: AccountInfo = {
     accountIdentifier: 'test-account',
@@ -82,27 +93,28 @@ describe('WalletConnect public request lifetime (#102)', () => {
     walletType: 'implicit'
   }
   beforeEach(() => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     localStorage.clear()
     resetWire()
     delivered = []
-    sent = jest.spyOn(DappWalletConnectTransport.prototype, 'send')
+    sent = vi.spyOn(DappWalletConnectTransport.prototype, 'send')
     // Matrix is never connected in this fixture; its legacy unsubscribe waits
     // for an unstarted network client. WalletConnect teardown remains real.
-    jest
-      .spyOn(P2PCommunicationClient.prototype, 'unsubscribeFromEncryptedMessages')
-      .mockResolvedValue(undefined)
+    vi.spyOn(
+      P2PCommunicationClient.prototype,
+      'unsubscribeFromEncryptedMessages'
+    ).mockResolvedValue(undefined)
     adapter = new WalletConnectCommunicationClient(
       { network: NetworkType.MAINNET, opts: { projectId: 'offline' } },
       async () => true
     )
-    jest.spyOn(WalletConnectCommunicationClient, 'getInstance').mockReturnValue(adapter)
+    vi.spyOn(WalletConnectCommunicationClient, 'getInstance').mockReturnValue(adapter)
   })
   afterEach(async () => {
     await dapp?.destroy()
-    jest.restoreAllMocks()
-    jest.clearAllTimers()
-    jest.useRealTimers()
+    vi.restoreAllMocks()
+    vi.clearAllTimers()
+    vi.useRealTimers()
   })
   async function start(requestTimeoutMs: number) {
     dapp = new DAppClient({
@@ -127,7 +139,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
   }
   async function sign(payload: string) {
     const previousRequests = mockRequests.length
-    const settled = jest.fn()
+    const settled = vi.fn()
     const outcome = dapp.requestSignPayload({ payload, signingType: SigningType.RAW }).then(
       (value) => {
         settled({ value })
@@ -166,10 +178,10 @@ describe('WalletConnect public request lifetime (#102)', () => {
   it('legacy ACKs cannot turn a bounded public request into an indefinite wait', async () => {
     await start(1000)
     const request = await sign('aa')
-    await jest.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(500)
     await acknowledge()
     await acknowledge()
-    await jest.advanceTimersByTimeAsync(501)
+    await vi.advanceTimersByTimeAsync(501)
     expect(request.settled).toHaveBeenCalledTimes(1)
     expect(await request.outcome).toEqual({
       error: expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
@@ -179,7 +191,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
   it('a configured longer deadline allows an approval beyond the default minute without ACKs', async () => {
     await start(120_000)
     const request = await sign('aa')
-    await jest.advanceTimersByTimeAsync(90_000)
+    await vi.advanceTimersByTimeAsync(90_000)
     expect(request.settled).not.toHaveBeenCalled()
     mockRequests[0].reply.resolve({ signature: 'slow-signature' })
     await flush()
@@ -190,7 +202,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
         type: BeaconMessageType.SignPayloadResponse
       })
     })
-    await jest.advanceTimersByTimeAsync(40_000)
+    await vi.advanceTimersByTimeAsync(40_000)
     expect(request.settled).toHaveBeenCalledTimes(1)
   })
 
@@ -199,7 +211,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
     async (late) => {
       await start(1000)
       const old = await sign('aa')
-      await jest.advanceTimersByTimeAsync(1001)
+      await vi.advanceTimersByTimeAsync(1001)
       expect(old.settled).toHaveBeenCalledTimes(1)
       expect(await old.outcome).toEqual({
         error: expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
@@ -230,11 +242,11 @@ describe('WalletConnect public request lifetime (#102)', () => {
   it('a late legacy ACK for an expired request cannot disable the successor deadline', async () => {
     await start(1000)
     const old = await sign('aa')
-    await jest.advanceTimersByTimeAsync(1001)
+    await vi.advanceTimersByTimeAsync(1001)
     expect(old.settled).toHaveBeenCalledTimes(1)
     const next = await sign('bb')
     await acknowledge()
-    await jest.advanceTimersByTimeAsync(1001)
+    await vi.advanceTimersByTimeAsync(1001)
     expect(next.settled).toHaveBeenCalledTimes(1)
     expect(await next.outcome).toEqual({
       error: expect.objectContaining({ id: next.id, errorType: BeaconErrorType.PEER_UNREACHABLE })
@@ -244,7 +256,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
   it('a successor can complete while an expired wallet request is still pending', async () => {
     await start(1000)
     const old = await sign('aa')
-    await jest.advanceTimersByTimeAsync(1001)
+    await vi.advanceTimersByTimeAsync(1001)
     expect(old.settled).toHaveBeenCalledTimes(1)
     const next = await sign('bb')
     mockRequests[1].reply.resolve({ signature: 'new-signature' })
@@ -292,7 +304,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
   it('permission renewal aborts an older public request even with timeout disabled', async () => {
     await start(0)
     const old = await sign('aa')
-    const renewed = jest.fn()
+    const renewed = vi.fn()
     const renewal = dapp.requestPermissions().then(
       (value) => {
         renewed({ value })
@@ -329,12 +341,12 @@ describe('WalletConnect public request lifetime (#102)', () => {
     await start(0)
     const sendMessage = adapter.sendMessage
     let closing: Promise<void> | undefined
-    jest.spyOn(adapter, 'sendMessage').mockImplementationOnce((encoded) => {
+    vi.spyOn(adapter, 'sendMessage').mockImplementationOnce((encoded) => {
       const sending = sendMessage.call(adapter, encoded)
       closing = adapter.closeSignClient()
       return sending
     })
-    const settled = jest.fn()
+    const settled = vi.fn()
     const outcome = dapp.requestSignPayload({ payload: 'aa', signingType: SigningType.RAW }).then(
       (value) => {
         settled({ value })
@@ -356,7 +368,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
 
   it('public renewal timeout discards a late approval and preserves the active session', async () => {
     await start(1000)
-    const settled = jest.fn()
+    const settled = vi.fn()
     const outcome = dapp.requestPermissions().then(
       (value) => {
         settled({ value })
@@ -370,7 +382,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
     await flush()
     expect(mockApprovals).toHaveLength(1)
     await acknowledge()
-    await jest.advanceTimersByTimeAsync(1001)
+    await vi.advanceTimersByTimeAsync(1001)
     expect(settled).toHaveBeenCalledTimes(1)
     expect(await outcome).toEqual({
       error: expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })

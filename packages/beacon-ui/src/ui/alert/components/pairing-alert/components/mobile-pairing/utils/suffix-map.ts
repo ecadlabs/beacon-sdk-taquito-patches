@@ -1,6 +1,3 @@
-const suffixMap = new Map<string, string>([
-  ['kukai_ios', 'Mobile'],
-  ['acurast_ios', 'Lite']
-])
+const suffixMap = new Map<string, string>([['kukai_ios', 'Mobile']])
 
 export default suffixMap

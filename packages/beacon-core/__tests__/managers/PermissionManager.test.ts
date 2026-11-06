@@ -217,7 +217,7 @@ describe('PermissionManager', () => {
   describe('hasPermission', () => {
     it('delegates to PermissionValidator.hasPermission and returns its result', async () => {
       const dummyMessage = { type: 'DUMMY' } as unknown as BeaconMessage
-      const spy = jest.spyOn(PermissionValidator, 'hasPermission').mockResolvedValue(true)
+      const spy = vi.spyOn(PermissionValidator, 'hasPermission').mockResolvedValue(true)
 
       await expect(manager.hasPermission(dummyMessage)).resolves.toBe(true)
       expect(spy).toHaveBeenCalledWith(dummyMessage, expect.any(Function), expect.any(Function))
@@ -228,7 +228,7 @@ describe('PermissionManager', () => {
     it('propagates errors from PermissionValidator', async () => {
       const dummyMessage = { type: 'BAD' } as unknown as BeaconMessage
       const error = new Error('not handled')
-      jest.spyOn(PermissionValidator, 'hasPermission').mockRejectedValue(error)
+      vi.spyOn(PermissionValidator, 'hasPermission').mockRejectedValue(error)
       await expect(manager.hasPermission(dummyMessage)).rejects.toThrow('not handled')
     })
   })

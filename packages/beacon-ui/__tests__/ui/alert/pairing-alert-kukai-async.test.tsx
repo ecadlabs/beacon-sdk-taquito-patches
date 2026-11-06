@@ -1,43 +1,43 @@
+import type { Mock } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NetworkType } from '@ecadlabs/beacon-types'
 import PairingAlert from '../../../src/ui/alert/components/pairing-alert'
 import { ConfigurableAlertProps } from '../../../src/ui/common'
 import useWallets from '../../../src/ui/alert/hooks/useWallets'
 
-jest.mock('../../../src/ui/alert/hooks/useWallets', () => ({
+vi.mock('../../../src/ui/alert/hooks/useWallets', () => ({
   __esModule: true,
-  default: jest.fn()
+  default: vi.fn()
 }))
 
-jest.mock('../../../src/ui/alert/hooks/useSubstrateWallets', () => ({
+vi.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({
   __esModule: true,
-  default: jest.fn(() => new Map())
+  default: vi.fn(() => false)
 }))
 
-jest.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({
-  __esModule: true,
-  default: jest.fn(() => false)
+vi.mock('../../../src/utils/platform', () => ({
+  isTwBrowser: vi.fn(() => false),
+  isAndroid: vi.fn(() => false),
+  isMobileOS: vi.fn(() => false),
+  isIOS: vi.fn(() => false)
 }))
 
-jest.mock('../../../src/utils/platform', () => ({
-  isTwBrowser: jest.fn(() => false),
-  isAndroid: jest.fn(() => false),
-  isMobileOS: jest.fn(() => false),
-  isIOS: jest.fn(() => false)
+vi.mock('../../../src/components/alert', () => ({
+  default: (props: any) => (
+    <div data-testid="alert" data-loading={props.loading ? 'true' : 'false'}>
+      {props.children}
+      {props.extraContent}
+    </div>
+  )
 }))
 
-jest.mock('../../../src/components/alert', () => (props: any) => (
-  <div data-testid="alert" data-loading={props.loading ? 'true' : 'false'}>
-    {props.children}
-    {props.extraContent}
-  </div>
-))
-
-jest.mock('../../../src/components/qr', () => (props: any) => (
-  <div data-testid="qr" data-walletconnect={props.isWalletConnect ? 'true' : 'false'}>
-    {props.code}
-  </div>
-))
+vi.mock('../../../src/components/qr', () => ({
+  default: (props: any) => (
+    <div data-testid="qr" data-walletconnect={props.isWalletConnect ? 'true' : 'false'}>
+      {props.code}
+    </div>
+  )
+}))
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void
@@ -52,7 +52,7 @@ const deferred = <T,>() => {
 
 describe('PairingAlert Kukai async pairing paths', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
     Object.defineProperty(window.navigator, 'onLine', { value: true, writable: true })
 
     const kukaiWallet = {
@@ -77,7 +77,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
       supportedInteractionStandards: ['beacon']
     }
 
-    ;(useWallets as jest.Mock).mockReturnValue({
+    ;(useWallets as Mock).mockReturnValue({
       wallets: new Map([
         ['kukai', kukaiWallet],
         ['other', otherWallet]
@@ -89,12 +89,12 @@ describe('PairingAlert Kukai async pairing paths', () => {
   it('shows Kukai browser path and WalletConnect QR after WalletConnect pairing resolves', async () => {
     const wcPairing = deferred<string>()
     const openedTab = { opener: undefined as Window | null | undefined, location: { href: '' } }
-    window.open = jest.fn(() => openedTab as unknown as Window)
+    window.open = vi.fn(() => openedTab as unknown as Window)
     const props: ConfigurableAlertProps = {
       open: true,
       closeOnBackdropClick: true,
       title: 'Pair wallet',
-      onClose: jest.fn(),
+      onClose: vi.fn(),
       pairingPayload: {
         p2pSyncCode: Promise.resolve('p2p-code'),
         postmessageSyncCode: Promise.resolve('post-code'),
@@ -133,7 +133,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
       open: true,
       closeOnBackdropClick: true,
       title: 'Pair wallet',
-      onClose: jest.fn(),
+      onClose: vi.fn(),
       pairingPayload: {
         p2pSyncCode: Promise.resolve('p2p-code'),
         postmessageSyncCode: Promise.resolve('post-code'),

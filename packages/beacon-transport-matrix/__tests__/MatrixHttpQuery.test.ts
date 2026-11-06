@@ -1,4 +1,5 @@
-/** @jest-environment node */
+import type { MockInstance } from 'vitest'
+/** @vitest-environment node */
 
 import { MatrixHttpClient } from '../src/matrix-client/MatrixHttpClient'
 import {
@@ -8,15 +9,15 @@ import {
 
 describe('MatrixHttpClient sync query requests', () => {
   const response = { next_batch: 'next-sync', rooms: {} }
-  let fetchMock: jest.SpyInstance<ReturnType<typeof fetch>, Parameters<typeof fetch>>
+  let fetchMock: MockInstance<(...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>>
 
   beforeEach(() => {
-    fetchMock = jest
+    fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async () => Response.json(response))
   })
 
-  afterEach(() => jest.restoreAllMocks())
+  afterEach(() => vi.restoreAllMocks())
 
   it('encodes defined query values and sends authentication with the existing GET request', async () => {
     const client = new MatrixHttpClient('https://matrix.example/')
@@ -196,7 +197,7 @@ describe('MatrixHttpClient sync query requests', () => {
       })
       const pendingResponse = new Response(body)
       const readText = pendingResponse.text.bind(pendingResponse)
-      jest.spyOn(pendingResponse, 'text').mockImplementation(() => {
+      vi.spyOn(pendingResponse, 'text').mockImplementation(() => {
         const pendingText = readText()
         bodyReadStarted()
         return pendingText

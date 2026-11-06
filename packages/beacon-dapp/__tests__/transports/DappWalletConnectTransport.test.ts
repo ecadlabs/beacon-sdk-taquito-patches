@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest'
 import { LocalStorage } from '@ecadlabs/beacon-core'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import {
@@ -15,10 +16,14 @@ import { DappPostMessageTransport } from '../../src/transports/DappPostMessageTr
 import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
 
-jest.mock('@ecadlabs/beacon-transport-walletconnect', () =>
-  jest.requireActual('../../../beacon-transport-walletconnect/src')
+vi.mock(
+  '@ecadlabs/beacon-transport-walletconnect',
+  async () =>
+    await vi.importActual<typeof import('../../../beacon-transport-walletconnect/src')>(
+      '../../../beacon-transport-walletconnect/src'
+    )
 )
-jest.mock('broadcast-channel', () => ({
+vi.mock('broadcast-channel', () => ({
   BroadcastChannel: class {
     postMessage() {}
     close() {}
@@ -29,13 +34,15 @@ jest.mock('broadcast-channel', () => ({
     die: async () => {}
   })
 }))
-jest.mock('@walletconnect/sign-client', () => ({}))
-jest.mock('@walletconnect/utils', () => ({
+vi.mock('@walletconnect/sign-client', () => ({ default: {} }))
+vi.mock('@walletconnect/utils', () => ({
   getSdkError: () => ({ code: 6000, message: 'Disconnected' })
 }))
-jest.mock('@ecadlabs/beacon-core', () => ({
-  ...jest.requireActual('@ecadlabs/beacon-core'),
-  WCStorage: jest.fn().mockImplementation(() => ({}))
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
+  WCStorage: vi.fn().mockImplementation(function () {
+    return {}
+  })
 }))
 
 class InspectableClient extends WalletConnectCommunicationClient {
@@ -78,20 +85,22 @@ describe('WalletConnect pairing approval ownership', () => {
   let transport: DappWalletConnectTransport
   let storage: LocalStorage
   let approval: ExposedPromise<SessionTypes.Struct>
-  let paired: jest.Mock
-  let disconnect: jest.Mock
-  let connect: jest.Mock<Promise<{ uri: string; approval: () => Promise<SessionTypes.Struct> }>, []>
-  let leader: jest.Mock
+  let paired: Mock
+  let disconnect: Mock
+  let connect: Mock<
+    (...args: []) => Promise<{ uri: string; approval: () => Promise<SessionTypes.Struct> }>
+  >
+  let leader: Mock
 
   beforeEach(() => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     localStorage.clear()
-    leader = jest.fn().mockResolvedValue(true)
+    leader = vi.fn().mockResolvedValue(true)
     client = new InspectableClient(options, leader)
     approval = new ExposedPromise()
-    disconnect = jest.fn().mockResolvedValue(undefined)
+    disconnect = vi.fn().mockResolvedValue(undefined)
     // Mock the network boundary; peer persistence and both SDK layers remain real.
-    connect = jest.fn(async () => ({
+    connect = vi.fn(async () => ({
       uri: 'wc:pairing@2?symKey=test',
       approval: () => approval.promise
     }))
@@ -103,7 +112,7 @@ describe('WalletConnect pairing approval ownership', () => {
       disconnect
     }
     Reflect.set(client, 'signClient', signClient)
-    jest.spyOn(WalletConnectCommunicationClient, 'getInstance').mockReturnValue(client)
+    vi.spyOn(WalletConnectCommunicationClient, 'getInstance').mockReturnValue(client)
     storage = new LocalStorage('approval-test')
     transport = new DappWalletConnectTransport(
       'Test',
@@ -112,13 +121,13 @@ describe('WalletConnect pairing approval ownership', () => {
       options,
       leader
     )
-    paired = jest.fn()
+    paired = vi.fn()
   })
 
   afterEach(() => {
-    jest.restoreAllMocks()
-    jest.clearAllTimers()
-    jest.useRealTimers()
+    vi.restoreAllMocks()
+    vi.clearAllTimers()
+    vi.useRealTimers()
   })
 
   async function start() {
@@ -132,7 +141,7 @@ describe('WalletConnect pairing approval ownership', () => {
     expect(client.listenerKeys()).toEqual([])
     expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
     expect(paired).not.toHaveBeenCalled()
-    const ready = jest.fn()
+    const ready = vi.fn()
     void transport.waitForResolution().then(ready)
     await flush()
     expect(ready).not.toHaveBeenCalled()
@@ -160,9 +169,9 @@ describe('WalletConnect pairing approval ownership', () => {
       const keys = { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) }
       const post = new DappPostMessageTransport('Test', keys, storage)
       const matrix = new DappP2PTransport('Test', keys, storage, {})
-      jest.spyOn(post, 'connect').mockResolvedValue(undefined)
-      jest.spyOn(matrix, 'connect').mockResolvedValue(undefined)
-      jest.spyOn(matrix, 'getPairingRequestInfo').mockResolvedValue({
+      vi.spyOn(post, 'connect').mockResolvedValue(undefined)
+      vi.spyOn(matrix, 'connect').mockResolvedValue(undefined)
+      vi.spyOn(matrix, 'getPairingRequestInfo').mockResolvedValue({
         id: 'matrix',
         type: 'p2p-pairing-request',
         name: 'Test',
@@ -170,18 +179,18 @@ describe('WalletConnect pairing approval ownership', () => {
         version: '3',
         relayServer: 'matrix.example.com'
       })
-      jest.spyOn(post, 'getPairingRequestInfo').mockResolvedValue({
+      vi.spyOn(post, 'getPairingRequestInfo').mockResolvedValue({
         id: 'post',
         type: 'postmessage-pairing-request',
         name: 'Test',
         publicKey: 'post-key',
         version: '3'
       })
-      jest.spyOn(PostMessageTransport, 'getAvailableExtensions').mockResolvedValue([])
+      vi.spyOn(PostMessageTransport, 'getAvailableExtensions').mockResolvedValue([])
       const matrixListener = new ExposedPromise<
         Parameters<DappP2PTransport['listenForNewPeer']>[0]
       >()
-      jest.spyOn(matrix, 'listenForNewPeer').mockImplementation(async (listener) => {
+      vi.spyOn(matrix, 'listenForNewPeer').mockImplementation(async (listener) => {
         matrixListener.resolve(listener)
       })
       const wc = transport
@@ -310,7 +319,7 @@ describe('WalletConnect pairing approval ownership', () => {
     const entered = new ExposedPromise<void>()
     const release = new ExposedPromise<void>()
     const set = storage.set.bind(storage)
-    jest.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
+    vi.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
       entered.resolve()
       await release.promise
       return set(key, value)
@@ -340,7 +349,7 @@ describe('WalletConnect pairing approval ownership', () => {
   it('does not deliver an old approval to a replacement pairing listener', async () => {
     await start()
     await transport.stopListeningForNewPeers()
-    const replacement = jest.fn()
+    const replacement = vi.fn()
     await transport.listenForNewPeer(replacement)
     approval.resolve(session('stale'))
     await expectRejected()
@@ -374,7 +383,7 @@ describe('WalletConnect pairing approval ownership', () => {
     const entered = new ExposedPromise<void>()
     const release = new ExposedPromise<void>()
     const set = storage.set.bind(storage)
-    jest.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
+    vi.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
       entered.resolve()
       await release.promise
       return set(key, value)
@@ -405,7 +414,7 @@ describe('WalletConnect pairing approval ownership', () => {
     const entered = new ExposedPromise<void>()
     const release = new ExposedPromise<void>()
     const set = storage.set.bind(storage)
-    jest.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
+    vi.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
       entered.resolve()
       await release.promise
       return set(key, value)
@@ -431,7 +440,7 @@ describe('WalletConnect pairing approval ownership', () => {
     leader.mockResolvedValue(false)
     const entered = new ExposedPromise<void>()
     const release = new ExposedPromise<void>()
-    jest.spyOn(client, 'closeSignClient').mockImplementationOnce(() => {
+    vi.spyOn(client, 'closeSignClient').mockImplementationOnce(() => {
       entered.resolve()
       return release.promise
     })
@@ -459,7 +468,7 @@ describe('WalletConnect pairing approval ownership', () => {
 
   it('retains secondary-tab cleanup after valid selection stops pairing listeners', async () => {
     leader.mockResolvedValue(false)
-    const close = jest.spyOn(client, 'closeSignClient').mockResolvedValue(undefined)
+    const close = vi.spyOn(client, 'closeSignClient').mockResolvedValue(undefined)
     paired.mockImplementation(() => {
       void transport.stopListeningForNewPeers()
     })

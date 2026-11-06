@@ -1,11 +1,12 @@
+import type { Mock } from 'vitest'
 import { ExtensionMessageTarget } from '@ecadlabs/beacon-types'
 
 type MessageHandler = (event: unknown) => void
 
 interface LoadedExtensionsUtil {
   getAvailableExtensions: () => Promise<unknown[]>
-  mockAddEventListener: jest.Mock
-  mockPostMessage: jest.Mock
+  mockAddEventListener: Mock
+  mockPostMessage: Mock
   mockWindowRef: {
     location: {
       origin: string
@@ -15,15 +16,15 @@ interface LoadedExtensionsUtil {
 }
 
 const loadExtensionsUtil = async (): Promise<LoadedExtensionsUtil> => {
-  jest.resetModules()
+  vi.resetModules()
 
   let messageHandler: MessageHandler | undefined
-  const mockAddEventListener = jest.fn((event: string, handler: MessageHandler) => {
+  const mockAddEventListener = vi.fn((event: string, handler: MessageHandler) => {
     if (event === 'message') {
       messageHandler = handler
     }
   })
-  const mockPostMessage = jest.fn()
+  const mockPostMessage = vi.fn()
   const mockWindowRef = {
     location: {
       origin: 'https://dapp.example'
@@ -32,10 +33,12 @@ const loadExtensionsUtil = async (): Promise<LoadedExtensionsUtil> => {
     postMessage: mockPostMessage
   }
 
-  jest.doMock('@ecadlabs/beacon-core', () => ({
-    Logger: jest.fn().mockImplementation(() => ({
-      log: jest.fn()
-    })),
+  vi.doMock('@ecadlabs/beacon-core', () => ({
+    Logger: vi.fn().mockImplementation(function () {
+      return {
+        log: vi.fn()
+      }
+    }),
     windowRef: mockWindowRef
   }))
 
@@ -52,12 +55,12 @@ const loadExtensionsUtil = async (): Promise<LoadedExtensionsUtil> => {
 
 describe('getAvailableExtensions', () => {
   beforeEach(() => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
   })
 
   afterEach(() => {
-    jest.useRealTimers()
-    jest.dontMock('@ecadlabs/beacon-core')
+    vi.useRealTimers()
+    vi.doUnmock('@ecadlabs/beacon-core')
   })
 
   it('posts the extension ping using the Beacon extension message shape', async () => {
@@ -75,7 +78,7 @@ describe('getAvailableExtensions', () => {
       'https://dapp.example'
     )
 
-    jest.advanceTimersByTime(1000)
+    vi.advanceTimersByTime(1000)
     await expect(extensionsPromise).resolves.toEqual([])
   })
 
@@ -98,7 +101,7 @@ describe('getAvailableExtensions', () => {
       }
     })
 
-    jest.advanceTimersByTime(1000)
+    vi.advanceTimersByTime(1000)
 
     await expect(extensionsPromise).resolves.toEqual([extension])
     expect(mockPostMessage).toHaveBeenCalledWith('extensionsUpdated', mockWindowRef.location.origin)
@@ -120,7 +123,7 @@ describe('getAvailableExtensions', () => {
       }
     })
 
-    jest.advanceTimersByTime(1000)
+    vi.advanceTimersByTime(1000)
 
     await expect(extensionsPromise).resolves.toEqual([])
   })
@@ -171,7 +174,7 @@ describe('getAvailableExtensions', () => {
         data: { payload: 'pong', sender }
       })
     }
-    jest.advanceTimersByTime(1000)
+    vi.advanceTimersByTime(1000)
     const available = await pending
     expect(available).toEqual(valid)
     valid.forEach((sender, index) => expect(available[index]).toBe(sender))
