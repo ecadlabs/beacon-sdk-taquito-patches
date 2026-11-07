@@ -1,6 +1,6 @@
 import { DappPostMessageTransport } from '../../src/transports/DappPostMessageTransport'
 import { LocalStorage, windowRef } from '@ecadlabs/beacon-core'
-import { getKeypairFromSeed } from '@ecadlabs/beacon-utils'
+import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
   ExtendedPostMessagePairingResponse,
   ExtensionMessageTarget,
@@ -83,8 +83,7 @@ it('cancels new-peer notifications and removes peer subscriptions explicitly on 
   expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
 })
 
-// Phase 3.5 RED: disconnect must detach the extension's window message listener.
-it.fails('removes window listeners when disconnecting an extension transport', async () => {
+it('removes window listeners when disconnecting an extension transport', async () => {
   const transport = new DappPostMessageTransport(
     'Dapp',
     await getKeypairFromSeed('cleanup'),
@@ -145,4 +144,45 @@ it('delivers encrypted extension messages after disconnecting and reconnecting',
     await transport['client'].unsubscribeFromEncryptedMessages()
     await wallet.unsubscribeFromEncryptedMessages()
   }
+})
+
+it('keeps a disconnected transport stopped when an earlier connect resumes', async () => {
+  const transport = new DappPostMessageTransport(
+    'Dapp',
+    await getKeypairFromSeed('late-connect'),
+    new LocalStorage()
+  )
+  const gate = new ExposedPromise<ExtendedPostMessagePairingResponse[]>()
+  const peers = vi.spyOn(transport, 'getPeers').mockReturnValue(gate.promise)
+  const connecting = transport.connect()
+  await vi.waitFor(() => expect(peers).toHaveBeenCalledTimes(1))
+  await transport.disconnect()
+  const registrations = windowListeners.mock.calls.length
+  gate.resolve([peer])
+  await connecting
+  expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
+  expect(windowListeners).toHaveBeenCalledTimes(registrations)
+})
+
+it('does not reconnect when pairing persistence finishes after disconnect', async () => {
+  const storage = new LocalStorage()
+  const transport = new DappPostMessageTransport(
+    'Dapp',
+    await getKeypairFromSeed('late-pairing'),
+    storage
+  )
+  const opening = vi
+    .spyOn(transport['client'], 'listenForChannelOpening')
+    .mockResolvedValue(undefined)
+  await transport.startOpenChannelListener()
+  const gate = new ExposedPromise<void>()
+  const write = vi.spyOn(storage, 'set').mockReturnValue(gate.promise)
+  const pairing = opening.mock.calls[0][0](peer)
+  await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1))
+  await transport.disconnect()
+  const registrations = windowListeners.mock.calls.length
+  gate.resolve()
+  await pairing
+  expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
+  expect(windowListeners).toHaveBeenCalledTimes(registrations)
 })

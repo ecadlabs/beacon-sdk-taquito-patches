@@ -26,6 +26,7 @@ export class StorageManager<
     | StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET
     | StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP
 > {
+  private mutations: Promise<void> = Promise.resolve()
   private readonly storage: Storage
   private readonly storageKey: T
 
@@ -51,33 +52,44 @@ export class StorageManager<
     predicate: (element: ArrayElem<StorageKeyReturnType[T]>) => boolean,
     overwrite: boolean = true
   ): Promise<void> {
-    const entities = await this.storage.get(this.storageKey)
+    return this.enqueue(async () => {
+      const entities = await this.storage.get(this.storageKey)
 
-    if (!fixArrayType(entities).some(predicate)) {
-      fixArrayType(entities).push(element)
-    } else if (overwrite) {
-      for (let i = 0; i < entities.length; i++) {
-        if (predicate(fixArrayType(entities)[i])) {
-          entities[i] = element
+      if (!fixArrayType(entities).some(predicate)) {
+        fixArrayType(entities).push(element)
+      } else if (overwrite) {
+        for (let i = 0; i < entities.length; i++) {
+          if (predicate(fixArrayType(entities)[i])) {
+            entities[i] = element
+          }
         }
       }
-    }
 
-    return this.storage.set(this.storageKey, entities)
+      return this.storage.set(this.storageKey, entities)
+    })
   }
 
   public async remove(
     predicate: (element: ArrayElem<StorageKeyReturnType[T]>) => boolean
   ): Promise<void> {
-    const entities = await this.storage.get(this.storageKey)
+    return this.enqueue(async () => {
+      const entities = await this.storage.get(this.storageKey)
 
-    const filteredEntities = fixArrayType(entities).filter((entity) => !predicate(entity))
+      const filteredEntities = fixArrayType(entities).filter((entity) => !predicate(entity))
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return this.storage.set(this.storageKey, filteredEntities as any)
+      return this.storage.set(this.storageKey, filteredEntities as StorageKeyReturnType[T])
+    })
   }
 
   public async removeAll(): Promise<void> {
-    return this.storage.delete(this.storageKey)
+    return this.enqueue(() => this.storage.delete(this.storageKey))
+  }
+
+  private enqueue(mutation: () => Promise<void>): Promise<void> {
+    const result = this.mutations.then(mutation)
+    // Keep later mutations runnable even when this caller receives a rejection.
+    this.mutations = result.catch(() => undefined)
+
+    return result
   }
 }

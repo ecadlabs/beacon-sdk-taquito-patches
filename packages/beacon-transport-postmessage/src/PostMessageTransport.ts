@@ -46,6 +46,8 @@ export class PostMessageTransport<
   K extends
     StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP | StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET
 > extends Transport<T, K, PostMessageClient> {
+  protected connectionGeneration = 0
+
   public readonly type: TransportType = TransportType.POST_MESSAGE
 
   constructor(name: string, keyPair: KeyPair, storage: Storage, storageKey: K) {
@@ -61,10 +63,18 @@ export class PostMessageTransport<
 
         const data = event.data
         if (isRecord(data) && data.payload === 'pong') {
-          resolve(true)
+          // The timer is created before this listener is registered.
+          // eslint-disable-next-line @typescript-eslint/no-use-before-define
+          clearTimeout(timeout)
           windowRef.removeEventListener('message', fn)
+          resolve(true)
         }
       }
+
+      const timeout = setTimeout(() => {
+        windowRef.removeEventListener('message', fn)
+        resolve(false)
+      }, 500)
 
       windowRef.addEventListener('message', fn)
 
@@ -142,9 +152,14 @@ export class PostMessageTransport<
     }
 
     this._isConnected = TransportStatus.CONNECTING
+    const generation = ++this.connectionGeneration
 
     try {
+      await this.client.init()
       const knownPeers = await this.getPeers()
+      if (generation !== this.connectionGeneration) {
+        return
+      }
 
       if (knownPeers.length > 0) {
         logger.log('connect', `connecting to ${knownPeers.length} peers`)
@@ -158,15 +173,31 @@ export class PostMessageTransport<
         }
       }
 
+      if (generation !== this.connectionGeneration) {
+        return
+      }
       await this.startOpenChannelListener()
-      await super.connect()
+      if (generation === this.connectionGeneration) {
+        await super.connect()
+      }
     } catch (error) {
-      await this.client.unsubscribeFromEncryptedMessages().catch((cleanupError) => {
-        logger.error('connect', 'failed to clear extension listeners', cleanupError)
-      })
-      this._isConnected = TransportStatus.NOT_CONNECTED
+      if (generation === this.connectionGeneration) {
+        await this.client.unsubscribeFromEncryptedMessages().catch((cleanupError) => {
+          logger.error('connect', 'failed to clear extension listeners', cleanupError)
+        })
+        if (generation === this.connectionGeneration) {
+          this._isConnected = TransportStatus.NOT_CONNECTED
+        }
+      }
       throw error
     }
+  }
+
+  public async disconnect(): Promise<void> {
+    ++this.connectionGeneration
+    await this.client.unsubscribeFromEncryptedMessages()
+    this.newPeerListener = undefined
+    await super.disconnect()
   }
 
   public async startOpenChannelListener(): Promise<void> {
@@ -193,6 +224,3 @@ export class PostMessageTransport<
     )
   }
 }
-
-// Start loading wallets async so they will be ready when the modal is opened
-PostMessageTransport.getAvailableExtensions()

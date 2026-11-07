@@ -5,6 +5,7 @@ import { isStorageKey, normalizeParsedStoredValue } from './storage-normalizatio
 const logger = new Logger('IndexedDBStorage')
 
 export class IndexedDBStorage extends Storage {
+  private readonly initPromise: Promise<IDBDatabase>
   private db: IDBDatabase | null = null
   private isSupported: boolean = true
 
@@ -18,9 +19,9 @@ export class IndexedDBStorage extends Storage {
     private readonly storeNames: string[] = ['keyvaluestorage']
   ) {
     super()
-    this.initDB()
-      .then((db) => (this.db = db))
-      .catch((err) => logger.error(err.message))
+    this.initPromise = this.initDB()
+    // Observe initialization failures even if no storage operation is requested.
+    this.initPromise.catch((error) => logger.error(error))
   }
 
   private isIndexedDBSupported() {
@@ -103,6 +104,7 @@ export class IndexedDBStorage extends Storage {
     storeName: string,
     operation: (store: IDBObjectStore) => Promise<T>
   ): Promise<T> {
+    await this.initPromise
     return new Promise((resolve, reject) => {
       if (!this.isSupported) {
         reject('IndexedDB is not supported.')
@@ -243,7 +245,8 @@ export class IndexedDBStorage extends Storage {
 
   getPrefixedKey<K extends StorageKey>(key: K): string {
     logger.debug('getPrefixedKey', key)
-    throw new Error('Method not implemented.')
+
+    return key
   }
 
   subscribeToStorageChanged(
@@ -255,7 +258,8 @@ export class IndexedDBStorage extends Storage {
     }) => {}
   ): Promise<void> {
     logger.debug('subscribeToStorageEvent', callback)
-    throw new Error('Method not implemented.')
+
+    return Promise.resolve()
   }
 
   /**
@@ -277,53 +281,45 @@ export class IndexedDBStorage extends Storage {
       return
     }
 
-    const targetDBRequest = indexedDB.open(targetDBName)
-
-    targetDBRequest.onerror = () => {
-      throw new Error(`Failed to open target database: ${targetDBRequest.error}`)
-    }
-
+    await this.initPromise
     const targetDB = await new Promise<IDBDatabase>((resolve, reject) => {
-      targetDBRequest.onsuccess = () => resolve(targetDBRequest.result)
-      targetDBRequest.onerror = () => reject(targetDBRequest.error)
+      const request = indexedDB.open(targetDBName)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
     })
 
-    // Copy items from the source store to the target store, skipping any specified keys.
-    await this.transaction('readonly', sourceStoreName, async (sourceStore) => {
-      const getAllRequest = sourceStore.getAll()
-      const getAllKeysRequest = sourceStore.getAllKeys()
-
-      getAllRequest.onsuccess = async () => {
-        getAllKeysRequest.onsuccess = async () => {
-          const items = getAllRequest.result
-          const keys = getAllKeysRequest.result
-
-          if (!targetDB.objectStoreNames.contains(targetStoreName)) {
-            logger.error(`${targetStoreName} not found. ${new Error().stack}`)
-
-            return
+    try {
+      if (!targetDB.objectStoreNames.contains(targetStoreName)) {
+        throw new Error(`${targetStoreName} not found.`)
+      }
+      // Read keys and values in the same transaction to preserve their association.
+      const { items, keys } = await this.transaction(
+        'readonly',
+        sourceStoreName,
+        (store) =>
+          new Promise<{ items: unknown[]; keys: IDBValidKey[] }>((resolve, reject) => {
+            const values = store.getAll()
+            const keyRequest = store.getAllKeys()
+            keyRequest.onsuccess = () => resolve({ items: values.result, keys: keyRequest.result })
+            values.onerror = () => reject(values.error)
+            keyRequest.onerror = () => reject(keyRequest.error)
+          })
+      )
+      await new Promise<void>((resolve, reject) => {
+        const targetTransaction = targetDB.transaction(targetStoreName, 'readwrite')
+        targetTransaction.oncomplete = () => resolve()
+        targetTransaction.onerror = () => reject(targetTransaction.error)
+        targetTransaction.onabort = () =>
+          reject(targetTransaction.error ?? new Error('Copy aborted'))
+        const targetStore = targetTransaction.objectStore(targetStoreName)
+        keys.forEach((key, index) => {
+          if (!skipKeys.includes(key.toString())) {
+            targetStore.put(items[index], key)
           }
-
-          const targetTransaction = targetDB.transaction(targetStoreName, 'readwrite')
-          const targetStore = targetTransaction.objectStore(targetStoreName)
-
-          keys
-            .filter((key) => !skipKeys.includes(key.toString()))
-            .forEach((key, index) => {
-              targetStore.put(items[index], key)
-            })
-
-          targetTransaction.onerror = (event: any) => {
-            logger.error('Transaction error: ', event.target.error)
-          }
-        }
-      }
-      getAllKeysRequest.onerror = () => {
-        logger.error('Failed to getAllKeys from source:', getAllKeysRequest.error)
-      }
-      getAllRequest.onerror = () => {
-        logger.error('Failed to getAll from source:', getAllRequest.error)
-      }
-    })
+        })
+      })
+    } finally {
+      targetDB.close()
+    }
   }
 }

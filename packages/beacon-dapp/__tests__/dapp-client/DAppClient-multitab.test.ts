@@ -270,8 +270,7 @@ it('synchronizes active-account storage changes and clears selection when storag
   })
   expect(await client.getActiveAccount()).toBeUndefined()
 })
-// Phase 3.7 RED: the secondary tab must emit the event matching the request type.
-it.fails.each([
+it.each([
   [BeaconMessageType.OperationRequest, BeaconEvent.OPERATION_REQUEST_SENT],
   [BeaconMessageType.SignPayloadRequest, BeaconEvent.SIGN_REQUEST_SENT],
   [BeaconMessageType.BroadcastRequest, BeaconEvent.BROADCAST_REQUEST_SENT]

@@ -139,8 +139,7 @@ describe('PostMessageTransport.connect', () => {
   })
 })
 
-// Phase 3.5 RED: lack of an extension must settle false and detach its listener.
-it.fails('bounds isAvailable when no extension responds', async () => {
+it('bounds isAvailable when no extension responds', async () => {
   vi.useFakeTimers()
   const { windowRef } = await import('@ecadlabs/beacon-core')
   const add = vi.spyOn(windowRef, 'addEventListener')
@@ -159,5 +158,45 @@ it.fails('bounds isAvailable when no extension responds', async () => {
     vi.restoreAllMocks()
     vi.clearAllTimers()
     vi.useRealTimers()
+  }
+})
+
+it('does not start discovery timers or listeners when importing the package', async () => {
+  vi.resetModules()
+  vi.useFakeTimers()
+  const { windowRef } = await import('@ecadlabs/beacon-core')
+  const add = vi.spyOn(windowRef, 'addEventListener')
+  const timers = vi.getTimerCount()
+  try {
+    await import('../src/index')
+    expect(vi.getTimerCount()).toBe(timers)
+    expect(add).not.toHaveBeenCalled()
+  } finally {
+    for (const [type, listener] of add.mock.calls) windowRef.removeEventListener(type, listener)
+    vi.restoreAllMocks()
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  }
+})
+
+it('deduplicates init and reinstalls one message listener after unsubscribe', async () => {
+  const { windowRef } = await import('@ecadlabs/beacon-core')
+  const add = vi.spyOn(windowRef, 'addEventListener')
+  const remove = vi.spyOn(windowRef, 'removeEventListener')
+  const client = new PostMessageClient('lifecycle', {
+    publicKey: new Uint8Array(32),
+    secretKey: new Uint8Array(64)
+  })
+  try {
+    await client.init()
+    await client.init()
+    expect(add).toHaveBeenCalledTimes(1)
+    await client.unsubscribeFromEncryptedMessages()
+    expect(remove).toHaveBeenCalledWith('message', add.mock.calls[0][1])
+    await client.init()
+    expect(add).toHaveBeenCalledTimes(2)
+  } finally {
+    await client.unsubscribeFromEncryptedMessages()
+    vi.restoreAllMocks()
   }
 })

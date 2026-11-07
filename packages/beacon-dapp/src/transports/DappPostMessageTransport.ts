@@ -24,10 +24,22 @@ export class DappPostMessageTransport extends PostMessageTransport<
   }
 
   public async startOpenChannelListener(): Promise<void> {
+    const generation = this.connectionGeneration
     return this.client.listenForChannelOpening(async (peer: ExtendedPostMessagePairingResponse) => {
       logger.log('connect', `received PostMessagePairingResponse`, peer)
 
-      await this.addPeer(peer)
+      if (generation !== this.connectionGeneration) {
+        return
+      }
+      // A disconnected pairing may finish its write, but cannot reinstall listeners.
+      await this.peerManager.addPeer(peer)
+      if (generation !== this.connectionGeneration) {
+        return
+      }
+      await this.listen(peer.publicKey)
+      if (generation !== this.connectionGeneration) {
+        return
+      }
 
       this._isConnected = TransportStatus.CONNECTED
 

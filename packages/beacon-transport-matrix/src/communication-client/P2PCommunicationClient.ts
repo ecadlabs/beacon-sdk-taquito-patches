@@ -115,7 +115,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     (event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => void
   > = new Map()
 
-  private readonly ignoredRooms: string[] = []
+  private ignoredRooms: string[] = []
   private loginCounter: number = 0
 
   constructor(
@@ -629,6 +629,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     this.relayServer = undefined
     this.client = new ExposedPromise()
     this.activeListeners.clear()
+    this.ignoredRooms = []
     this.initialReplay = { pending: 0, buffered: new WeakSet(), claimed: new WeakSet() }
     this.initialEvent = undefined
     this.initialListener = undefined
@@ -808,9 +809,9 @@ export class P2PCommunicationClient extends CommunicationClient {
     return this.mutatePeerRooms(session, (roomIds) => {
       const room = roomIds[sender]
       logger.debug('updatePeerRoom', 'current room', room, 'new room', roomId)
-      if (room && room[1]) {
-        logger.log('updatePeerRoom', `adding room "${room[1]}" to ignored array`)
-        this.ignoredRooms.push(room[1])
+      if (room && room !== roomId) {
+        logger.log('updatePeerRoom', `adding room "${room}" to ignored array`)
+        this.ignoredRooms.push(room)
       }
 
       return { ...roomIds, [sender]: roomId }
@@ -955,14 +956,14 @@ export class P2PCommunicationClient extends CommunicationClient {
     )
 
     const msg = ['@channel-open', recipient, encryptedMessage].join(':')
-    ;(await this.client.promise).sendTextMessage(roomId, msg).catch(async (error) => {
+    await (await this.client.promise).sendTextMessage(roomId, msg).catch(async (error) => {
       if (error.errcode === 'M_FORBIDDEN') {
         // Room doesn't exist
         logger.log(`sendPairingResponse`, `M_FORBIDDEN`, roomId, error)
         await this.deleteRoomIdFromRooms(roomId)
         const newRoomId = await this.getRelevantRoom(recipient)
         logger.log(`sendPairingResponse`, `Old room deleted, new room created`, newRoomId)
-        ;(await this.client.promise).sendTextMessage(newRoomId, msg).catch(async (error2) => {
+        await (await this.client.promise).sendTextMessage(newRoomId, msg).catch(async (error2) => {
           logger.log(`sendPairingResponse`, `inner error`, newRoomId, error2)
         })
       } else {
@@ -990,9 +991,10 @@ export class P2PCommunicationClient extends CommunicationClient {
     const relayServer = split.join(':')
 
     return this.writeSessionState(session, async () => {
+      const dappPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
       const manager = new PeerManager(
         this.storage,
-        localStorage.getItem('beacon:communication-peers-dapp')
+        dappPeers?.length
           ? StorageKey.TRANSPORT_P2P_PEERS_DAPP
           : StorageKey.TRANSPORT_P2P_PEERS_WALLET
       )

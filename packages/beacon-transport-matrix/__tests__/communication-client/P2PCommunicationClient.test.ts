@@ -118,23 +118,20 @@ describe('P2PCommunicationClient', () => {
     throw new Error('Timed out waiting for condition')
   }
 
-  // Phase 3.3 RED: retain the entire obsolete room ID, never its second character.
-  it.fails('ignores the full previous room when updating a peer room', async () => {
+  it('ignores the full previous room when updating a peer room', async () => {
     mockStorage.get.mockResolvedValueOnce({ '@peer:relay': '!old:relay' })
     await client.updatePeerRoom('@peer:relay', '!new:relay')
     expect(client['ignoredRooms']).toContain('!old:relay')
     expect(client['ignoredRooms']).not.toContain('o')
   })
 
-  // Phase 3.3 RED: writing the same room must not mark it as obsolete.
-  it.fails('does not ignore an unchanged peer room', async () => {
+  it('does not ignore an unchanged peer room', async () => {
     mockStorage.get.mockResolvedValueOnce({ '@peer:relay': '!same:relay' })
     await client.updatePeerRoom('@peer:relay', '!same:relay')
     expect(client['ignoredRooms']).toEqual([])
   })
 
-  // Phase 3.3 RED: ignored rooms belong to a session, not the client lifetime.
-  it.fails('clears ignoredRooms when resetting the current session', async () => {
+  it('clears ignoredRooms when resetting the current session', async () => {
     mockStorage.delete.mockResolvedValue(undefined)
     client['ignoredRooms'].push('!old:relay')
     await client['resetSession'](client['captureSession']().id)
@@ -180,6 +177,67 @@ describe('P2PCommunicationClient', () => {
     })
     ;(client as any).client.resolve(fakeMatrixClient)
   })
+
+  it.each([
+    { retry: false, reject: false },
+    { retry: true, reject: false },
+    { retry: false, reject: true },
+    { retry: true, reject: true }
+  ])(
+    'waits for pairing send settlement (retry: $retry, reject: $reject)',
+    async ({ retry, reject }) => {
+      const pending = createDeferred<void>()
+      vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      vi.spyOn(client, 'waitForJoin').mockResolvedValue(undefined)
+      vi.spyOn(client, 'getPairingResponseInfo').mockResolvedValue({
+        id: 'pair',
+        name: 'Wallet',
+        publicKey: 'abcd',
+        version: '2',
+        type: 'p2p-pairing-response',
+        relayServer: 'relay.server'
+      })
+      const pairingInternals = client as unknown as {
+        encryptMessageAsymmetric: (typeof client)['encryptMessageAsymmetric']
+        getRelevantRoom: (typeof client)['getRelevantRoom']
+      }
+      vi.spyOn(pairingInternals, 'encryptMessageAsymmetric').mockResolvedValue('encrypted')
+      vi.spyOn(client, 'deleteRoomIdFromRooms').mockResolvedValue(undefined)
+      vi.spyOn(pairingInternals, 'getRelevantRoom').mockResolvedValue('!retry:relay')
+      if (retry) fakeMatrixClient.sendTextMessage.mockRejectedValueOnce({ errcode: 'M_FORBIDDEN' })
+      fakeMatrixClient.sendTextMessage.mockReturnValueOnce(pending.promise)
+      let completed = false
+      const sending = client
+        .sendPairingResponse(new P2PPairingRequest('pair', 'Dapp', 'abcd', '2', 'relay.server'))
+        .then(() => {
+          completed = true
+        })
+      await waitFor(() => fakeMatrixClient.sendTextMessage.mock.calls.length === (retry ? 2 : 1))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const resolvedEarly = completed
+      if (reject) pending.reject(new Error('send failed'))
+      else pending.resolve(undefined)
+      await sending
+      expect(resolvedEarly).toBe(false)
+      expect(fakeMatrixClient.sendTextMessage).toHaveBeenLastCalledWith(
+        retry ? '!retry:relay' : '!room:id',
+        expect.stringContaining('@channel-open:')
+      )
+    }
+  )
+
+  it.each([StorageKey.TRANSPORT_P2P_PEERS_DAPP, StorageKey.TRANSPORT_P2P_PEERS_WALLET])(
+    'updates relay peers from custom storage at %s',
+    async (key) => {
+      localStorage.clear()
+      const peer = new P2PPairingRequest('pair', 'Peer', 'abcd', '2', 'old.relay')
+      mockStorage.get.mockImplementation(async (requested) => (requested === key ? [peer] : []))
+      mockStorage.set.mockResolvedValue(undefined)
+      await client.updateRelayServer('@hex-hash:new.relay')
+      expect(mockStorage.get).toHaveBeenCalledWith(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
+      expect(mockStorage.set).toHaveBeenCalledWith(key, [{ ...peer, relayServer: 'new.relay' }])
+    }
+  )
 
   describe('start login retries', () => {
     beforeEach(() => {
@@ -907,7 +965,7 @@ describe('P2PCommunicationClient', () => {
       )
     })
 
-    it('pushes the 2nd character of old room into ignoredRooms and updates storage', async () => {
+    it('ignores the previous room and updates storage', async () => {
       const sender = '@abcdef:relay.server'
       const oldRoom = '!old:room'
       mockStorage.get.mockResolvedValue({ [sender]: oldRoom })
@@ -915,8 +973,7 @@ describe('P2PCommunicationClient', () => {
 
       await client.updatePeerRoom(sender, '!new:room')
 
-      // per implementation, room[1] === 'o' is what gets pushed
-      expect((client as any).ignoredRooms).toContain(oldRoom[1])
+      expect(client['ignoredRooms']).toContain(oldRoom)
       expect(mockStorage.set).toHaveBeenCalledWith(StorageKey.MATRIX_PEER_ROOM_IDS, {
         [sender]: '!new:room'
       })

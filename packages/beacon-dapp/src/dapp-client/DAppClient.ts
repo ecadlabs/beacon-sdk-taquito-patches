@@ -3503,7 +3503,7 @@ export class DAppClient extends Client {
     }
 
     this.events
-      .emit(messageEvents[BeaconMessageType.PermissionRequest].sent, {
+      .emit(messageEvents[request.type].sent, {
         walletInfo: await this.getWalletInfo(),
         extraInfo: {
           resetCallback: () => this.disconnect()

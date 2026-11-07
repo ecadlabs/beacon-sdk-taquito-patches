@@ -50,14 +50,22 @@ export class PostMessageClient extends MessageBasedClient {
     (message: EncryptedExtensionMessage, context: ConnectionContext) => Promise<void>
   > = new Map()
 
+  // The base constructor invokes init before subclass field initialization.
+  declare private messageListener: ((event: unknown) => void) | undefined
+  private channelOpeningListener?: (event: unknown) => Promise<void>
+  private channelOpeningCallback?: (
+    response: ExtendedPostMessagePairingResponse
+  ) => void | Promise<void>
+
   public async init(): Promise<void> {
-    await this.subscribeToMessages()
+    this.subscribeToMessages()
   }
 
   public async listenForEncryptedMessage(
     senderPublicKey: string,
     messageCallback: (message: string, context: ConnectionContext) => void | Promise<void>
   ): Promise<void> {
+    this.subscribeToMessages()
     if (this.activeListeners.has(senderPublicKey)) {
       return
     }
@@ -74,7 +82,9 @@ export class PostMessageClient extends MessageBasedClient {
         return
       }
 
-      await messageCallback(decryptedMessage, context)
+      if (this.activeListeners.get(senderPublicKey) === callbackFunction) {
+        await messageCallback(decryptedMessage, context)
+      }
     }
 
     this.activeListeners.set(senderPublicKey, callbackFunction)
@@ -101,6 +111,10 @@ export class PostMessageClient extends MessageBasedClient {
   public async listenForChannelOpening(
     messageCallback: (pairingResponse: ExtendedPostMessagePairingResponse) => void | Promise<void>
   ): Promise<void> {
+    this.channelOpeningCallback = messageCallback
+    if (this.channelOpeningListener) {
+      return
+    }
     const fn = async (event: unknown): Promise<void> => {
       if (!isTrustedWindowMessage(event)) {
         return
@@ -142,7 +156,9 @@ export class PostMessageClient extends MessageBasedClient {
           }
 
           try {
-            await messageCallback(response)
+            if (this.channelOpeningListener === fn) {
+              await this.channelOpeningCallback?.(response)
+            }
           } catch (error) {
             logger.error('listenForChannelOpening', error)
           }
@@ -150,6 +166,7 @@ export class PostMessageClient extends MessageBasedClient {
       }
     }
 
+    this.channelOpeningListener = fn
     windowRef.addEventListener('message', fn)
   }
 
@@ -170,8 +187,11 @@ export class PostMessageClient extends MessageBasedClient {
     )
   }
 
-  private async subscribeToMessages(): Promise<void> {
-    windowRef.addEventListener('message', (event: unknown) => {
+  private subscribeToMessages(): void {
+    if (this.messageListener) {
+      return
+    }
+    this.messageListener = (event: unknown) => {
       if (!isTrustedWindowMessage(event)) {
         return
       }
@@ -193,6 +213,20 @@ export class PostMessageClient extends MessageBasedClient {
           id: senderId ?? ''
         }).catch((error) => logger.error('subscribeToMessages', error))
       })
-    })
+    }
+    windowRef.addEventListener('message', this.messageListener)
+  }
+
+  public async unsubscribeFromEncryptedMessages(): Promise<void> {
+    this.activeListeners.clear()
+    if (this.messageListener) {
+      windowRef.removeEventListener('message', this.messageListener)
+      this.messageListener = undefined
+    }
+    if (this.channelOpeningListener) {
+      windowRef.removeEventListener('message', this.channelOpeningListener)
+      this.channelOpeningListener = undefined
+    }
+    this.channelOpeningCallback = undefined
   }
 }

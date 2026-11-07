@@ -1,3 +1,4 @@
+import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { StorageManager } from '../../src/managers/StorageManager'
 import { AccountManager } from '../../src/managers/AccountManager'
 import { PeerManager } from '../../src/managers/PeerManager'
@@ -27,33 +28,45 @@ describe('StorageManager', () => {
     await manager.removeAll()
     expect(await manager.getAll()).toEqual([])
   })
-  // Phase 3.6 RED: asynchronous reads must not overwrite another mutation's result.
-  it.fails.each(['add', 'remove'])(
-    'preserves concurrent addOne and %s writes',
-    async (operation) => {
-      const storage = new LocalStorage()
-      const manager = new StorageManager(storage, StorageKey.APP_METADATA_LIST)
-      await manager.addOne(first, () => false)
-      const get = storage.get.bind(storage)
-      vi.spyOn(storage, 'get').mockImplementation(async (key) => {
-        const snapshot = await get(key)
-        await new Promise((resolve) => setTimeout(resolve, 1))
-        return snapshot
-      })
-      await Promise.all([
-        manager.addOne(second, (item) => item.senderId === second.senderId),
-        operation === 'add'
-          ? manager.addOne(
-              { senderId: 'third', name: 'Third' },
-              (item) => item.senderId === 'third'
-            )
-          : manager.remove((item) => item.senderId === first.senderId)
-      ])
-      expect((await manager.getAll()).map((item) => item.senderId).sort()).toEqual(
-        operation === 'add' ? ['first', 'second', 'third'] : ['second']
-      )
-    }
-  )
+  it.each(['add', 'remove'])('preserves concurrent addOne and %s writes', async (operation) => {
+    const storage = new LocalStorage()
+    const manager = new StorageManager(storage, StorageKey.APP_METADATA_LIST)
+    await manager.addOne(first, () => false)
+    const get = storage.get.bind(storage)
+    vi.spyOn(storage, 'get').mockImplementation(async (key) => {
+      const snapshot = await get(key)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      return snapshot
+    })
+    await Promise.all([
+      manager.addOne(second, (item) => item.senderId === second.senderId),
+      operation === 'add'
+        ? manager.addOne({ senderId: 'third', name: 'Third' }, (item) => item.senderId === 'third')
+        : manager.remove((item) => item.senderId === first.senderId)
+    ])
+    expect((await manager.getAll()).map((item) => item.senderId).sort()).toEqual(
+      operation === 'add' ? ['first', 'second', 'third'] : ['second']
+    )
+  })
+})
+
+it('serializes removeAll between concurrent additions', async () => {
+  const storage = new LocalStorage()
+  const manager = new StorageManager(storage, StorageKey.APP_METADATA_LIST)
+  const pending = new ExposedPromise<void>()
+  const set = storage.set.bind(storage)
+  const write = vi.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
+    await pending.promise
+    return set(key, value)
+  })
+  const firstAdd = manager.addOne(first, () => false)
+  await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1))
+  const clearing = manager.removeAll()
+  const secondAdd = manager.addOne(second, () => false)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  pending.resolve()
+  await Promise.all([firstAdd, clearing, secondAdd])
+  expect(await manager.getAll()).toEqual([second])
 })
 
 describe('entity managers', () => {
@@ -132,4 +145,16 @@ describe('entity managers', () => {
     await manager.removeAllAccounts()
     expect(await manager.getAccounts()).toEqual([])
   })
+})
+
+it('allows queued mutations after a failed write', async () => {
+  const storage = new LocalStorage()
+  const manager = new StorageManager(storage, StorageKey.APP_METADATA_LIST)
+  const failure = new Error('write failed')
+  vi.spyOn(storage, 'set').mockRejectedValueOnce(failure)
+  const rejected = expect(manager.addOne(first, () => false)).rejects.toBe(failure)
+  const next = manager.addOne(second, () => false)
+  await rejected
+  await next
+  expect(await manager.getAll()).toEqual([second])
 })

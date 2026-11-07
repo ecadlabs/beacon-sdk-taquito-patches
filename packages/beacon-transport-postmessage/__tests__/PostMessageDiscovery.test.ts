@@ -24,9 +24,10 @@ const loadTransport = async () => {
     windowRef
   }))
   const { PostMessageTransport } = await import('../src/PostMessageTransport')
+  PostMessageTransport.getAvailableExtensions()
   const discovery = listeners[0]
   if (!discovery) {
-    throw new Error('Expected import to start public extension discovery')
+    throw new Error('Expected explicit discovery to register its listener')
   }
 
   return { PostMessageTransport, discovery, listeners, windowRef }

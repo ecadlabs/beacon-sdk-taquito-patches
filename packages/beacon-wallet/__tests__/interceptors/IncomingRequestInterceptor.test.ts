@@ -35,9 +35,7 @@ it('persists permission metadata before delivering the request', async () => {
     storedAtDelivery = config.appMetadataManager.getAppMetadata('dapp')
   })
   await IncomingRequestInterceptor.intercept(config)
-  await vi.waitFor(() =>
-    expect(config.interceptorCallback).toHaveBeenCalledWith(permission, connectionInfo)
-  )
+  expect(config.interceptorCallback).toHaveBeenCalledWith(permission, connectionInfo)
   await expect(storedAtDelivery).resolves.toEqual(metadata)
 })
 const requests: BeaconRequestMessage[] = [
@@ -73,11 +71,9 @@ it.each(requests)('enriches $type with stored metadata', async (message) => {
   const config = setup()
   await config.appMetadataManager.addAppMetadata(metadata)
   await IncomingRequestInterceptor.intercept({ ...config, message })
-  await vi.waitFor(() =>
-    expect(config.interceptorCallback).toHaveBeenCalledWith(
-      { ...message, appMetadata: metadata },
-      connectionInfo
-    )
+  expect(config.interceptorCallback).toHaveBeenCalledWith(
+    { ...message, appMetadata: metadata },
+    connectionInfo
   )
 })
 it.each([BeaconMessageType.PermissionRequest, BeaconMessageType.BlockchainRequest])(
@@ -95,9 +91,7 @@ it.each([BeaconMessageType.PermissionRequest, BeaconMessageType.BlockchainReques
       }
     }
     await IncomingRequestInterceptor.intercept({ ...config, message })
-    await vi.waitFor(() =>
-      expect(config.interceptorCallback).toHaveBeenCalledWith(message, connectionInfo)
-    )
+    expect(config.interceptorCallback).toHaveBeenCalledWith(message, connectionInfo)
     if (type === BeaconMessageType.PermissionRequest) {
       expect(await config.appMetadataManager.getAppMetadata('dapp')).toEqual(metadata)
       expect(await config.appMetadataManager.getAppMetadata('spoofed')).toBeUndefined()
@@ -128,8 +122,7 @@ it('rejects an unknown V2 message in its handler', async () => {
     IncomingRequestInterceptor['handleV2Message']({ ...config, message })
   ).rejects.toThrow('Function not implemented.')
 })
-// Phase 3.2 RED: public interception must await both protocol handlers.
-it.fails.each(['2', '3'])('waits for V%s metadata persistence', async (version) => {
+it.each(['2', '3'])('waits for V%s metadata persistence', async (version) => {
   const config = setup()
   const gate = new ExposedPromise<void>()
   const persist = vi
@@ -156,79 +149,44 @@ it.fails.each(['2', '3'])('waits for V%s metadata persistence', async (version) 
   const resolvedEarly = complete
   gate.resolve()
   await intercepted
-  await vi.waitFor(() => expect(config.interceptorCallback).toHaveBeenCalledTimes(1))
+  expect(config.interceptorCallback).toHaveBeenCalledTimes(1)
   expect(resolvedEarly).toBe(false)
 })
-// Phase 3.2 RED: observe the real handler rejection without leaking it to Vitest.
-it.fails.each(['metadata', 'callback'])(
-  'propagates %s rejection through intercept',
-  async (source) => {
-    const config = setup()
-    const error = new Error(source)
-    if (source === 'metadata')
-      vi.spyOn(config.appMetadataManager, 'addAppMetadata').mockRejectedValue(error)
-    else
-      config.interceptorCallback.mockImplementation(() => {
-        throw error
-      })
-    const original = IncomingRequestInterceptor['handleV2Message'].bind(IncomingRequestInterceptor)
-    let handler: Promise<void> | undefined
-    vi.spyOn(
-      IncomingRequestInterceptor as unknown as { handleV2Message: typeof original },
-      'handleV2Message'
-    ).mockImplementation((options: Parameters<typeof original>[0]) => {
-      handler = original(options)
-      void handler.catch(() => {})
-      return handler
-    })
-    const outcome = IncomingRequestInterceptor.intercept(config).then(
-      () => undefined,
-      (reason: unknown) => reason
-    )
-    await expect(handler).rejects.toBe(error)
-    expect(await outcome).toBe(error)
-  }
-)
-
-// Phase 3.2 RED: callback work is part of interception, including async rejection.
-it.fails.each(['2', '3'])(
-  'waits for asynchronous V%s interceptorCallback completion',
-  async (version) => {
-    const config = setup()
-    const gate = new ExposedPromise<void>()
-    config.interceptorCallback.mockReturnValue(gate.promise)
-    const message =
-      version === '2'
-        ? permission
-        : {
-            ...base,
-            version,
-            message: { ...base, type: BeaconMessageType.BlockchainRequest, blockchainData: {} }
-          }
-    let completed = false
-    const outcome = IncomingRequestInterceptor.intercept({ ...config, message }).then(() => {
-      completed = true
-    })
-    await vi.waitFor(() => expect(config.interceptorCallback).toHaveBeenCalledTimes(1))
-    const resolvedEarly = completed
-    gate.resolve()
-    await outcome
-    expect(resolvedEarly).toBe(false)
-  }
-)
-// Phase 3.2 RED: observe callback rejection separately, without changing its rejected state.
-it.fails('propagates a rejected async interceptorCallback promise', async () => {
+it.each(['metadata', 'callback'])('propagates %s rejection through intercept', async (source) => {
   const config = setup()
-  const error = new Error('async callback')
-  const rejection = Promise.reject(error)
-  void rejection.catch(() => {})
-  config.interceptorCallback.mockReturnValue(rejection)
-  const outcome = IncomingRequestInterceptor.intercept(config).then(
-    () => undefined,
-    (reason: unknown) => reason
-  )
-  await vi.waitFor(() => expect(config.interceptorCallback).toHaveBeenCalledTimes(1))
-  expect(await outcome).toBe(error)
+  const error = new Error(source)
+  if (source === 'metadata')
+    vi.spyOn(config.appMetadataManager, 'addAppMetadata').mockRejectedValue(error)
+  else
+    config.interceptorCallback.mockImplementation(() => {
+      throw error
+    })
+  await expect(IncomingRequestInterceptor.intercept(config)).rejects.toBe(error)
+})
+
+it.each(['2', '3'])('does not wait for the application callback in V%s', async (version) => {
+  const config = setup()
+  const application = new ExposedPromise<void>()
+  config.interceptorCallback.mockReturnValue(application.promise)
+  const message =
+    version === '2'
+      ? permission
+      : {
+          ...base,
+          version,
+          message: { ...base, type: BeaconMessageType.BlockchainRequest, blockchainData: {} }
+        }
+  let completed = false
+  const intercepted = IncomingRequestInterceptor.intercept({ ...config, message }).then(() => {
+    completed = true
+  })
+  try {
+    await vi.waitFor(() => expect(completed).toBe(true))
+    expect(config.interceptorCallback).toHaveBeenCalledTimes(1)
+  } finally {
+    application.resolve()
+    await intercepted
+  }
 })
 
 it('rejects requests whose sender has no stored app metadata', async () => {

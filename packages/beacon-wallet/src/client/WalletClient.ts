@@ -125,7 +125,10 @@ export class WalletClient extends Client {
         if (!this.pendingRequests.some((request) => request[0].id === message.id)) {
           this.pendingRequests.push([typedMessage, connectionContext])
 
-          await this.sendAcknowledgeResponse(typedMessage, connectionContext)
+          // ACK delivery must not block cold-start replay or application delivery.
+          this.sendAcknowledgeResponse(typedMessage, connectionContext).catch((error) =>
+            logger.error('sendAcknowledgeResponse', error)
+          )
 
           await IncomingRequestInterceptor.intercept({
             message: typedMessage,
@@ -145,7 +148,9 @@ export class WalletClient extends Client {
           this.pendingRequests.push([typedMessage, connectionContext])
 
           if (typedMessage.version !== '1') {
-            await this.sendAcknowledgeResponse(typedMessage, connectionContext)
+            this.sendAcknowledgeResponse(typedMessage, connectionContext).catch((error) =>
+              logger.error('sendAcknowledgeResponse', error)
+            )
           }
 
           await IncomingRequestInterceptor.intercept({

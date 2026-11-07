@@ -35,7 +35,7 @@ interface OutgoingResponseInterceptorOptions {
   ownAppMetadata: AppMetadata
   permissionManager: PermissionManager
   appMetadataManager: AppMetadataManager
-  interceptorCallback(message: BeaconMessage): void
+  interceptorCallback(message: BeaconMessage): void | Promise<void>
 }
 
 const logger = new Logger('OutgoingResponseInterceptor')
@@ -48,9 +48,11 @@ const logger = new Logger('OutgoingResponseInterceptor')
 export class OutgoingResponseInterceptor {
   public static async intercept(config: OutgoingResponseInterceptorOptions): Promise<void> {
     if (config.request.version === '2') {
-      OutgoingResponseInterceptor.handleV2Message(config)
+      // eslint-disable-next-line no-return-await
+      return await OutgoingResponseInterceptor.handleV2Message(config)
     } else if (config.request.version === '3') {
-      OutgoingResponseInterceptor.handleV3Message(config)
+      // eslint-disable-next-line no-return-await
+      return await OutgoingResponseInterceptor.handleV3Message(config)
     }
   }
 
@@ -73,7 +75,7 @@ export class OutgoingResponseInterceptor {
 
     logger.log('LOGGING OUTGOING V3', v3Message, appMetadataManager)
 
-    interceptorCallback(msg as any)
+    await interceptorCallback(msg as BeaconMessage)
 
     // switch (v3Message.type) {
     //   case BeaconMessageType.PermissionResponse:
@@ -163,7 +165,7 @@ export class OutgoingResponseInterceptor {
             )
           }
         }
-        interceptorCallback(response)
+        await interceptorCallback(response)
         break
       }
       case BeaconMessageType.Acknowledge: {
@@ -173,7 +175,7 @@ export class OutgoingResponseInterceptor {
           senderId,
           id: message.id
         }
-        interceptorCallback(response)
+        await interceptorCallback(response)
         break
       }
       case BeaconMessageType.PermissionResponse: {
@@ -223,9 +225,9 @@ export class OutgoingResponseInterceptor {
           connectedAt: new Date().getTime()
         }
 
-        permissionManager.addPermission(permission).catch(console.error)
+        await permissionManager.addPermission(permission)
 
-        interceptorCallback(response)
+        await interceptorCallback(response)
         break
       }
       case BeaconMessageType.OperationResponse:
@@ -235,7 +237,7 @@ export class OutgoingResponseInterceptor {
             version: '2',
             ...message
           }
-          interceptorCallback(response)
+          await interceptorCallback(response)
         }
         break
       case BeaconMessageType.SignPayloadResponse:
@@ -245,7 +247,7 @@ export class OutgoingResponseInterceptor {
             version: '2',
             ...message
           }
-          interceptorCallback(response)
+          await interceptorCallback(response)
         }
         break
       // TODO: ENCRYPTION
@@ -266,7 +268,7 @@ export class OutgoingResponseInterceptor {
             version: '2',
             ...message
           }
-          interceptorCallback(response)
+          await interceptorCallback(response)
         }
         break
       case BeaconMessageType.ProofOfEventChallengeResponse:
@@ -276,7 +278,7 @@ export class OutgoingResponseInterceptor {
             version: '2',
             ...message
           }
-          interceptorCallback(response)
+          await interceptorCallback(response)
         }
         break
       case BeaconMessageType.SimulatedProofOfEventChallengeResponse:
@@ -286,7 +288,7 @@ export class OutgoingResponseInterceptor {
             version: '2',
             ...message
           }
-          interceptorCallback(response)
+          await interceptorCallback(response)
         }
         break
       default:

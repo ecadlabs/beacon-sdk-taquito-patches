@@ -132,8 +132,7 @@ it.each([undefined, [{ kind: 'temporary', id: 'rpc.error' }], [{ invalid: true }
     )
   }
 )
-// Phase 3.2 RED: completion includes permission persistence, not just callback dispatch.
-it.fails('waits for permissionManager.addPermission before resolving', async () => {
+it('waits for permissionManager.addPermission before resolving', async () => {
   const config = setup()
   await config.appMetadataManager.addAppMetadata(metadata)
   const gate = new ExposedPromise<void>()
@@ -148,29 +147,14 @@ it.fails('waits for permissionManager.addPermission before resolving', async () 
   await outcome
   expect(resolvedEarly).toBe(false)
 })
-// Phase 3.2 RED: capture the dropped real handler promise to avoid an unhandled rejection.
-it.fails('propagates missing AppMetadata from intercept', async () => {
+it('propagates missing AppMetadata from intercept', async () => {
   const config = setup()
-  const original = OutgoingResponseInterceptor['handleV2Message'].bind(OutgoingResponseInterceptor)
-  let handler: Promise<void> | undefined
-  vi.spyOn(
-    OutgoingResponseInterceptor as unknown as { handleV2Message: typeof original },
-    'handleV2Message'
-  ).mockImplementation((options: Parameters<typeof original>[0]) => {
-    handler = original(options)
-    void handler.catch(() => {})
-    return handler
-  })
-  const outcome = OutgoingResponseInterceptor.intercept(config).then(
-    () => undefined,
-    (reason: unknown) => reason
+  await expect(OutgoingResponseInterceptor.intercept(config)).rejects.toThrow(
+    'AppMetadata not found'
   )
-  await expect(handler).rejects.toThrow('AppMetadata not found')
-  expect(await outcome).toEqual(new Error('AppMetadata not found'))
 })
 
-// Phase 3.2 RED: V3 callback completion must be included in the returned promise.
-it.fails('waits for the V3 interceptor callback', async () => {
+it('waits for the V3 interceptor callback', async () => {
   const config = setup()
   const gate = new ExposedPromise<void>()
   config.interceptorCallback.mockReturnValue(gate.promise)
@@ -239,8 +223,7 @@ it('accepts an explicit address without a public key', async () => {
   expect(config.interceptorCallback).toHaveBeenCalledWith(expect.objectContaining({ address }))
 })
 
-// Phase 3.2 RED: V2 responses and acknowledgements await the actual transport send.
-it.fails.each([...responses, permission])(
+it.each([...responses, permission])(
   'waits for the V2 $type callback to finish',
   async (message) => {
     const config = setup(message)
@@ -261,8 +244,7 @@ it.fails.each([...responses, permission])(
     }
   }
 )
-// Phase 3.2 RED: rejecting the send must reject interception rather than be dropped.
-it.fails.each([...responses, permission])(
+it.each([...responses, permission])(
   'propagates the V2 $type callback rejection',
   async (message) => {
     const config = setup(message)

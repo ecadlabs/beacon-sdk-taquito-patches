@@ -7,6 +7,7 @@ export default defineConfig({
   resolve: {
     // Browser tests use ESM builds, avoiding require(ESM) in Node 22's VM loader.
     alias: {
+      src: fileURLToPath(new URL('./src', import.meta.url)),
       '@ecadlabs/beacon-core': fileURLToPath(
         new URL('../beacon-core/dist/esm/index.js', import.meta.url)
       ),

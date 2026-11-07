@@ -162,6 +162,16 @@ describe('PostMessageClient', () => {
       expect(windowRef.addEventListener).toHaveBeenCalledWith('message', expect.any(Function))
     })
 
+    it('deduplicates repeated channel-opening registrations', async () => {
+      const pairingClient = new PostMessageClient('pairing', {
+        publicKey: new Uint8Array(32), secretKey: new Uint8Array(64)
+      })
+      const callback = vi.fn()
+      await pairingClient.listenForChannelOpening(callback)
+      await pairingClient.listenForChannelOpening(callback)
+      expect(windowRef.addEventListener).toHaveBeenCalledTimes(1)
+    })
+
     it('decrypts a valid channel-open event and calls back', async () => {
       const raw = { id: 'id1', name: 'n', publicKey: 'p', version: 'v' }
       ;(openCryptobox as Mock).mockResolvedValueOnce(JSON.stringify(raw))

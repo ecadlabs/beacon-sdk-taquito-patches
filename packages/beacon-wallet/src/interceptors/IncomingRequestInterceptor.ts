@@ -12,11 +12,11 @@ import {
   BeaconMessageWrapper,
   BlockchainRequestV3,
   PermissionRequestV3,
-  BeaconBaseMessage
+  BeaconBaseMessage,
+  SimulatedProofOfEventChallengeRequestOutput
   // EncryptPayloadRequestOutput
 } from '@ecadlabs/beacon-types'
 import { AppMetadataManager, Logger } from '@ecadlabs/beacon-core'
-import { SimulatedProofOfEventChallengeRequestOutput } from '@ecadlabs/beacon-types/dist/esm/types/beacon/messages/BeaconRequestOutputMessage'
 
 const logger = new Logger('IncomingRequestInterceptor')
 
@@ -49,9 +49,15 @@ export class IncomingRequestInterceptor {
     logger.log('INTERCEPTING REQUEST', config.message)
 
     if (config.message.version === '2') {
-      IncomingRequestInterceptor.handleV2Message(config as IncomingRequestInterceptorOptionsV2)
+      // eslint-disable-next-line no-return-await
+      return await IncomingRequestInterceptor.handleV2Message(
+        config as IncomingRequestInterceptorOptionsV2
+      )
     } else if (config.message.version === '3') {
-      IncomingRequestInterceptor.handleV3Message(config as IncomingRequestInterceptorOptionsV3)
+      // eslint-disable-next-line no-return-await
+      return await IncomingRequestInterceptor.handleV3Message(
+        config as IncomingRequestInterceptorOptionsV3
+      )
     }
   }
 
@@ -169,19 +175,6 @@ export class IncomingRequestInterceptor {
           interceptorCallback(request, connectionInfo)
         }
         break
-      case BeaconMessageType.SimulatedProofOfEventChallengeRequest:
-        {
-          const appMetadata: AppMetadata = await IncomingRequestInterceptor.getAppMetadata(
-            appMetadataManager,
-            message.senderId
-          )
-          const request: SimulatedProofOfEventChallengeRequestOutput = {
-            appMetadata,
-            ...message
-          }
-          interceptorCallback(request, connectionInfo)
-        }
-        break
       default:
         logger.log('intercept', 'Message not handled')
         assertNever(message)
@@ -196,9 +189,9 @@ export class IncomingRequestInterceptor {
       interceptorCallback
     }: IncomingRequestInterceptorOptionsV3 = config
 
-    const wrappedMessage:
+    const wrappedMessage = msg as unknown as
       | BeaconMessageWrapper<PermissionRequestV3>
-      | BeaconMessageWrapper<BlockchainRequestV3> = msg as any /* TODO: Remove any */
+      | BeaconMessageWrapper<BlockchainRequestV3>
 
     const v3Message: PermissionRequestV3 | BlockchainRequestV3 = wrappedMessage.message
 

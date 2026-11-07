@@ -17,7 +17,6 @@ beforeEach(() => {
   databases = []
 })
 afterEach(async () => {
-  // A cold-start RED assertion may finish before the constructor's open request.
   for (const storage of databases) {
     await vi.waitFor(() => expect(storage['db']).not.toBeNull())
     storage['db']?.close()
@@ -81,56 +80,47 @@ it('fills another initialized store, preserving unrelated entries and skipping a
   await source.set('z', 'excluded')
   await target.set('existing', 'retained')
   await source.fillStore('target', 'values', ['z'])
-  // Current fillStore starts the copy but does not await transaction completion.
-  await vi.waitFor(async () => expect(await target.get('a')).toBe('first'))
+  expect(await target.get('a')).toBe('first')
   expect(await target.get('z')).toBeUndefined()
   expect(await target.get('existing')).toBe('retained')
 })
-// Phase 3.4 RED: constructor initialization must be awaited by each operation.
-it.fails('supports get immediately after construction', async () => {
+it('supports get immediately after construction', async () => {
   const storage = create()
   await expect(storage.get('missing')).resolves.toBeUndefined()
 })
-// Phase 3.4 RED: the first write must survive asynchronous database initialization.
-it.fails('supports set immediately after construction', async () => {
+it('supports set immediately after construction', async () => {
   const storage = create()
   await storage.set('key', 'value')
   expect(await storage.get('key')).toBe('value')
 })
-// Phase 3.4 RED: concrete Storage implementations must provide the key mapping contract.
-it.fails('returns a storage key instead of throwing Method not implemented', async () => {
+it('returns a storage key instead of throwing Method not implemented', async () => {
   const storage = await initialized()
   expect(storage.getPrefixedKey(StorageKey.ACTIVE_ACCOUNT)).toBe(StorageKey.ACTIVE_ACCOUNT)
 })
-// Phase 3.4 RED: registration may be a no-op, but must not throw.
-it.fails('accepts a storage change subscription', async () => {
+it('accepts a storage change subscription', async () => {
   const storage = await initialized()
   await expect(storage.subscribeToStorageChanged(() => ({}))).resolves.toBeUndefined()
 })
 
-// Phase 3.4 RED: completion must include the target transaction.
-it.fails('finishes copying before fillStore resolves', async () => {
+it('finishes copying before fillStore resolves', async () => {
   const source = await initialized('source')
   const target = await initialized('target')
   await source.set('a', 'first')
   await source.fillStore('target', 'values')
   const valueAtResolution = await target.get('a')
-  await vi.waitFor(async () => expect(await target.get('a')).toBe('first'))
   expect(valueAtResolution).toBe('first')
 })
-// Phase 3.4 RED: filtering keys must preserve the original key/value association.
-it.fails('copies the correct values when skipping the first key', async () => {
+it('copies the correct values when skipping the first key', async () => {
   const source = await initialized('source')
   const target = await initialized('target')
   await source.set('a', 'excluded')
   await source.set('b', 'retained')
   await source.fillStore('target', 'values', ['a'])
-  await vi.waitFor(async () => expect(await target.getAllKeys()).toEqual(['b']))
+  expect(await target.getAllKeys()).toEqual(['b'])
   expect(await target.get('b')).toBe('retained')
 })
 
-// Phase 3.4 RED: all operations share the same initialization requirement.
-it.fails.each(['delete', 'clearStore', 'getAll', 'getAllKeys'] as const)(
+it.each(['delete', 'clearStore', 'getAll', 'getAllKeys'] as const)(
   'supports cold-start %s',
   async (operation) => {
     const storage = create()
@@ -151,15 +141,14 @@ it('upgrades an existing database to add a missing store without losing values',
   await upgraded.set('key', 'new store', 'added')
   expect(await upgraded.get('key', 'added')).toBe('new store')
 })
-// Phase 3.4 RED: fillStore owns the additional target connection it opens.
-it.fails('closes the fillStore target connection after copying', async () => {
+it('closes the fillStore target connection after copying', async () => {
   const source = await initialized('source')
   const target = await initialized('target')
   await source.set('a', 'copied')
   const initialConnections = new Set(connections)
   const close = vi.spyOn(FakeIDBDatabase.prototype, 'close')
   await source.fillStore('target', 'values')
-  await vi.waitFor(async () => expect(await target.get('a')).toBe('copied'))
+  expect(await target.get('a')).toBe('copied')
   const ownedConnections = [...connections].filter(
     (db) => !initialConnections.has(db) && db.name === 'target'
   )
@@ -167,4 +156,42 @@ it.fails('closes the fillStore target connection after copying', async () => {
   expect(close.mock.contexts).toContain(ownedConnections[0])
   expect(close.mock.contexts).not.toContain(source['db'])
   expect(close.mock.contexts).not.toContain(target['db'])
+})
+
+it('rejects operations cleanly when IndexedDB is unavailable', async () => {
+  vi.stubGlobal('window', undefined)
+  const storage = new IndexedDBStorage()
+  await expect(storage.get('key')).rejects.toBe('IndexedDB is not supported.')
+  await expect(storage.set('key', 'value')).rejects.toBe('IndexedDB is not supported.')
+})
+
+it('closes the target connection when copying to a missing store fails', async () => {
+  const source = await initialized('source')
+  await initialized('target')
+  const initialConnections = new Set(connections)
+  const close = vi.spyOn(FakeIDBDatabase.prototype, 'close')
+  await expect(source.fillStore('target', 'missing')).rejects.toThrow('missing not found')
+  const owned = [...connections].filter((db) => !initialConnections.has(db))
+  expect(owned).toHaveLength(1)
+  expect(close.mock.contexts).toContain(owned[0])
+})
+
+it('finishes initialization before opening the same database as a copy target', async () => {
+  const original = await initialized('upgrade-copy')
+  await original.set('key', 'value')
+  original['db']?.close()
+  const upgraded = create('upgrade-copy', ['values', 'other', 'added'])
+  let completed = false
+  const copying = upgraded.fillStore('upgrade-copy', 'added').then(() => {
+    completed = true
+  })
+  copying.catch(() => undefined)
+  try {
+    await vi.waitFor(() => expect(completed).toBe(true))
+    await copying
+    expect(await upgraded.get('key', 'added')).toBe('value')
+  } finally {
+    connections.forEach((connection) => connection.close())
+    await copying.catch(() => undefined)
+  }
 })
