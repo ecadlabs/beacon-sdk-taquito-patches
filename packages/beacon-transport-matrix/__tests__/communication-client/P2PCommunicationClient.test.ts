@@ -118,6 +118,30 @@ describe('P2PCommunicationClient', () => {
     throw new Error('Timed out waiting for condition')
   }
 
+  // Phase 3.3 RED: retain the entire obsolete room ID, never its second character.
+  it.fails('ignores the full previous room when updating a peer room', async () => {
+    mockStorage.get.mockResolvedValueOnce({ '@peer:relay': '!old:relay' })
+    await client.updatePeerRoom('@peer:relay', '!new:relay')
+    expect(client['ignoredRooms']).toContain('!old:relay')
+    expect(client['ignoredRooms']).not.toContain('o')
+  })
+
+  // Phase 3.3 RED: writing the same room must not mark it as obsolete.
+  it.fails('does not ignore an unchanged peer room', async () => {
+    mockStorage.get.mockResolvedValueOnce({ '@peer:relay': '!same:relay' })
+    await client.updatePeerRoom('@peer:relay', '!same:relay')
+    expect(client['ignoredRooms']).toEqual([])
+  })
+
+  // Phase 3.3 RED: ignored rooms belong to a session, not the client lifetime.
+  it.fails('clears ignoredRooms when resetting the current session', async () => {
+    mockStorage.delete.mockResolvedValue(undefined)
+    client['ignoredRooms'].push('!old:relay')
+    await client['resetSession'](client['captureSession']().id)
+    expect(mockStorage.delete).toHaveBeenCalledWith(StorageKey.MATRIX_PEER_ROOM_IDS)
+    expect(client['ignoredRooms']).toEqual([])
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
 

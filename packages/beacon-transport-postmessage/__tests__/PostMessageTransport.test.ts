@@ -138,3 +138,26 @@ describe('PostMessageTransport.connect', () => {
     }
   })
 })
+
+// Phase 3.5 RED: lack of an extension must settle false and detach its listener.
+it.fails('bounds isAvailable when no extension responds', async () => {
+  vi.useFakeTimers()
+  const { windowRef } = await import('@ecadlabs/beacon-core')
+  const add = vi.spyOn(windowRef, 'addEventListener')
+  const remove = vi.spyOn(windowRef, 'removeEventListener')
+  let result: boolean | undefined
+  const pending = PostMessageTransport.isAvailable().then((value) => {
+    result = value
+  })
+  try {
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(result).toBe(false)
+    expect(remove).toHaveBeenCalledWith('message', add.mock.calls[0][1])
+    await pending
+  } finally {
+    for (const [type, listener] of add.mock.calls) windowRef.removeEventListener(type, listener)
+    vi.restoreAllMocks()
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  }
+})
