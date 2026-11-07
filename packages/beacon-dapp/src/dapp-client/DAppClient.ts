@@ -574,7 +574,22 @@ export class DAppClient extends Client {
         }
       } else if (ownsRequest) {
         if (typedMessage.type === BeaconMessageType.PermissionResponse && appMetadata) {
-          await this.appMetadataManager.addAppMetadata(appMetadata)
+          try {
+            await this.appMetadataManager.addAppMetadata(appMetadata)
+          } catch {
+            if (this.openRequests.get(message.id) === openRequest) {
+              openRequest.reject({
+                id: message.id,
+                type: BeaconMessageType.Error,
+                errorType: BeaconErrorType.UNKNOWN_ERROR,
+                senderId: '',
+                version: '2'
+              })
+              this.clearOpenRequest(message.id)
+            }
+
+            return
+          }
         }
 
         if (this.openRequests.get(message.id) !== openRequest) {
