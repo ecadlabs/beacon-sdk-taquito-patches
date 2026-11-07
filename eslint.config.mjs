@@ -1,0 +1,185 @@
+import tsPlugin from '@typescript-eslint/eslint-plugin'
+import tsParser from '@typescript-eslint/parser'
+import importPlugin from 'eslint-plugin-import'
+import prettier from 'eslint-config-prettier'
+import globals from 'globals'
+
+export default [
+  {
+    // Preserve ESLint 8's handling of existing suppression comments.
+    linterOptions: { reportUnusedDisableDirectives: 'off' }
+  },
+  ...tsPlugin.configs['flat/recommended'],
+  prettier,
+  {
+    files: ['**/*.ts', '**/*.tsx'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { project: './tsconfig.json', tsconfigRootDir: import.meta.dirname },
+      sourceType: 'module',
+      globals: { ...globals.browser, ...globals.es2015, ...globals.node }
+    },
+    plugins: {
+      import: importPlugin,
+      // Resolve legacy source suppressions without restoring the retired rule.
+      // prefer-arrow-callback below enforces the replacement policy.
+      'prefer-arrow': {
+        rules: {
+          'prefer-arrow-functions': {
+            meta: { schema: [] },
+            create: () => ({})
+          }
+        }
+      }
+    },
+    rules: {
+      '@typescript-eslint/adjacent-overload-signatures': 'error',
+      '@typescript-eslint/array-type': 'error',
+      '@typescript-eslint/await-thenable': 'error',
+      '@typescript-eslint/consistent-type-assertions': 'error',
+      '@typescript-eslint/consistent-type-definitions': 'error',
+      '@typescript-eslint/explicit-member-accessibility': [
+        'error',
+        {
+          accessibility: 'explicit',
+          overrides: {
+            constructors: 'no-public'
+          }
+        }
+      ],
+      '@typescript-eslint/no-empty-function': 'error',
+      '@typescript-eslint/no-empty-interface': 'error',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-extraneous-class': 'off',
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-for-in-array': 'error',
+      '@typescript-eslint/no-inferrable-types': 'off',
+      '@typescript-eslint/no-misused-new': 'error',
+      '@typescript-eslint/no-namespace': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'error',
+      'no-param-reassign': 'error',
+      '@typescript-eslint/no-parameter-properties': 'off',
+      '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/no-this-alias': 'error',
+      '@typescript-eslint/no-unnecessary-qualifier': 'error',
+      '@typescript-eslint/no-unnecessary-type-arguments': 'error',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'error',
+      '@typescript-eslint/no-use-before-define': 'error',
+      '@typescript-eslint/no-var-requires': 'error',
+      '@typescript-eslint/prefer-for-of': 'off',
+      '@typescript-eslint/prefer-function-type': 'error',
+      '@typescript-eslint/prefer-namespace-keyword': 'error',
+      '@typescript-eslint/promise-function-async': 'off',
+      '@typescript-eslint/restrict-plus-operands': 'error',
+      '@typescript-eslint/strict-boolean-expressions': 'off',
+      '@typescript-eslint/triple-slash-reference': 'error',
+      '@typescript-eslint/unbound-method': 'error',
+      '@typescript-eslint/unified-signatures': 'error',
+      'arrow-body-style': ['error', 'as-needed'],
+      'arrow-parens': ['off', 'as-needed'],
+      'class-methods-use-this': 'off',
+      'comma-dangle': 'off',
+      complexity: 'error',
+      'constructor-super': 'error',
+      curly: 'error',
+      'default-case': 'error',
+      'dot-notation': 'error',
+      'eol-last': 'off',
+      eqeqeq: ['error', 'smart'],
+      'guard-for-in': 'error',
+      'id-blacklist': [
+        'warn',
+        'any',
+        'Number',
+        'number',
+        'String',
+        'string',
+        'Boolean',
+        'boolean',
+        'Undefined'
+      ],
+      'id-match': 'error',
+      'import/no-default-export': 'error',
+      'import/no-deprecated': 'error',
+      'import/no-extraneous-dependencies': [
+        'error',
+        {
+          devDependencies: false
+        }
+      ],
+      'import/no-internal-modules': 'off',
+      'import/no-unassigned-import': 'off',
+      'import/order': 'error',
+      'linebreak-style': 'off',
+      'max-classes-per-file': ['error', 1],
+      'max-len': 'off',
+      'new-parens': 'off',
+      'newline-per-chained-call': 'off',
+      'no-bitwise': 'error',
+      'no-caller': 'error',
+      'no-cond-assign': 'error',
+      'no-console': 'warn',
+      'no-debugger': 'error',
+      'no-duplicate-case': 'error',
+      'no-duplicate-imports': 'error',
+      'no-empty': 'error',
+      'no-eval': 'error',
+      'no-extra-semi': 'off',
+      'no-fallthrough': 'error',
+      'no-invalid-this': 'error',
+      'no-irregular-whitespace': 'off',
+      'no-magic-numbers': 'off',
+      'no-multiple-empty-lines': 'off',
+      'no-new-wrappers': 'error',
+      'no-redeclare': 'error',
+      'no-return-await': 'error',
+      'no-sequences': 'error',
+      'no-shadow': [
+        'error',
+        {
+          hoist: 'all'
+        }
+      ],
+      'no-sparse-arrays': 'error',
+      'no-template-curly-in-string': 'error',
+      'no-throw-literal': 'error',
+      'no-trailing-spaces': 'off',
+      'no-undef-init': 'error',
+      'no-underscore-dangle': ['error', { allowAfterThis: true, allowAfterSuper: true }],
+      'no-unsafe-finally': 'error',
+      'no-unused-expressions': 'off',
+      '@typescript-eslint/no-unused-expressions': 'error',
+      'no-unused-labels': 'error',
+      'no-var': 'error',
+      'no-void': 'error',
+      'object-shorthand': 'error',
+      'one-var': ['error', 'never'],
+      'padding-line-between-statements': [
+        'error',
+        {
+          blankLine: 'always',
+          prev: '*',
+          next: 'return'
+        }
+      ],
+      'prefer-arrow-callback': 'error',
+      'prefer-const': 'error',
+      'prefer-object-spread': 'off',
+      '@typescript-eslint/prefer-readonly': 'error',
+      'prefer-template': 'error',
+      'quote-props': 'off',
+      radix: 'error',
+      'space-before-function-paren': 'off',
+      'spaced-comment': 'error',
+      'use-isnan': 'error',
+      'valid-typeof': 'off',
+      yoda: 'error',
+      'no-implicit-coercion': 'error'
+    }
+  },
+  {
+    // Logger is the console adapter; application code uses LoggerInterface.
+    files: ['packages/beacon-core/src/utils/Logger.ts'],
+    rules: { 'no-console': 'off' }
+  }
+]

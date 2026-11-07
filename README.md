@@ -165,7 +165,7 @@ For a more complete example, see [`examples/wallet.html`](./examples/wallet.html
 ## Adding a wallet to Beacon SDK
 
 Please create a PR and add your wallet in
-[`scripts/blockchains/tezos.ts`](./scripts/blockchains/tezos.ts).
+[`scripts/blockchains/tezos.mjs`](./scripts/blockchains/tezos.mjs).
 
 For iOS wallets, the wallet needs to define a custom URL scheme to support same-device functionality.
 

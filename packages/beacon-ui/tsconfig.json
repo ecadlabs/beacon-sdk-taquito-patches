@@ -7,7 +7,7 @@
     "moduleResolution": "bundler",
     // "allowSyntheticDefaultImports": true,
     // "esModuleInterop": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "jsxImportSource": "react",
     "types": ["vite/client", "node", "chrome", "vitest/globals"],
     "typeRoots": [

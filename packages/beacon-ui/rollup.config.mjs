@@ -1,7 +1,6 @@
 import { string } from 'rollup-plugin-string'
 import postcss from 'rollup-plugin-postcss'
 import typescript from 'rollup-plugin-typescript2'
-import babel from '@rollup/plugin-babel'
 import terser from '@rollup/plugin-terser'
 import commonjs from '@rollup/plugin-commonjs'
 import resolve from '@rollup/plugin-node-resolve'
@@ -33,13 +32,6 @@ export default [
           include: ['src/**/*'],
           exclude: ['**/__tests__/**', '**/*.test.ts', '**/*.spec.ts']
         }
-      }),
-      babel({
-        extensions,
-        babelHelpers: 'bundled',
-        compact: false,
-        include: ['src/**/*'],
-        presets: [['@babel/preset-react', { runtime: 'automatic' }]]
       }),
       terser(),
       json()
@@ -78,13 +70,6 @@ export default [
           include: ['src/**/*'],
           exclude: ['**/__tests__/**', '**/*.test.ts', '**/*.spec.ts']
         }
-      }),
-      babel({
-        extensions,
-        babelHelpers: 'bundled',
-        compact: false,
-        include: ['src/**/*'],
-        presets: [['@babel/preset-react', { runtime: 'automatic' }]]
       }),
       terser(),
       json()

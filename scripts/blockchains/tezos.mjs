@@ -1,23 +1,20 @@
-import { App, DesktopApp, ExtensionApp, WebApp } from 'packages/beacon-types/src/types/ui'
-
-// TODO: Temporary build fix
-export enum NetworkType {
-  MAINNET = 'mainnet',
+export const NetworkType = {
+  MAINNET: 'mainnet',
   /** @deprecated Ghostnet is succeeded by shadownet. */
-  GHOSTNET = 'ghostnet',
-  WEEKLYNET = 'weeklynet', // Testnet, resets every week
-  DAILYNET = 'dailynet', // Testnet, resets every day
+  GHOSTNET: 'ghostnet',
+  WEEKLYNET: 'weeklynet', // Testnet, resets every week
+  DAILYNET: 'dailynet', // Testnet, resets every day
   /** @deprecated Seoulnet is succeeded by tallinnnet. */
-  SEOULNET = 'seoulnet',
-  SHADOWNET = 'shadownet',
-  TALLINNNET = 'tallinnnet',
-  TEZLINK_SHADOWNET = 'tezlink-shadownet',
-  TEZOSX_PREVIEWNET = 'tezosx-previewnet',
-  USHUAIANET = 'ushuaianet',
-  CUSTOM = 'custom'
+  SEOULNET: 'seoulnet',
+  SHADOWNET: 'shadownet',
+  TALLINNNET: 'tallinnnet',
+  TEZLINK_SHADOWNET: 'tezlink-shadownet',
+  TEZOSX_PREVIEWNET: 'tezosx-previewnet',
+  USHUAIANET: 'ushuaianet',
+  CUSTOM: 'custom'
 }
 
-export const tezosExtensionList: ExtensionApp[] = [
+export const tezosExtensionList = [
   {
     key: 'temple_chrome',
     id: 'ookjlbkiijinhpmnjffcofjonbfbgaoc',
@@ -47,7 +44,7 @@ export const tezosExtensionList: ExtensionApp[] = [
   }
 ]
 
-export const tezosWebList: WebApp[] = [
+export const tezosWebList = [
   {
     key: 'metamask_tezos_web',
     name: 'MetaMask',
@@ -109,7 +106,7 @@ export const tezosWebList: WebApp[] = [
   }
 ]
 
-export const tezosDesktopList: DesktopApp[] = [
+export const tezosDesktopList = [
   {
     key: 'infinity_wallet',
     name: 'Infinity Wallet',
@@ -139,7 +136,7 @@ export const tezosDesktopList: DesktopApp[] = [
   }
 ]
 
-export const tezosIosList: App[] = [
+export const tezosIosList = [
   {
     key: 'airgap_ios',
     name: 'AirGap Wallet',

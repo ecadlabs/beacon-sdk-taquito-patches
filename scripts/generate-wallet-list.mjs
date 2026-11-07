@@ -1,41 +1,34 @@
-import * as path from 'path'
+import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { readFile, writeFile } from 'node:fs/promises'
-
-import {
-  ExtensionApp,
-  WebApp,
-  App,
-  AppBase,
-  DesktopApp
-} from '../packages/beacon-types/src/types/ui'
 
 import {
   tezosDesktopList,
   tezosExtensionList,
   tezosIosList,
   tezosWebList
-} from './blockchains/tezos'
+} from './blockchains/tezos.mjs'
 
 import {
   tezosSaplingDesktopList,
   tezosSaplingExtensionList,
   tezosSaplingIosList,
   tezosSaplingWebList
-} from './blockchains/tezos-sapling'
+} from './blockchains/tezos-sapling.mjs'
 
-const { createDataUri } = require('./helpers/logo')
+import { createDataUri } from './helpers/logo.js'
 
-const generateForBlockchains = (
-  packagePath: string,
-  extensionList: ExtensionApp[],
-  desktopList: DesktopApp[],
-  webList: WebApp[],
-  iosList: App[]
+const generateForBlockchains = async (
+  packagePath,
+  extensionList,
+  desktopList,
+  webList,
+  iosList
 ) => {
-  const PKG_DIR = path.join(__dirname, '../')
+  const PKG_DIR = fileURLToPath(new URL('../', import.meta.url))
   const REGISTRY_DIR = path.join(PKG_DIR, 'assets', 'logos')
 
-  const convert = <T extends AppBase>(list: T[]): Promise<T[]> => {
+  const convert = (list) => {
     return Promise.all(
       list.map(async (entry) => {
         const ext = path.extname(entry.logo).replace('.', '')
@@ -45,9 +38,7 @@ const generateForBlockchains = (
         }
 
         const imgBuffer = await readFile(path.join(REGISTRY_DIR, entry.logo))
-        entry.logo = createDataUri(imgBuffer, ext)
-
-        return entry
+        return { ...entry, logo: createDataUri(imgBuffer, ext) }
       })
     )
   }
@@ -113,13 +104,10 @@ const generateForBlockchains = (
     )
   }
 
-  createLists()
-  createAlert()
-  createToast()
+  await Promise.all([createLists(), createAlert(), createToast()])
 }
 
-// Usage examples with default 'wallet-lists'
-generateForBlockchains(
+await generateForBlockchains(
   'beacon-blockchain-tezos',
   tezosExtensionList,
   tezosDesktopList,
@@ -127,7 +115,7 @@ generateForBlockchains(
   tezosIosList
 )
 
-generateForBlockchains(
+await generateForBlockchains(
   'beacon-blockchain-tezos-sapling',
   tezosSaplingExtensionList,
   tezosSaplingDesktopList,
@@ -135,7 +123,7 @@ generateForBlockchains(
   tezosSaplingIosList
 )
 
-generateForBlockchains(
+await generateForBlockchains(
   'beacon-ui',
   tezosExtensionList,
   tezosDesktopList,

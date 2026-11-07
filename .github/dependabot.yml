@@ -35,3 +35,11 @@ updates:
       - dependency-name: "typescript"
         versions:
           - ">= 6.0.0"
+      # Keep ESLint within the major supported by eslint-plugin-import.
+      - dependency-name: "eslint"
+        versions:
+          - ">= 10.0.0"
+      # Match the Node 22/24 LTS package baseline.
+      - dependency-name: "@types/node"
+        versions:
+          - ">= 25.0.0"

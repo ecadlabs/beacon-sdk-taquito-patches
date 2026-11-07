@@ -27,7 +27,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "prebuild": "ts-node --project tsconfig-cjs.json scripts/generate-wallet-list.ts",
+    "prebuild": "node scripts/generate-wallet-list.mjs",
     "build": "npm run check:versions && npm run build:packages && npm run webpack:all && npm run check:sourcemaps",
     "build:packages": "node scripts/run-workspaces.mjs tsc --topological",
     "webpack:all": "npm run webpack:sdk && npm run webpack:dapp && npm run webpack:wallet",
@@ -76,7 +76,6 @@
     "@walletconnect/sign-client": "2.18.0",
     "@walletconnect/types": "2.18.0",
     "@walletconnect/utils": "2.18.0",
-    "@babel/plugin-transform-modules-systemjs": "7.29.4",
     "fast-uri": "3.1.9",
     "unstorage": "1.17.5",
     "h3": "1.15.9",
@@ -94,9 +93,6 @@
     "@eslint/eslintrc": {
       "ajv": "6.14.0",
       "js-yaml": "4.3.2",
-      "minimatch": "3.1.5"
-    },
-    "@humanwhocodes/config-array": {
       "minimatch": "3.1.5"
     },
     "eslint-plugin-import": {
@@ -122,9 +118,6 @@
     "minimatch@9.0.7": {
       "brace-expansion": "2.1.7"
     },
-    "ts-node": {
-      "diff": "4.0.4"
-    },
     "postcss-load-config@3.1.4": {
       "yaml": "1.10.3"
     },
@@ -139,10 +132,6 @@
     }
   },
   "devDependencies": {
-    "@babel/core": "^7.29.7",
-    "@babel/preset-env": "^7.29.7",
-    "@babel/preset-react": "^7.29.7",
-    "@babel/preset-typescript": "^7.29.7",
     "@playwright/test": "^1.64.1",
     "@types/chrome": "^0.3.7",
     "@types/elliptic": "6.4.18",
@@ -150,30 +139,21 @@
     "@typescript-eslint/eslint-plugin": "^8.72.1",
     "@typescript-eslint/parser": "^8.72.1",
     "@vitest/coverage-v8": "^5.1.0",
-    "eslint": "^8.57.1",
+    "eslint": "^9.39.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-no-null": "1.0.2",
-    "eslint-plugin-prefer-arrow": "1.2.3",
     "fake-indexeddb": "^6.2.7",
+    "globals": "^13.24.0",
     "husky": "9.1.7",
     "jsdom": "26.1.0",
-    "jsdom-global": "3.0.2",
     "prettier": "^3.9.10",
     "pretty-quick": "^4.2.2",
     "terser": "^5.51.2",
-    "ts-node": "10.9.2",
     "typedoc": "^0.28.20",
     "typedoc-plugin-internal-external": "2.2.0",
     "typescript": "5.9.3",
-    "uglify-js": "3.19.3",
     "vitest": "^5.1.0",
     "webpack": "^5.112.2",
     "webpack-cli": "^7.3.1"
-  },
-  "husky": {
-    "hooks": {
-      "pre-commit": "npm run check:versions && pretty-quick --staged"
-    }
   }
 }

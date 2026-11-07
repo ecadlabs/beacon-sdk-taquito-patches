@@ -21,7 +21,7 @@ import {
   installLocalChannel
 } from '../helpers/controlled-sign-client'
 
-// Babel does not inline const enums from built dependencies. Load the source enum.
+// esbuild does not inline const enums from built dependencies. Load the source enum.
 vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
   ...(await vi.importActual<
