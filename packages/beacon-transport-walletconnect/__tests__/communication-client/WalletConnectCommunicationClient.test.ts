@@ -607,7 +607,10 @@ describe('WalletConnectCommunicationClient basics', () => {
             resolveSecondFetch = resolve
           })
       )
-    const notifyListenersSpy = vi.spyOn(client as any, 'notifyListeners')
+    const delivered: unknown[] = []
+    await client.listenForEncryptedMessage('observer', (message) => {
+      delivered.push(JSON.parse(message))
+    })
 
     try {
       const firstUpdate = (client as any).updateActiveAccount(
@@ -628,17 +631,16 @@ describe('WalletConnectCommunicationClient basics', () => {
       await firstUpdate
 
       expect((client as any).activeAccountOrPbk).toBe('tz1SecondAccount')
-      expect(notifyListenersSpy).toHaveBeenCalledTimes(1)
-      expect(notifyListenersSpy).toHaveBeenCalledWith(
-        'active-topic',
+      expect(delivered).toEqual([
         expect.objectContaining({
           type: BeaconMessageType.ChangeAccountRequest,
+          senderId: 'active-topic',
           publicKey: 'pk-second'
         })
-      )
+      ])
     } finally {
       fetchAccountsSpy.mockRestore()
-      notifyListenersSpy.mockRestore()
+      await client.unsubscribeFromEncryptedMessage('observer')
       ;(isPublicKeySC as Mock).mockReturnValue(true)
     }
   })

@@ -285,7 +285,10 @@ export abstract class Transport<
    */
   protected async notifyListeners(
     message: unknown,
-    connectionInfo: ConnectionContext
+    connectionInfo: ConnectionContext,
+    dispatch?: (
+      listener: (message: unknown, connectionInfo: ConnectionContext) => void | Promise<void>
+    ) => void | Promise<void>
   ): Promise<void> {
     if (this.listeners.length === 0) {
       logger.warn('notifyListeners', '0 listeners notified!', this)
@@ -293,7 +296,11 @@ export abstract class Transport<
       logger.log('notifyListeners', `Notifying ${this.listeners.length} listeners`, this)
     }
 
-    await Promise.all(this.listeners.map(async (listener) => listener(message, connectionInfo)))
+    await Promise.all(
+      this.listeners.map(async (listener) =>
+        dispatch ? dispatch(listener) : listener(message, connectionInfo)
+      )
+    )
   }
 
   abstract listen(publicKey: string): Promise<void>

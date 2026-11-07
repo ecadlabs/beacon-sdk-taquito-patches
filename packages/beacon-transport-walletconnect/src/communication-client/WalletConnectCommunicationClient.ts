@@ -26,7 +26,7 @@ import {
   OperationResponseInput,
   Optional,
   PermissionRequest,
-  PermissionResponseInput,
+  PermissionResponse,
   PermissionScope,
   SignPayloadRequest,
   SignPayloadResponseInput,
@@ -116,9 +116,18 @@ type ChannelOpeningListener = (
   isCurrent: () => boolean
 ) => boolean | Promise<boolean>
 
+type SessionUpdateMessage = PermissionResponse | ChangeAccountRequest
+type SessionUpdateListener = (
+  message: SessionUpdateMessage,
+  isCurrent: () => boolean
+) => void | Promise<void>
+type MessageListener = (
+  message: string,
+  update?: { message: SessionUpdateMessage; isCurrent: () => boolean }
+) => void | Promise<void>
+
 export class WalletConnectCommunicationClient extends CommunicationClient {
-  protected readonly activeListeners: Map<string, (message: string) => void | Promise<void>> =
-    new Map()
+  protected readonly activeListeners: Map<string, MessageListener> = new Map()
 
   protected readonly channelOpeningListeners: Map<string, ChannelOpeningListener> = new Map()
   private pairingGeneration = 0
@@ -233,13 +242,24 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
   public async listenForEncryptedMessage(
     senderPublicKey: string,
-    messageCallback: (message: string) => void | Promise<void>
+    messageCallback: (message: string) => void | Promise<void>,
+    sessionUpdateCallback?: SessionUpdateListener
   ): Promise<void> {
     if (this.activeListeners.has(senderPublicKey)) {
       return
     }
 
-    const callbackFunction = async (message: string): Promise<void> => {
+    const callbackFunction: MessageListener = async (message, update) => {
+      if (update) {
+        if (!update.isCurrent()) {
+          return
+        }
+        if (sessionUpdateCallback) {
+          await sessionUpdateCallback(update.message, update.isCurrent)
+
+          return
+        }
+      }
       await messageCallback(message)
     }
 
@@ -492,7 +512,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     })
   }
 
-  private async notifyListenersWithPermissionResponse(
+  private async getPermissionResponse(
     session: SessionTypes.Struct,
     network: Network,
     sessionEventId: string,
@@ -541,7 +561,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       throw new Error('Public Key in `tezos_getAccounts` is empty!')
     }
 
-    const permissionResponse: PermissionResponseInput = {
+    const permissionResponse: Omit<PermissionResponse, IgnoredResponseInputProperties> = {
       type: BeaconMessageType.PermissionResponse,
       appMetadata: {
         senderId: this.getTopicFromSession(session),
@@ -562,10 +582,6 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
       return permissionResponse
     }
-    if (this.session === session) {
-      await this.notifyListeners(session.topic, permissionResponse)
-    }
-
     return permissionResponse
   }
 
@@ -582,12 +598,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       }
       this.setDefaultAccountAndNetwork()
 
-      return this.notifyListenersWithPermissionResponse(
-        this.getSession(),
-        message.network,
-        message.id,
-        request
-      )
+      return this.getPermissionResponse(this.getSession(), message.network, message.id, request)
     })
   }
 
@@ -1028,8 +1039,15 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
   private async updateActiveAccount(accounts: string[], session: SessionTypes.Struct) {
     const generation = ++this.accountUpdateGeneration
+    const signClient = this.signClient
+    const sessionGeneration = this.requestGeneration
+    const isCurrent = () =>
+      this.signClient === signClient &&
+      this.session === session &&
+      this.requestGeneration === sessionGeneration &&
+      this.accountUpdateGeneration === generation
     try {
-      if (this.session !== session) {
+      if (!isCurrent()) {
         return
       }
       if (accounts.length) {
@@ -1051,7 +1069,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
           publicKey = addressOrPbk
         }
 
-        if (generation !== this.accountUpdateGeneration || this.session !== session) {
+        if (!isCurrent()) {
           return
         }
 
@@ -1060,28 +1078,33 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         }
 
         const id = await generateGUID()
-        if (generation !== this.accountUpdateGeneration || this.session !== session) {
+        if (!isCurrent()) {
           return
         }
         this.activeNetwork = chainId
         this.activeAccountOrPbk = addressOrPbk
 
-        await this.notifyListeners(this.getTopicFromSession(session), {
-          id,
-          type: BeaconMessageType.ChangeAccountRequest,
-          publicKey,
-          network: { type: chainId as NetworkType },
-          scopes: [PermissionScope.SIGN, PermissionScope.OPERATION_REQUEST],
-          walletType: 'implicit'
-        })
+        await this.notifySessionUpdate(
+          session,
+          {
+            id,
+            type: BeaconMessageType.ChangeAccountRequest,
+            publicKey,
+            network: { type: chainId as NetworkType },
+            scopes: [PermissionScope.SIGN, PermissionScope.OPERATION_REQUEST],
+            walletType: 'implicit'
+          },
+          isCurrent
+        )
       } else {
-        await this.notifyListenersWithPermissionResponse(
+        const response = await this.getPermissionResponse(
           session,
           {
             type: this.wcOptions.network
           },
           'session_update'
         )
+        await this.notifySessionUpdate(session, response, isCurrent)
       }
     } catch {}
   }
@@ -1576,7 +1599,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   private async notifyListeners(
     topic: string,
     partialResponse: BeaconInputMessage,
-    listeners: ((message: string) => void | Promise<void>)[] = [...this.activeListeners.values()]
+    listeners: MessageListener[] = [...this.activeListeners.values()]
   ) {
     const response: BeaconBaseMessage = {
       ...partialResponse,
@@ -1589,6 +1612,32 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     const serialized = await serializer.serialize(response)
 
     await Promise.all(listeners.map(async (listener) => listener(serialized)))
+  }
+
+  private async notifySessionUpdate(
+    session: SessionTypes.Struct,
+    partialMessage:
+      | Omit<PermissionResponse, IgnoredResponseInputProperties>
+      | Omit<ChangeAccountRequest, IgnoredResponseInputProperties>,
+    isCurrent: () => boolean
+  ): Promise<void> {
+    if (!isCurrent()) {
+      return
+    }
+    const message: SessionUpdateMessage = {
+      ...partialMessage,
+      version: '2',
+      senderId: session.topic
+    }
+    const listeners = [...this.activeListeners.values()]
+    const serialized = await new Serializer().serialize(message)
+    if (!isCurrent()) {
+      return
+    }
+    // Existing observers retain the wire envelope; the dApp receives an owned update.
+    await Promise.all(
+      listeners.map(async (listener) => listener(serialized, { message, isCurrent }))
+    )
   }
 
   public currentSession(): SessionTypes.Struct | undefined {

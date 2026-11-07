@@ -3,13 +3,16 @@ import { LocalStorage, Serializer } from '@ecadlabs/beacon-core'
 import {
   AccountInfo,
   BeaconErrorType,
+  BeaconMessage,
   BeaconMessageType,
+  ConnectionContext,
   NetworkType,
   Origin,
   PermissionScope,
   SigningType
 } from '@ecadlabs/beacon-types'
 import { WalletConnectCommunicationClient } from '../../../beacon-transport-walletconnect/src/communication-client/WalletConnectCommunicationClient'
+import { getAddressFromPublicKey } from '@ecadlabs/beacon-utils'
 import {
   mockRemote,
   mockApprovals,
@@ -174,6 +177,152 @@ describe('WalletConnect public request lifetime (#102)', () => {
     })
     await flush()
   }
+
+  async function receive(message: BeaconMessage, connectionInfo: ConnectionContext) {
+    // DAppClient accepts responses; its inherited declaration lists requests.
+    const handleResponse = dapp['handleResponse'].bind(dapp) as (
+      message: BeaconMessage,
+      connectionInfo: ConnectionContext
+    ) => Promise<void>
+    await handleResponse(message, connectionInfo)
+  }
+
+  it.each(['before the first request', 'after the last request'])(
+    'applies a session account update %s without creating a pending request',
+    async (stage) => {
+      await start(1000)
+      if (stage === 'after the last request') {
+        const request = await sign('aa')
+        mockRequests[0].reply.resolve({ signature: 'completed-signature' })
+        await flush()
+        expect(await request.outcome).toEqual({
+          value: expect.objectContaining({ signature: 'completed-signature' })
+        })
+      }
+      const publicKey = 'edpkv3Nf62TZxR1XwzKRteLTh1SmXLmr8cGEwHRSNoiUV3oiBrDbFX'
+      const address = await getAddressFromPublicKey(publicKey)
+      const handler = mockHandlers.get('session_update')
+      if (!handler) throw new Error('Missing session update listener')
+      const current = mockRemote.session.get()
+      current.namespaces.tezos.accounts = [`tezos:mainnet:${publicKey}`]
+      handler({ topic: 'current', params: { namespaces: current.namespaces } })
+      await flush()
+
+      expect(await dapp.getActiveAccount()).toEqual(
+        expect.objectContaining({ address, publicKey, senderId: 'current' })
+      )
+      expect(dapp['openRequests'].size).toBe(0)
+    }
+  )
+
+  it.each(['before the first request', 'after the last request'])(
+    'keeps the selected account on an empty session account update %s',
+    async (stage) => {
+      await start(1000)
+      if (stage === 'after the last request') {
+        const request = await sign('aa')
+        mockRequests[0].reply.resolve({ signature: 'completed-signature' })
+        await flush()
+        expect(await request.outcome).toEqual({
+          value: expect.objectContaining({ signature: 'completed-signature' })
+        })
+      }
+      const accountChanged = vi.fn()
+      const permissionSucceeded = vi.fn()
+      const channelClosed = vi.fn()
+      await dapp.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, accountChanged)
+      await dapp.subscribeToEvent(BeaconEvent.PERMISSION_REQUEST_SUCCESS, permissionSucceeded)
+      await dapp.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosed)
+      const handler = mockHandlers.get('session_update')
+      if (!handler) throw new Error('Missing session update listener')
+      const current = mockRemote.session.get()
+      current.namespaces.tezos.accounts = []
+      current.peer.metadata = {
+        ...current.peer.metadata,
+        name: 'Updated wallet',
+        icons: ['https://wallet.example/updated.png']
+      }
+      handler({ topic: 'current', params: { namespaces: current.namespaces } })
+      await flush()
+      await vi.advanceTimersByTimeAsync(1001)
+
+      expect(delivered).toContainEqual(
+        expect.objectContaining({
+          type: BeaconMessageType.PermissionResponse,
+          id: 'session_update',
+          senderId: 'current'
+        })
+      )
+      expect(await dapp.getActiveAccount()).toEqual(selected)
+      expect(accountChanged).not.toHaveBeenCalled()
+      expect(permissionSucceeded).not.toHaveBeenCalled()
+      expect(channelClosed).not.toHaveBeenCalled()
+      if (stage === 'after the last request') {
+        await expect(dapp['appMetadataManager'].getAppMetadata('current')).resolves.toEqual({
+          senderId: 'current',
+          name: 'Updated wallet',
+          icon: 'https://wallet.example/updated.png'
+        })
+      }
+      expect(dapp['openRequests'].size).toBe(0)
+    }
+  )
+
+  it('ignores a session update envelope from another topic after a completed request', async () => {
+    await start(1000)
+    const request = await sign('aa')
+    mockRequests[0].reply.resolve({ signature: 'completed-signature' })
+    await flush()
+    expect(await request.outcome).toEqual({
+      value: expect.objectContaining({ signature: 'completed-signature' })
+    })
+    await receive(
+      {
+        type: BeaconMessageType.PermissionResponse,
+        id: 'session_update',
+        version: '2',
+        senderId: 'other-topic',
+        walletType: 'implicit',
+        publicKey: 'edpkv3Nf62TZxR1XwzKRteLTh1SmXLmr8cGEwHRSNoiUV3oiBrDbFX',
+        appMetadata: { senderId: 'other-topic', name: 'Other wallet' },
+        network: { type: NetworkType.MAINNET },
+        scopes: [PermissionScope.SIGN]
+      },
+      { origin: Origin.WALLETCONNECT, id: 'other-wallet-key' }
+    )
+
+    await expect(dapp['appMetadataManager'].getAppMetadata('other-topic')).resolves.toBeUndefined()
+    expect(await dapp.getActiveAccount()).toEqual(selected)
+    expect(dapp['openRequests'].size).toBe(0)
+  })
+
+  it('aborts a public request when an active wallet disconnect shares its ID', async () => {
+    await start(0)
+    await dapp['accountManager'].addAccount(selected)
+    expect(await dapp.getAccounts()).toEqual([selected])
+    const request = await sign('aa')
+
+    await receive(
+      {
+        type: BeaconMessageType.Disconnect,
+        id: request.id,
+        version: '2',
+        senderId: 'current'
+      },
+      { origin: Origin.WALLETCONNECT, id: 'wallet-key' }
+    )
+    await flush()
+
+    expect(await request.outcome).toEqual({
+      error: expect.objectContaining({ id: request.id, errorType: BeaconErrorType.ABORTED_ERROR })
+    })
+    expect(request.settled).toHaveBeenCalledTimes(1)
+    expect(await dapp.getActiveAccount()).toBeUndefined()
+    expect(await dapp.getAccounts()).toEqual([])
+    mockRequests[0].reply.resolve({ signature: 'after-wallet-disconnect' })
+    await flush()
+    expect(request.settled).toHaveBeenCalledTimes(1)
+  })
 
   it('legacy ACKs cannot turn a bounded public request into an indefinite wait', async () => {
     await start(1000)

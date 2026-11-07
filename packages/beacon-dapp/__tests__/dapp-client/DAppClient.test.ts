@@ -3,6 +3,14 @@ import type { Mock } from 'vitest'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import {
   AccountInfo,
+  BeaconMessage,
+  BeaconMessageWrapper,
+  BeaconBaseMessage,
+  ConnectionContext,
+  ErrorResponse,
+  ExtendedP2PPairingResponse,
+  PeerInfoType,
+  WalletInfo,
   BeaconMessageType,
   BeaconErrorType,
   NetworkType,
@@ -2420,7 +2428,7 @@ describe('DAppClient: basic unit tests', () => {
     }
   )
 
-  it('does not time out the walletconnect session_update marker', async () => {
+  it('applies the deadline to a real request whose ID is session_update', async () => {
     vi.useFakeTimers()
     ;(window as any).beaconCreatedClientInstance = false
     const timeoutClient = new DAppClient({
@@ -2433,23 +2441,364 @@ describe('DAppClient: basic unit tests', () => {
     const channelClosedHandler = vi.fn()
     timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
-    const sessionUpdate = new ExposedPromise<unknown, unknown>()
+    const sessionUpdate: Parameters<DAppClient['addOpenRequest']>[1] = new ExposedPromise()
     const rejection = vi.fn()
     void sessionUpdate.promise.catch(rejection)
 
     try {
-      ;(timeoutClient as any).addOpenRequest('session_update', sessionUpdate)
+      timeoutClient['addOpenRequest']('session_update', sessionUpdate)
 
       vi.advanceTimersByTime(10)
       await Promise.resolve()
 
-      expect(rejection).not.toHaveBeenCalled()
-      expect(channelClosedHandler).not.toHaveBeenCalled()
-      expect((timeoutClient as any).openRequests.has('session_update')).toBe(true)
+      expect(rejection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'session_update',
+          errorType: BeaconErrorType.PEER_UNREACHABLE
+        })
+      )
+      expect(channelClosedHandler).toHaveBeenCalledTimes(1)
+      expect(timeoutClient['openRequests'].has('session_update')).toBe(false)
     } finally {
       ;(timeoutClient as any).clearOpenRequest('session_update')
       vi.useRealTimers()
     }
+  })
+
+  describe('notification routing', () => {
+    let getWalletInfo: DAppClient['getWalletInfo']
+    let receive: (
+      message: BeaconMessage | BeaconMessageWrapper<{ type: unknown }>,
+      connectionInfo: ConnectionContext
+    ) => Promise<void>
+    const connectionInfo: ConnectionContext = { origin: Origin.P2P, id: 'wallet-public-key' }
+    const activePeer: ExtendedP2PPairingResponse = {
+      type: 'p2p-pairing-response',
+      id: 'active-peer',
+      publicKey: 'wallet-public-key',
+      senderId: 'wallet-sender-id',
+      name: 'Wallet',
+      version: '3',
+      relayServer: 'matrix.example.com'
+    }
+
+    beforeEach(async () => {
+      vi.useFakeTimers()
+      getWalletInfo = client['getWalletInfo']
+      // Client declares request input; DAppClient installs a V2/V3 response handler.
+      receive = client['handleResponse'] as typeof receive
+      await client['storageValidated']
+      await seedPeerStorage()
+      client['_activePeer'] = ExposedPromise.resolve<PeerInfoType | undefined>(activePeer)
+      client['_activeAccount'] = ExposedPromise.resolve<AccountInfo | undefined>(
+        createStoredAccount()
+      )
+      await client['storage'].set(StorageKey.ACCOUNTS, [createStoredAccount()])
+    })
+
+    afterEach(() => {
+      client['abortOpenRequests']()
+      client['getWalletInfo'] = getWalletInfo
+      vi.restoreAllMocks()
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    })
+
+    function register(id = 'live-request') {
+      const pending = new ExposedPromise<
+        {
+          message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>
+          connectionInfo: ConnectionContext
+        },
+        ErrorResponse
+      >()
+      const resolved = vi.fn()
+      const rejected = vi.fn()
+      void pending.promise.then(resolved, rejected)
+      client['addOpenRequest'](id, pending)
+      return { pending, resolved, rejected }
+    }
+
+    function envelope(message: BeaconMessage, version: string) {
+      return version === '3'
+        ? { id: message.id, senderId: message.senderId, version, message }
+        : message
+    }
+
+    it('aborts a real request whose ID is session_update', async () => {
+      const request = register('session_update')
+
+      client['abortOpenRequests']()
+      await Promise.resolve()
+
+      expect(request.rejected).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'session_update', errorType: BeaconErrorType.ABORTED_ERROR })
+      )
+      expect(request.resolved).not.toHaveBeenCalled()
+      expect(client['openRequests'].size).toBe(0)
+    })
+
+    it.each([BeaconMessageType.ChangeAccountRequest, BeaconMessageType.Disconnect] as const)(
+      'keeps a delegated request pending after a mismatched %s with the same ID',
+      async (type) => {
+        const request = register()
+        client['openRequestsOtherTabs'].add('live-request')
+        const forwarded = vi.spyOn(client['multiTabChannel'], 'postMessage')
+
+        await receive(
+          envelope(
+            {
+              id: 'live-request',
+              version: '2',
+              senderId: activePeer.senderId,
+              type,
+              address: createStoredAccount().address,
+              walletType: 'implicit',
+              network: { type: NetworkType.MAINNET },
+              scopes: [PermissionScope.SIGN]
+            },
+            '3'
+          ),
+          { ...connectionInfo, id: 'other-public-key' }
+        )
+
+        expect(forwarded).not.toHaveBeenCalled()
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(request.rejected).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+      }
+    )
+
+    it.each([BeaconMessageType.ChangeAccountRequest, BeaconMessageType.Disconnect] as const)(
+      'handles a retained peer %s without settling the active peer request with the same ID',
+      async (type) => {
+        const retainedPeer: ExtendedP2PPairingResponse = {
+          ...activePeer,
+          id: 'retained-peer',
+          publicKey: 'retained-public-key',
+          senderId: 'senderId'
+        }
+        const retainedAccount: AccountInfo = {
+          ...createStoredAccount(),
+          accountIdentifier: 'retained-account',
+          senderId: retainedPeer.senderId,
+          origin: { type: Origin.P2P, id: retainedPeer.publicKey }
+        }
+        await client['storage'].set(StorageKey.ACCOUNTS, [createStoredAccount(), retainedAccount])
+        const transport = new DappP2PTransport(
+          'Notification test',
+          { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) },
+          client['storage'],
+          {}
+        )
+        vi.spyOn(transport, 'getPeers').mockResolvedValue([activePeer, retainedPeer])
+        const removed = vi.spyOn(transport, 'removePeer').mockResolvedValue(undefined)
+        client['p2pTransport'] = transport
+        const request = register()
+        const closed = vi.fn()
+        await client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, closed)
+
+        await receive(
+          {
+            id: 'live-request',
+            version: '2',
+            senderId: retainedPeer.senderId,
+            type,
+            address: 'tz1Ke2h7sDdakHJQh8WX4Z372du1KChsksyU',
+            walletType: 'implicit',
+            network: { type: NetworkType.MAINNET },
+            scopes: [PermissionScope.SIGN]
+          },
+          { origin: Origin.P2P, id: retainedPeer.publicKey }
+        )
+
+        if (type === BeaconMessageType.Disconnect) {
+          expect(removed).toHaveBeenCalledWith(retainedPeer)
+          expect(closed).toHaveBeenCalledTimes(1)
+          await expect(client['storage'].get(StorageKey.ACCOUNTS)).resolves.toEqual([
+            createStoredAccount()
+          ])
+        } else {
+          expect(removed).not.toHaveBeenCalled()
+          expect(closed).not.toHaveBeenCalled()
+          await expect(client['storage'].get(StorageKey.ACCOUNTS)).resolves.toEqual([
+            createStoredAccount(),
+            retainedAccount
+          ])
+        }
+        await expect(client.getActiveAccount()).resolves.toEqual(createStoredAccount())
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(request.rejected).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+      }
+    )
+
+    it.each([
+      ['2', BeaconMessageType.ChangeAccountRequest],
+      ['3', BeaconMessageType.ChangeAccountRequest],
+      ['2', BeaconMessageType.Disconnect],
+      ['3', BeaconMessageType.Disconnect]
+    ] as const)(
+      'keeps a live request pending after a V%s %s from a mismatched connection',
+      async (version, type) => {
+        const request = register()
+        const selected = vi.spyOn(client, 'setActiveAccount')
+        const closed = vi.fn()
+        await client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, closed)
+        const message: BeaconMessage = {
+          id: 'live-request',
+          version: '2',
+          senderId: activePeer.senderId,
+          type,
+          address: createStoredAccount().address,
+          walletType: 'implicit' as const,
+          network: { type: NetworkType.MAINNET },
+          scopes: [PermissionScope.SIGN]
+        }
+
+        await receive(envelope(message, version), {
+          ...connectionInfo,
+          id: 'other-public-key'
+        })
+
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(request.rejected).not.toHaveBeenCalled()
+        expect(selected).not.toHaveBeenCalled()
+        expect(closed).not.toHaveBeenCalled()
+        await expect(client['storage'].get(StorageKey.ACCOUNTS)).resolves.toEqual([
+          createStoredAccount()
+        ])
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+      }
+    )
+
+    it.each(['2', '3'])(
+      'applies a V%s account change without settling a request with the same ID',
+      async (version) => {
+        const request = register()
+        const selected = vi.spyOn(client, 'setActiveAccount').mockResolvedValue(undefined)
+        const message: BeaconMessage = {
+          id: 'live-request',
+          version: '2',
+          senderId: activePeer.senderId,
+          type: BeaconMessageType.ChangeAccountRequest,
+          address: 'tz1Ke2h7sDdakHJQh8WX4Z372du1KChsksyU',
+          walletType: 'implicit',
+          network: { type: NetworkType.MAINNET },
+          scopes: [PermissionScope.SIGN]
+        }
+
+        await receive(envelope(message, version), connectionInfo)
+
+        expect(selected).toHaveBeenCalledWith(expect.objectContaining({ address: message.address }))
+        await expect(client['storage'].get(StorageKey.ACCOUNTS)).resolves.toEqual(
+          expect.arrayContaining([expect.objectContaining({ address: message.address })])
+        )
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(request.rejected).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+      }
+    )
+
+    it.each([BeaconMessageType.Acknowledge, BeaconMessageType.BlockchainResponse] as const)(
+      'keeps the deadline armed while a V3 %s awaits wallet information',
+      async (type) => {
+        const request = register()
+        await client['storage'].set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [activePeer])
+        const entered = new ExposedPromise<void>()
+        const wallet = new ExposedPromise<WalletInfo>()
+        client['getWalletInfo'] = () => {
+          entered.resolve()
+          return wallet.promise
+        }
+        const acknowledged = vi.fn()
+        await client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledged)
+        const message =
+          type === BeaconMessageType.Acknowledge
+            ? { type }
+            : {
+                type,
+                blockchainIdentifier: 'tezos',
+                blockchainData: { transactionHash: 'op-hash' }
+              }
+        const delivery = receive(
+          {
+            id: 'live-request',
+            version: '3',
+            senderId: activePeer.senderId,
+            message
+          },
+          connectionInfo
+        )
+        await entered.promise
+
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+        wallet.resolve({ name: 'Wallet' })
+        await delivery
+
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(request.rejected).toHaveBeenCalledTimes(1)
+        expect(acknowledged).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each([BeaconMessageType.Acknowledge, BeaconMessageType.BlockchainResponse] as const)(
+      'does not attach an earlier V3 %s to a request registered during wallet lookup',
+      async (type) => {
+        await client['storage'].set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [activePeer])
+        const entered = new ExposedPromise<void>()
+        const wallet = new ExposedPromise<WalletInfo>()
+        client['getWalletInfo'] = () => {
+          entered.resolve()
+          return wallet.promise
+        }
+        const acknowledged = vi.fn()
+        await client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledged)
+        const message =
+          type === BeaconMessageType.Acknowledge
+            ? { type }
+            : {
+                type,
+                blockchainIdentifier: 'tezos',
+                blockchainData: { transactionHash: 'op-hash' }
+              }
+        const delivery = receive(
+          {
+            id: 'live-request',
+            version: '3',
+            senderId: activePeer.senderId,
+            message
+          },
+          connectionInfo
+        )
+        await entered.promise
+        const request = register()
+        wallet.resolve({ name: 'Wallet' })
+        await delivery
+
+        expect(request.resolved).not.toHaveBeenCalled()
+        expect(acknowledged).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        expect(request.rejected).toHaveBeenCalledWith(
+          expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        )
+      }
+    )
   })
 
   it('processes buffered Disconnect delivered during transport.connect() when restoring active account on startup', async () => {

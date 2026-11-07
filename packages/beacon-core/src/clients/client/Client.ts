@@ -252,6 +252,13 @@ export abstract class Client extends BeaconClient {
     }
   }
 
+  protected async registerTransportListener(
+    transport: Transport,
+    listener: Parameters<Transport['addListener']>[0]
+  ): Promise<void> {
+    await transport.addListener(listener)
+  }
+
   protected async addListener(transport: Transport<any>): Promise<void> {
     // in beacon we subscribe to the transport on client init only
     // unsubscribing from the transport is only beneficial when running
@@ -278,7 +285,7 @@ export abstract class Client extends BeaconClient {
           }
         }
 
-        await transport.addListener(subscription)
+        await this.registerTransportListener(transport, subscription)
         this.transportListeners.set(transport.type, subscription)
       })
     this.transportListenerRegistrations.set(transport.type, registration)

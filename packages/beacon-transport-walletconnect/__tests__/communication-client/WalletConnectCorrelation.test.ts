@@ -9,6 +9,7 @@ import { WalletConnectCommunicationClient } from '../../src/communication-client
 
 import {
   mockRemote,
+  account,
   mockApprovals,
   session,
   mockRequests,
@@ -351,6 +352,95 @@ describe('WalletConnect request ownership (#102)', () => {
     await send('live', 'sign')
     await complete(0, 'live', 'sign', false)
     expect(responses).toEqual([expected('live', 'sign', false, 'replacement')])
+  })
+
+  it.each(['before first request', 'after last request'])(
+    'delivers an empty-account update %s using the retained session account',
+    async (when) => {
+      if (when === 'after last request') {
+        await send('completed', 'sign')
+        await complete(0, 'completed', 'sign', false)
+        responses.length = 0
+      }
+      const current = mockRemote.session.get()
+      current.namespaces.tezos.accounts = []
+      const update = mockHandlers.get('session_update')
+      if (!update) throw new Error('Missing session_update registration')
+      update({ topic: 'current', params: { namespaces: current.namespaces } })
+      await flush()
+
+      expect(responses).toEqual([
+        expect.objectContaining({
+          id: 'session_update',
+          type: BeaconMessageType.PermissionResponse,
+          senderId: 'current',
+          publicKey: 'edpk-test-public-key',
+          network: { type: NetworkType.MAINNET },
+          appMetadata: expect.objectContaining({ name: 'wallet', senderId: 'current' })
+        })
+      ])
+      expect(client.currentSession()).toBe(current)
+      expect(mockRequests).toHaveLength(when === 'after last request' ? 1 : 0)
+    }
+  )
+
+  it.each(['session_update', 'session_delete', 'session_expire', 'session_extend'])(
+    'ignores a foreign-topic %s while a request is pending',
+    async (eventName) => {
+      await send('live', 'sign')
+      const current = client.currentSession()
+      const handler = mockHandlers.get(eventName)
+      if (!handler) throw new Error(`Missing ${eventName} registration`)
+      handler({ topic: 'other', params: { namespaces: session('other').namespaces } })
+      await flush()
+
+      expect(responses).toEqual([])
+      expect(client.currentSession()).toBe(current)
+      expect(client.disconnectionEvents.size).toBe(0)
+      await complete(0, 'live', 'sign', false)
+      expect(responses).toEqual([expected('live', 'sign', false)])
+    }
+  )
+
+  it('extends the current expiry without settling its pending request', async () => {
+    await send('live', 'sign')
+    const expiry = mockRemote.session.get().expiry + 604800
+    restoreSession('current')
+    mockRemote.session.get().expiry = expiry
+    const extend = mockHandlers.get('session_extend')
+    if (!extend) throw new Error('Missing session_extend registration')
+    extend({ topic: 'current' })
+    await flush()
+
+    expect(client.currentSession()?.expiry).toBe(expiry)
+    expect(responses).toEqual([])
+    await complete(0, 'live', 'sign', false)
+    expect(responses).toEqual([expected('live', 'sign', false)])
+  })
+
+  it('discards an account lookup that completes after the current session expires', async () => {
+    const current = mockRemote.session.get()
+    const update = mockHandlers.get('session_update')
+    const expire = mockHandlers.get('session_expire')
+    if (!update || !expire) throw new Error('Missing session event registration')
+    update({ topic: 'current', params: { namespaces: current.namespaces } })
+    await flush()
+    expect(mockRequests).toHaveLength(1)
+    expect(mockRequests[0].input.request.method).toBe('tezos_getAccounts')
+
+    expire({ topic: 'current' })
+    await flush()
+    expect(client.currentSession()).toBeUndefined()
+    expect(responses).toEqual([
+      expect.objectContaining({ type: BeaconMessageType.Disconnect, senderId: 'current' })
+    ])
+    expire({ topic: 'current' })
+    mockRequests[0].reply.resolve([
+      { algo: 'ed25519', address: account, pubkey: 'edpk-next-public-key' }
+    ])
+    await flush()
+    expect(client.currentSession()).toBeUndefined()
+    expect(responses).toHaveLength(1)
   })
 
   it('rejects an invalid permission approval with its own ID and preserves the active session', async () => {

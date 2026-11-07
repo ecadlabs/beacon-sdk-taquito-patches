@@ -1,5 +1,7 @@
 import {
   ConnectionContext,
+  ChangeAccountRequest,
+  PermissionResponse,
   Origin,
   Storage,
   TransportStatus,
@@ -9,12 +11,18 @@ import {
   NetworkType,
   TransportType
 } from '@ecadlabs/beacon-types'
-import { Transport, PeerManager, Logger } from '@ecadlabs/beacon-core'
+import { Transport, PeerManager, Logger, Serializer } from '@ecadlabs/beacon-core'
 import { SignClientTypes } from '@walletconnect/types'
 import { ExposedPromise, KeyPair } from '@ecadlabs/beacon-utils'
 import { WalletConnectCommunicationClient } from './communication-client/WalletConnectCommunicationClient'
 
 const logger = new Logger('WalletConnectTransport')
+
+type SessionUpdateCallback = (
+  message: PermissionResponse | ChangeAccountRequest,
+  connectionInfo: ConnectionContext,
+  isCurrent: () => boolean
+) => Promise<void>
 
 /**
  * @internalapi
@@ -29,6 +37,7 @@ export class WalletConnectTransport<
   public readonly type: TransportType = TransportType.WALLETCONNECT
 
   protected isReady = new ExposedPromise<boolean>()
+  private readonly sessionUpdateCallbacks = new WeakMap<object, SessionUpdateCallback>()
 
   constructor(
     name: string,
@@ -47,6 +56,23 @@ export class WalletConnectTransport<
 
   public static async isAvailable(): Promise<boolean> {
     return Promise.resolve(true)
+  }
+
+  public async addListener(
+    listener: (message: unknown, connectionInfo: ConnectionContext) => void | Promise<void>,
+    sessionUpdateCallback?: SessionUpdateCallback
+  ): Promise<void> {
+    if (sessionUpdateCallback) {
+      this.sessionUpdateCallbacks.set(listener, sessionUpdateCallback)
+    }
+    await super.addListener(listener)
+  }
+
+  public async removeListener(
+    listener: (message: string, connectionInfo: ConnectionContext) => void
+  ): Promise<void> {
+    this.sessionUpdateCallbacks.delete(listener)
+    await super.removeListener(listener)
   }
 
   /**
@@ -160,19 +186,46 @@ export class WalletConnectTransport<
   }
 
   public async listen(publicKey: string): Promise<void> {
+    const connectionContext: ConnectionContext = {
+      origin: Origin.WALLETCONNECT,
+      id: publicKey
+    }
     await this.client
-      .listenForEncryptedMessage(publicKey, (message) => {
-        const connectionContext: ConnectionContext = {
-          origin: Origin.WALLETCONNECT,
-          id: publicKey
-        }
-
-        return this.notifyListeners(message, connectionContext).catch((error) => {
-          logger.error('listen', error)
-        })
-      })
+      .listenForEncryptedMessage(
+        publicKey,
+        (message) =>
+          this.notifyListeners(message, connectionContext).catch((error) => {
+            logger.error('listen', error)
+          }),
+        (message, isCurrent) => this.handleSessionUpdate(message, connectionContext, isCurrent)
+      )
       .catch((error) => {
         throw error
       })
+  }
+
+  protected async handleSessionUpdate(
+    message: PermissionResponse | ChangeAccountRequest,
+    connectionInfo: ConnectionContext,
+    isCurrent: () => boolean
+  ): Promise<void> {
+    if (!isCurrent()) {
+      return
+    }
+    const serialized = await new Serializer().serialize(message)
+    if (isCurrent()) {
+      await this.notifyListeners(serialized, connectionInfo, async (listener) => {
+        if (!isCurrent()) {
+          return
+        }
+        // The base transport owns registration; this metadata selects each delivery path.
+        const callback = this.sessionUpdateCallbacks.get(listener)
+        if (callback) {
+          await callback(message, connectionInfo, isCurrent)
+        } else {
+          await listener(serialized, connectionInfo)
+        }
+      })
+    }
   }
 }

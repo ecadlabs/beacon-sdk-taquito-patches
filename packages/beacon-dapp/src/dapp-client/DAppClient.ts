@@ -59,6 +59,7 @@ import {
   ProofOfEventChallengeRequestInput,
   RequestProofOfEventChallengeInput,
   ChangeAccountRequest,
+  DisconnectMessage,
   PeerInfoType,
   App,
   AppBase,
@@ -140,7 +141,6 @@ import { DAppClientOptions } from './DAppClientOptions'
 
 const logger = new Logger('DAppClient')
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
-const SESSION_UPDATE_REQUEST_ID = 'session_update'
 
 const createLazyPromise = <T>(factory: () => Promise<T>): PromiseLike<T> => {
   let promise: Promise<T> | undefined
@@ -476,6 +476,27 @@ export class DAppClient extends Client {
 
       const typedMessage = isV3WrappedMessage ? message.message : (message as BeaconMessage)
 
+      if (
+        typedMessage.type === BeaconMessageType.ChangeAccountRequest ||
+        typedMessage.type === BeaconMessageType.Disconnect
+      ) {
+        await this.handleNotification(
+          {
+            ...typedMessage,
+            id: message.id,
+            version: message.version,
+            senderId: message.senderId
+          } as ChangeAccountRequest | DisconnectMessage,
+          connectionInfo
+        )
+
+        return
+      }
+
+      // Capture arrival identity without changing the deadline during V3 enrichment.
+      const openRequest = this.openRequests.get(message.id)
+      const delegated = this.openRequestsOtherTabs.has(message.id)
+
       let appMetadata: AppMetadata | undefined = isV3WrappedMessage
         ? (typedMessage as unknown as PermissionResponseV3).blockchainData?.appMetadata
         : (typedMessage as PermissionResponse).appMetadata
@@ -488,7 +509,9 @@ export class DAppClient extends Client {
         ])
 
         for (const peers of storedMetadata) {
-          const peer: any = peers.find((peer: any) => peer.senderId === message.senderId)
+          const peer = peers.find(
+            (candidate) => 'senderId' in candidate && candidate.senderId === message.senderId
+          )
           if (!peer) {
             continue
           }
@@ -497,7 +520,7 @@ export class DAppClient extends Client {
 
           appMetadata = {
             name: peer.name,
-            senderId: peer.senderId,
+            senderId: message.senderId,
             icon: wallet.icon
           }
 
@@ -505,7 +528,12 @@ export class DAppClient extends Client {
         }
       }
 
-      if (this.openRequestsOtherTabs.has(message.id)) {
+      const ownsRequest = openRequest && this.openRequests.get(message.id) === openRequest
+      if (
+        delegated &&
+        this.openRequestsOtherTabs.has(message.id) &&
+        this.openRequests.get(message.id) === openRequest
+      ) {
         this.multiTabChannel.postMessage({
           type: 'RESPONSE',
           data: {
@@ -524,44 +552,12 @@ export class DAppClient extends Client {
         return
       }
 
-      const openRequest = this.openRequests.get(message.id)
-
       logger.log('### openRequest ###', openRequest)
       logger.log('handleResponse', 'Received message', message, connectionInfo)
       logger.log('### message ###', JSON.stringify(message))
       logger.log('### connectionInfo ###', connectionInfo)
 
-      const handleDisconnect = async (): Promise<void> => {
-        this.analytics.track('event', 'DAppClient', 'Disconnect received from Wallet')
-
-        const relevantTransport =
-          connectionInfo.origin === Origin.P2P
-            ? this.p2pTransport
-            : connectionInfo.origin === Origin.WALLETCONNECT
-              ? this.walletConnectTransport
-              : (this.postMessageTransport ?? (await this.transport))
-
-        if (relevantTransport) {
-          const peers: ExtendedPeerInfo[] = [
-            ...(await relevantTransport.getPeers()),
-            ...((connectionInfo.origin === Origin.WALLETCONNECT
-              ? await this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP)
-              : undefined) ?? [])
-          ]
-          const peer: ExtendedPeerInfo | undefined = peers.find(
-            (peerEl) => peerEl.senderId === message.senderId
-          )
-
-          if (peer) {
-            await relevantTransport.removePeer(peer)
-          }
-        }
-
-        await this.removeAccountsForPeerIds([message.senderId])
-        await this.events.emit(BeaconEvent.CHANNEL_CLOSED)
-      }
-
-      if (openRequest && typedMessage.type === BeaconMessageType.Acknowledge) {
+      if (ownsRequest && typedMessage.type === BeaconMessageType.Acknowledge) {
         if (!this.acknowledgedRequests.has(message.id)) {
           this.acknowledgedRequests.add(message.id)
           this.clearOpenRequestTimeout(message.id)
@@ -576,9 +572,13 @@ export class DAppClient extends Client {
             })
             .catch((emitError) => logger.error('handleResponse', emitError))
         }
-      } else if (openRequest) {
+      } else if (ownsRequest) {
         if (typedMessage.type === BeaconMessageType.PermissionResponse && appMetadata) {
           await this.appMetadataManager.addAppMetadata(appMetadata)
+        }
+
+        if (this.openRequests.get(message.id) !== openRequest) {
+          return
         }
 
         if (typedMessage.type === BeaconMessageType.Error) {
@@ -589,117 +589,11 @@ export class DAppClient extends Client {
         this.clearOpenRequest(message.id)
         this.acknowledgedRequests.delete(message.id)
       } else {
-        if (typedMessage.type === BeaconMessageType.ChangeAccountRequest) {
-          if (!(await this.isAuthorizedChangeAccountSender(message.senderId, connectionInfo))) {
-            return
-          }
-        } else if (typedMessage.type === BeaconMessageType.Disconnect) {
-          const activePeer = this._activePeer.isResolved()
-            ? await this._activePeer.promise
-            : undefined
-          if (connectionInfo.origin === Origin.P2P) {
-            const peers = [
-              ...(activePeer ? [activePeer] : []),
-              ...((await this.p2pTransport?.getPeers()) ?? [])
-            ]
-            let matched = false
-            for (const candidate of peers) {
-              if (
-                (candidate.type === 'p2p-pairing-response' ||
-                  candidate.type === 'p2p-pairing-request') &&
-                candidate.publicKey === connectionInfo.id &&
-                message.senderId === (await getSenderId(candidate.publicKey))
-              ) {
-                matched = true
-                break
-              }
-            }
-            if (!matched) {
-              return
-            }
-          } else if (connectionInfo.origin === Origin.EXTENSION) {
-            const relevantTransport =
-              this.postMessageTransport ??
-              (this._transport.isResolved() ? await this.transport : undefined)
-            const peers = [
-              ...(activePeer ? [activePeer] : []),
-              ...((await relevantTransport?.getPeers()) ?? [])
-            ]
-            let matched = false
-            for (const candidate of peers) {
-              if (
-                (candidate.type === 'postmessage-pairing-response' ||
-                  candidate.type === 'postmessage-pairing-request') &&
-                (candidate as ExtendedPostMessagePairingResponse).extensionId ===
-                  connectionInfo.id &&
-                message.senderId === (await getSenderId(candidate.publicKey))
-              ) {
-                matched = true
-                break
-              }
-            }
-            if (!matched) {
-              return
-            }
-          } else if (connectionInfo.origin === Origin.WALLETCONNECT) {
-            const storedPeers =
-              (await this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP)) ?? []
-            const peers = [
-              ...(activePeer &&
-              (activePeer.type === 'walletconnect-pairing-response' ||
-                activePeer.type === 'walletconnect-pairing-request')
-                ? [activePeer]
-                : []),
-              ...((await this.walletConnectTransport?.getPeers()) ?? []),
-              ...storedPeers
-            ]
-            const matchedPeer = peers.some(
-              (candidate) =>
-                (candidate.type === 'walletconnect-pairing-response' ||
-                  candidate.type === 'walletconnect-pairing-request') &&
-                candidate.publicKey === connectionInfo.id &&
-                'senderId' in candidate &&
-                candidate.senderId === message.senderId
-            )
-            const storedAccounts = await this.accountManager.getAccounts()
-            const matchedAccount = storedAccounts.some(
-              (account) =>
-                account.origin.type === Origin.WALLETCONNECT &&
-                account.origin.id === connectionInfo.id &&
-                account.senderId === message.senderId
-            )
-            if (!matchedPeer && !matchedAccount) {
-              return
-            }
-          }
-        }
-        if (typedMessage.type === BeaconMessageType.Disconnect) {
-          await handleDisconnect()
-        } else if (typedMessage.type === BeaconMessageType.ChangeAccountRequest) {
-          const changeGeneration = ++this._accountChangeGeneration
-          await this.onNewAccount(
-            typedMessage as ChangeAccountRequest,
-            connectionInfo,
-            changeGeneration
-          )
-        } else {
-          logger.warn('handleResponse', 'received response for unknown or closed request', {
-            id: message.id,
-            type: typedMessage.type,
-            connectionInfo
-          })
-        }
-      }
-
-      if (this._transport.isResolved()) {
-        const transport = await this.transport
-
-        if (
-          transport instanceof WalletConnectTransport &&
-          !this.openRequests.has(SESSION_UPDATE_REQUEST_ID)
-        ) {
-          this.openRequests.set(SESSION_UPDATE_REQUEST_ID, new ExposedPromise())
-        }
+        logger.warn('handleResponse', 'received response for unknown or closed request', {
+          id: message.id,
+          type: typedMessage.type,
+          connectionInfo
+        })
       }
     }
 
@@ -809,6 +703,188 @@ export class DAppClient extends Client {
         logger.error('onBCMessageHandler', 'message type not recognized', message)
     }
   }
+
+  protected async registerTransportListener(
+    transport: Transport,
+    listener: Parameters<Transport['addListener']>[0]
+  ): Promise<void> {
+    if (transport instanceof WalletConnectTransport) {
+      await transport.addListener(listener, (message, connectionInfo, isCurrent) =>
+        this.handleWalletConnectSessionUpdate(message, connectionInfo, isCurrent)
+      )
+    } else {
+      await super.registerTransportListener(transport, listener)
+    }
+  }
+
+  private async handleWalletConnectSessionUpdate(
+    message: PermissionResponse | ChangeAccountRequest,
+    connectionInfo: ConnectionContext,
+    isCurrent: () => boolean
+  ): Promise<void> {
+    if (
+      !isCurrent() ||
+      !(await this.isAuthorizedChangeAccountSender(message.senderId, connectionInfo)) ||
+      !isCurrent()
+    ) {
+      return
+    }
+
+    if (message.type === BeaconMessageType.ChangeAccountRequest) {
+      await this.handleNotification(message, connectionInfo, isCurrent)
+    } else {
+      await this.appMetadataManager.addAppMetadata(message.appMetadata)
+    }
+  }
+
+  private async handleNotification(
+    message: ChangeAccountRequest | DisconnectMessage,
+    connectionInfo: ConnectionContext,
+    isCurrent: () => boolean = () => true
+  ): Promise<void> {
+    const handleDisconnect = async (): Promise<void> => {
+      this.analytics.track('event', 'DAppClient', 'Disconnect received from Wallet')
+
+      const relevantTransport =
+        connectionInfo.origin === Origin.P2P
+          ? this.p2pTransport
+          : connectionInfo.origin === Origin.WALLETCONNECT
+            ? this.walletConnectTransport
+            : (this.postMessageTransport ?? (await this.transport))
+
+      if (relevantTransport) {
+        const peers: ExtendedPeerInfo[] = [
+          ...(await relevantTransport.getPeers()),
+          ...((connectionInfo.origin === Origin.WALLETCONNECT
+            ? await this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP)
+            : undefined) ?? [])
+        ]
+        const peer: ExtendedPeerInfo | undefined = peers.find(
+          (peerEl) => peerEl.senderId === message.senderId
+        )
+
+        if (peer) {
+          await relevantTransport.removePeer(peer)
+        }
+      }
+
+      await this.removeAccountsForPeerIds([message.senderId])
+      await this.events.emit(BeaconEvent.CHANNEL_CLOSED)
+    }
+    if (message.type === BeaconMessageType.ChangeAccountRequest) {
+      if (!(await this.isAuthorizedChangeAccountSender(message.senderId, connectionInfo))) {
+        return
+      }
+    } else if (message.type === BeaconMessageType.Disconnect) {
+      const activePeer = this._activePeer.isResolved() ? await this._activePeer.promise : undefined
+      if (connectionInfo.origin === Origin.P2P) {
+        if (!(await this.matchesP2PDisconnect(message, connectionInfo, activePeer))) {
+          return
+        }
+      } else if (connectionInfo.origin === Origin.EXTENSION) {
+        if (!(await this.matchesExtensionDisconnect(message, connectionInfo, activePeer))) {
+          return
+        }
+      } else if (connectionInfo.origin === Origin.WALLETCONNECT) {
+        if (!(await this.matchesWalletConnectDisconnect(message, connectionInfo, activePeer))) {
+          return
+        }
+      }
+    }
+    if (message.type === BeaconMessageType.Disconnect) {
+      await handleDisconnect()
+    } else if (message.type === BeaconMessageType.ChangeAccountRequest) {
+      if (!isCurrent()) {
+        return
+      }
+      const changeGeneration = ++this._accountChangeGeneration
+      await this.onNewAccount(message, connectionInfo, changeGeneration, isCurrent)
+    }
+  }
+
+  private async matchesP2PDisconnect(
+    message: DisconnectMessage,
+    connectionInfo: ConnectionContext,
+    activePeer: PeerInfo | undefined
+  ): Promise<boolean> {
+    const peers = [
+      ...(activePeer ? [activePeer] : []),
+      ...((await this.p2pTransport?.getPeers()) ?? [])
+    ]
+    for (const candidate of peers) {
+      if (
+        (candidate.type === 'p2p-pairing-response' || candidate.type === 'p2p-pairing-request') &&
+        candidate.publicKey === connectionInfo.id &&
+        message.senderId === (await getSenderId(candidate.publicKey))
+      ) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  private async matchesExtensionDisconnect(
+    message: DisconnectMessage,
+    connectionInfo: ConnectionContext,
+    activePeer: PeerInfo | undefined
+  ): Promise<boolean> {
+    const relevantTransport =
+      this.postMessageTransport ?? (this._transport.isResolved() ? await this.transport : undefined)
+    const peers = [
+      ...(activePeer ? [activePeer] : []),
+      ...((await relevantTransport?.getPeers()) ?? [])
+    ]
+    for (const candidate of peers) {
+      if (
+        (candidate.type === 'postmessage-pairing-response' ||
+          candidate.type === 'postmessage-pairing-request') &&
+        (candidate as ExtendedPostMessagePairingResponse).extensionId === connectionInfo.id &&
+        message.senderId === (await getSenderId(candidate.publicKey))
+      ) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  private async matchesWalletConnectDisconnect(
+    message: DisconnectMessage,
+    connectionInfo: ConnectionContext,
+    activePeer: PeerInfo | undefined
+  ): Promise<boolean> {
+    const storedPeers =
+      (await this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP)) ?? []
+    const peers = [
+      ...(activePeer &&
+      (activePeer.type === 'walletconnect-pairing-response' ||
+        activePeer.type === 'walletconnect-pairing-request')
+        ? [activePeer]
+        : []),
+      ...((await this.walletConnectTransport?.getPeers()) ?? []),
+      ...storedPeers
+    ]
+    const matchedPeer = peers.some(
+      (candidate) =>
+        (candidate.type === 'walletconnect-pairing-response' ||
+          candidate.type === 'walletconnect-pairing-request') &&
+        candidate.publicKey === connectionInfo.id &&
+        'senderId' in candidate &&
+        candidate.senderId === message.senderId
+    )
+    const storedAccounts = await this.accountManager.getAccounts()
+    const matchedAccount = storedAccounts.some(
+      (account) =>
+        account.origin.type === Origin.WALLETCONNECT &&
+        account.origin.id === connectionInfo.id &&
+        account.senderId === message.senderId
+    )
+
+    return matchedPeer || matchedAccount
+  }
+
+
 
   private async prepareRequest(message: any, isV3 = false) {
     if (!this.multiTabChannel.isLeader()) {
@@ -4018,10 +4094,6 @@ export class DAppClient extends Client {
       ErrorResponse
     >
   ): void {
-    if (id === SESSION_UPDATE_REQUEST_ID) {
-      return
-    }
-
     if (!Number.isFinite(this.requestTimeoutMs) || this.requestTimeoutMs <= 0) {
       return
     }
@@ -4072,12 +4144,10 @@ export class DAppClient extends Client {
   }
 
   private abortOpenRequests(): void {
-    Array.from(this.openRequests.entries())
-      .filter(([id]) => id !== SESSION_UPDATE_REQUEST_ID)
-      .forEach(([id, promise]) => {
-        promise.reject(this.createAbortedError(id))
-        this.clearOpenRequest(id)
-      })
+    Array.from(this.openRequests.entries()).forEach(([id, promise]) => {
+      promise.reject(this.createAbortedError(id))
+      this.clearOpenRequest(id)
+    })
     this.openRequests.clear()
     this.openRequestsOtherTabs.clear()
     this.acknowledgedRequests.clear()
@@ -4151,7 +4221,8 @@ export class DAppClient extends Client {
   private async onNewAccount(
     message: PermissionResponse | ChangeAccountRequest,
     connectionInfo: ConnectionContext,
-    changeGeneration: number = ++this._accountChangeGeneration
+    changeGeneration: number = ++this._accountChangeGeneration,
+    isCurrent: () => boolean = () => true
   ): Promise<AccountInfo> {
     // TODO: Migration code. Remove sometime after 1.0.0 release.
     const tempPK: string | undefined =
@@ -4228,6 +4299,7 @@ export class DAppClient extends Client {
       }
 
       return (
+        isCurrent() &&
         changeGeneration === this._accountChangeGeneration &&
         !this._disconnectPromise &&
         !this.destroyed
