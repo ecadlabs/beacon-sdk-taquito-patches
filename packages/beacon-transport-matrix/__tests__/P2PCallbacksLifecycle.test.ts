@@ -90,7 +90,7 @@ class ControlledStorage extends LocalStorage {
 const room = '!invited:relay.example'
 const sender = '@peer:relay.example'
 const emptySync = (): MatrixSyncResponse => ({ next_batch: 'next', rooms: {} })
-const inviteSync = (): MatrixSyncResponse => ({
+const inviteSync = (target: string): MatrixSyncResponse => ({
   next_batch: 'invite',
   rooms: {
     invite: {
@@ -100,7 +100,8 @@ const inviteSync = (): MatrixSyncResponse => ({
             {
               type: 'm.room.member',
               sender,
-              content: { membership: 'join' },
+              content: { membership: 'invite' },
+              state_key: target,
               origin_server_ts: Date.now()
             }
           ]
@@ -109,7 +110,7 @@ const inviteSync = (): MatrixSyncResponse => ({
     }
   }
 })
-const messageSync = (body: string): MatrixSyncResponse => ({
+const messageSync = (body: string, messageSender = sender): MatrixSyncResponse => ({
   next_batch: 'message',
   rooms: {
     join: {
@@ -119,7 +120,7 @@ const messageSync = (body: string): MatrixSyncResponse => ({
           events: [
             {
               type: 'm.room.message',
-              sender,
+              sender: messageSender,
               content: { msgtype: 'm.text', body },
               event_id: '$channel',
               origin_server_ts: Date.now()
@@ -168,12 +169,13 @@ describe('P2P callbacks retired by stop', () => {
   }
 
   it('does not restore a peer room when an old invite join finishes after stop and restart', async () => {
-    const { client, storage, sync } = await create(inviteSync())
+    const { client, storage, sync } = await create(inviteSync(`@${await getHexHash(Buffer.from((await getKeypairFromSeed('callback-lifecycle')).publicKey))}:relay.example`))
     const join = gate()
     vi.spyOn(MatrixClient.prototype, 'joinRooms').mockImplementation(async () => {
       join.entered.resolve()
       await join.release.promise
     })
+    await client.getPairingRequestInfo()
     await client.start()
     await join.entered.promise
     try {
@@ -193,12 +195,13 @@ describe('P2P callbacks retired by stop', () => {
   })
 
   it('does not retry an old forbidden invite using a replacement Matrix client', async () => {
-    const { client, sync } = await create(inviteSync())
+    const { client, sync } = await create(inviteSync(`@${await getHexHash(Buffer.from((await getKeypairFromSeed('callback-lifecycle')).publicKey))}:relay.example`))
     const entered = new ExposedPromise<void>()
     const join = vi.spyOn(MatrixClient.prototype, 'joinRooms').mockImplementation(async () => {
       entered.resolve()
       throw Object.assign(new Error('Forbidden'), { errcode: 'M_FORBIDDEN' })
     })
+    await client.getPairingRequestInfo()
     await client.start()
     await entered.promise
     await setImmediate()
@@ -213,15 +216,114 @@ describe('P2P callbacks retired by stop', () => {
     }
   })
 
+  it.each(['cancelled', 'expired', 'replaced', 'valid'])('rechecks pending invite eligibility on a %s retry', async (outcome) => {
+    const keys = await getKeypairFromSeed('callback-lifecycle')
+    const target = `@${await getHexHash(Buffer.from(keys.publicKey))}:relay.example`
+    const { client } = await create(inviteSync(target))
+    const join = vi.spyOn(MatrixClient.prototype, 'joinRooms')
+      .mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { errcode: 'M_FORBIDDEN' }))
+      .mockResolvedValue(undefined)
+    await client.getPairingRequestInfo()
+    await client.start()
+    await setImmediate()
+    expect(join).toHaveBeenCalledTimes(1)
+    if (outcome === 'cancelled' || outcome === 'replaced') await client.cancelPairingRequests()
+    if (outcome === 'replaced') await client.getPairingRequestInfo()
+    if (outcome === 'expired') vi.setSystemTime(Date.now() + 31 * 60 * 1000)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(join).toHaveBeenCalledTimes(outcome === 'valid' ? 2 : 1)
+    await client.stop()
+  })
+
+  it('does not retry a known-peer invite after that peer is removed', async () => {
+    const keys = await getKeypairFromSeed('callback-lifecycle')
+    const peerKeys = await getKeypairFromSeed('known-inviter')
+    const target = `@${await getHexHash(Buffer.from(keys.publicKey))}:relay.example`
+    const invitation = inviteSync(target)
+    const inviter = `@${await getHexHash(Buffer.from(peerKeys.publicKey))}:relay.example`
+    const events = invitation.rooms?.invite?.[room].invite_state.events
+    if (!events) throw new Error('Missing invite fixture')
+    events[0].sender = inviter
+    const { client, storage } = await create(invitation)
+    await storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [{
+      id: 'known', type: 'p2p-pairing-response', name: 'Known', version: '3',
+      publicKey: Buffer.from(peerKeys.publicKey).toString('hex'), relayServer: 'relay.example', senderId: 'known'
+    }])
+    const join = vi.spyOn(MatrixClient.prototype, 'joinRooms')
+      .mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { errcode: 'M_FORBIDDEN' }))
+      .mockResolvedValue(undefined)
+    await client.start()
+    await setImmediate()
+    expect(join).toHaveBeenCalledTimes(1)
+    await storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [])
+    await vi.advanceTimersByTimeAsync(200)
+    expect(join).toHaveBeenCalledTimes(1)
+    await client.stop()
+  })
+
+  it.each([false, true])('retains known peer matching after pairing ends, previously stored=%s', async (existing) => {
+    const keys = await getKeypairFromSeed('callback-lifecycle')
+    const peerKeys = await getKeypairFromSeed('known-inviter')
+    const target = `@${await getHexHash(Buffer.from(keys.publicKey))}:relay.example`
+    const invitation = inviteSync(target)
+    const events = invitation.rooms?.invite?.[room].invite_state.events
+    if (!events) throw new Error('Missing invite fixture')
+    events[0].sender = `@${await getHexHash(Buffer.from(peerKeys.publicKey))}:relay.example`
+    const { client, storage } = await create(invitation)
+    const peer = {
+      id: 'known', type: 'p2p-pairing-response' as const, name: 'Known', version: '3',
+      publicKey: Buffer.from(peerKeys.publicKey).toString('hex'), relayServer: 'relay.example', senderId: 'known'
+    }
+    if (existing) await storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [peer])
+    const join = vi.spyOn(MatrixClient.prototype, 'joinRooms')
+      .mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { errcode: 'M_FORBIDDEN' }))
+      .mockResolvedValue(undefined)
+    await client.getPairingRequestInfo()
+    await client.start()
+    await setImmediate()
+    expect(join).toHaveBeenCalledTimes(1)
+    await client.cancelPairingRequests()
+    if (!existing) await storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [peer])
+    await vi.advanceTimersByTimeAsync(200)
+    expect(join).toHaveBeenCalledTimes(2)
+    await client.stop()
+  })
+
+  it('does not accept a delayed invite using a replacement pairing', async () => {
+    const { client, keys, polling } = await create()
+    const target = `@${await getHexHash(Buffer.from(keys.publicKey))}:relay.example`
+    await client.getPairingRequestInfo()
+    await client.start()
+    await vi.advanceTimersByTimeAsync(0)
+    const pending = gate()
+    const getHash = client.getPublicKeyHash.bind(client)
+    vi.spyOn(client, 'getPublicKeyHash').mockImplementationOnce(async () => {
+      pending.entered.resolve()
+      await pending.release.promise
+      return getHash()
+    })
+    const join = vi.spyOn(MatrixClient.prototype, 'joinRooms').mockResolvedValue(undefined)
+    polling.resolve(inviteSync(target))
+    await pending.entered.promise
+    await client.cancelPairingRequests()
+    await client.getPairingRequestInfo()
+    pending.release.resolve()
+    await setImmediate()
+    expect(join).not.toHaveBeenCalled()
+    await client.stop()
+  })
+
   const openChannel = async () => {
     const setup = await create()
     await setup.client.start()
     const callback = vi.fn()
     await setup.client.listenForChannelOpening(callback)
+    const request = await setup.client.getPairingRequestInfo()
     const peerKeys = await getKeypairFromSeed('callback-peer')
     const publicKey = Buffer.from(peerKeys.publicKey).toString('hex')
+    const peerSender = `@${await getHexHash(Buffer.from(peerKeys.publicKey))}:relay.example`
     const pairing = {
-      id: 'pairing',
+      id: request.id,
       name: 'Peer',
       publicKey,
       version: '3',
@@ -231,16 +333,16 @@ describe('P2P callbacks retired by stop', () => {
     const body = `@channel-open:@${await getHexHash(Buffer.from(setup.keys.publicKey))}:${payload}`
     await vi.advanceTimersByTimeAsync(0)
 
-    return { ...setup, callback, pairing, body }
+    return { ...setup, callback, pairing, body, peerSender }
   }
 
   it('delivers a valid current-session channel opening using real cryptography', async () => {
-    const { client, polling, callback, pairing, body } = await openChannel()
+    const { client, polling, callback, pairing, body, peerSender } = await openChannel()
     try {
-      polling.resolve(messageSync(body))
+      polling.resolve(messageSync(body, peerSender))
       await setImmediate()
       expect(callback).toHaveBeenCalledTimes(1)
-      expect(callback).toHaveBeenCalledWith(expect.objectContaining(pairing))
+      expect(callback).toHaveBeenCalledWith(expect.objectContaining(pairing), expect.any(Function))
     } finally {
       await client.stop()
     }
@@ -249,14 +351,14 @@ describe('P2P callbacks retired by stop', () => {
   it.each(['decrypt', 'senderId'])(
     'does not deliver a channel opening whose %s resumes after stop',
     async (stage) => {
-      const { client, polling, callback, body } = await openChannel()
+      const { client, polling, callback, body, peerSender } = await openChannel()
       const pending = gate()
       if (stage === 'decrypt') {
         mockOpenGate = pending
       } else {
         mockSenderIdGate = pending
       }
-      polling.resolve(messageSync(body))
+      polling.resolve(messageSync(body, peerSender))
       await pending.entered.promise
       try {
         await client.stop()
@@ -271,7 +373,7 @@ describe('P2P callbacks retired by stop', () => {
   )
 
   it('does not persist an old channel opening after its target match resumes', async () => {
-    const { client, storage, polling, callback, body } = await openChannel()
+    const { client, storage, polling, callback, body, peerSender } = await openChannel()
     const pending = gate()
     const getPublicKey = client.getPublicKey.bind(client)
     vi.spyOn(client, 'getPublicKey').mockImplementationOnce(async () => {
@@ -281,7 +383,7 @@ describe('P2P callbacks retired by stop', () => {
 
       return result
     })
-    polling.resolve(messageSync(body))
+    polling.resolve(messageSync(body, peerSender))
     await pending.entered.promise
     try {
       await client.stop()
@@ -298,7 +400,8 @@ describe('P2P callbacks retired by stop', () => {
   it.each(['read', 'write'])(
     'does not leave an old peer mapping after an in-flight storage %s',
     async (stage) => {
-      const { client, storage } = await create(inviteSync())
+      const { client, storage } = await create()
+      await client.start()
       const write = vi.spyOn(storage, 'set')
       const pending = gate()
       if (stage === 'read') {
@@ -306,14 +409,13 @@ describe('P2P callbacks retired by stop', () => {
       } else {
         storage.writeGate = pending
       }
-      vi.spyOn(MatrixClient.prototype, 'joinRooms').mockResolvedValue(undefined)
-      await client.start()
+      const updating = client.updatePeerRoom(sender, room)
       await pending.entered.promise
       const stopping = client.stop()
       try {
         await setImmediate()
         pending.release.resolve()
-        await stopping
+        await Promise.all([updating, stopping])
         await setImmediate()
         await expect(storage.get(StorageKey.MATRIX_PEER_ROOM_IDS)).resolves.toEqual({})
         if (stage === 'read') {
@@ -323,7 +425,7 @@ describe('P2P callbacks retired by stop', () => {
         }
       } finally {
         pending.release.resolve()
-        await stopping
+        await Promise.allSettled([updating, stopping])
         await client.stop()
       }
     }
@@ -371,5 +473,19 @@ describe('P2P callbacks retired by stop', () => {
     } finally {
       log.mockRestore()
     }
+  })
+
+  it('still resets session state in stop() when startingClient.stop() rejects', async () => {
+    const { client, storage } = await create()
+    await storage.set(StorageKey.MATRIX_SELECTED_NODE, 'relay.example')
+    await storage.set(StorageKey.MATRIX_PEER_ROOM_IDS, { [sender]: room })
+    const stopFailure = new Error('starting client stop failed')
+    ;(client as unknown as { startingClient: { stop: () => Promise<void> } }).startingClient = {
+      stop: vi.fn().mockRejectedValue(stopFailure)
+    }
+
+    await expect(client.stop()).rejects.toBe(stopFailure)
+    await expect(storage.get(StorageKey.MATRIX_SELECTED_NODE)).resolves.toBeUndefined()
+    await expect(storage.get(StorageKey.MATRIX_PEER_ROOM_IDS)).resolves.toEqual({})
   })
 })

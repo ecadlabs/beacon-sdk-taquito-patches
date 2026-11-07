@@ -121,7 +121,7 @@ describe('WalletConnect pairing approval ownership', () => {
       options,
       leader
     )
-    paired = vi.fn()
+    paired = vi.fn().mockResolvedValue(true)
   })
 
   afterEach(() => {
@@ -149,6 +149,28 @@ describe('WalletConnect pairing approval ownership', () => {
     expect(disconnect).toHaveBeenCalledWith(expect.objectContaining({ topic: 'stale' }))
   }
 
+  it.each([false, true])('awaits a declined callback and preserves previous peer=%s', async (existing) => {
+    const previous = {
+      id: 'wallet-key', publicKey: 'wallet-key', senderId: 'previous',
+      type: 'walletconnect-pairing-response' as const, name: 'previous', version: 'first',
+      extensionId: 'previous'
+    }
+    if (existing) await transport.addPeer(previous)
+    const decision = new ExposedPromise<boolean>()
+    const entered = new ExposedPromise<void>()
+    paired.mockImplementation(() => { entered.resolve(); return decision.promise })
+    await start()
+    approval.resolve(session('stale'))
+    await entered.promise
+    decision.resolve(false)
+    await flush()
+    expect(await storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP)).toEqual(existing ? [previous] : [])
+    expect(client.listenerKeys()).toEqual(existing ? ['wallet-key'] : [])
+    expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
+    expect(client.currentSession()).toBeUndefined()
+    expect(disconnect).toHaveBeenCalledWith(expect.objectContaining({ topic: 'stale' }))
+  })
+
   it('rejects delayed approval after pairing cancellation', async () => {
     await start()
     await transport.stopListeningForNewPeers()
@@ -163,7 +185,7 @@ describe('WalletConnect pairing approval ownership', () => {
     await expectRejected()
   })
 
-  it.each(['Matrix selection', 'account cancellation'])(
+  it.each(['Matrix selection', 'account cancellation', 'WalletConnect success then disconnect'])(
     'rejects delayed approval after DAppClient %s',
     async (outcome) => {
       const keys = { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) }
@@ -171,6 +193,9 @@ describe('WalletConnect pairing approval ownership', () => {
       const matrix = new DappP2PTransport('Test', keys, storage, {})
       vi.spyOn(post, 'connect').mockResolvedValue(undefined)
       vi.spyOn(matrix, 'connect').mockResolvedValue(undefined)
+      // Matrix networking is not started in this WalletConnect fixture.
+      vi.spyOn(matrix, 'removeAllPeers').mockResolvedValue(undefined)
+      vi.spyOn(matrix, 'disconnect').mockResolvedValue(undefined)
       vi.spyOn(matrix, 'getPairingRequestInfo').mockResolvedValue({
         id: 'matrix',
         type: 'p2p-pairing-request',
@@ -210,6 +235,17 @@ describe('WalletConnect pairing approval ownership', () => {
       const selection = dapp.init()
       const selectMatrix = await matrixListener.promise
       await client.init()
+      if (outcome === 'WalletConnect success then disconnect') {
+        approval.resolve(session('valid'))
+        await expect(selection).resolves.toBe(TransportType.WALLETCONNECT)
+        await dapp.disconnect({ notifyPeers: false })
+        await flush()
+        expect(await storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP)).toEqual([])
+        expect(client.listenerKeys()).toEqual([])
+        expect(client.currentSession()).toBeUndefined()
+        expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
+        return
+      }
       if (outcome === 'Matrix selection') {
         selectMatrix({
           id: 'matrix',
@@ -436,6 +472,29 @@ describe('WalletConnect pairing approval ownership', () => {
     expect(disconnect).not.toHaveBeenCalled()
   })
 
+  it('preserves the existing session when a secondary tab declines an approval', async () => {
+    leader.mockResolvedValue(false)
+    const close = vi.spyOn(client, 'closeSignClient').mockResolvedValue(undefined)
+    const previous = session('previous')
+    const peer = {
+      id: 'wallet-key', publicKey: 'wallet-key', senderId: 'previous',
+      type: 'walletconnect-pairing-response' as const, name: 'Previous wallet',
+      version: '3', extensionId: 'Previous wallet'
+    }
+    await transport.addPeer(peer)
+    Reflect.set(client, 'session', previous)
+    paired.mockResolvedValue(false)
+    await start()
+    approval.resolve(session('declined'))
+    await flush()
+    expect(client.currentSession()).toBe(previous)
+    expect(close).not.toHaveBeenCalled()
+    expect(client.listenerKeys()).toEqual(['wallet-key'])
+    expect(await storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP)).toEqual([peer])
+    expect(disconnect).toHaveBeenCalledWith(expect.objectContaining({ topic: 'declined' }))
+    expect(disconnect).not.toHaveBeenCalledWith(expect.objectContaining({ topic: 'previous' }))
+  })
+
   it('preserves a replacement approved while secondary-tab cleanup is awaiting close', async () => {
     leader.mockResolvedValue(false)
     const entered = new ExposedPromise<void>()
@@ -446,6 +505,7 @@ describe('WalletConnect pairing approval ownership', () => {
     })
     paired.mockImplementation(() => {
       void transport.stopListeningForNewPeers()
+      return true
     })
     await start()
     approval.resolve(session('first'))
@@ -471,6 +531,7 @@ describe('WalletConnect pairing approval ownership', () => {
     const close = vi.spyOn(client, 'closeSignClient').mockResolvedValue(undefined)
     paired.mockImplementation(() => {
       void transport.stopListeningForNewPeers()
+      return true
     })
     await start()
     approval.resolve(session('valid'))
@@ -489,6 +550,7 @@ describe('WalletConnect pairing approval ownership', () => {
   it('accepts valid approval and keeps the session when selection stops pairing listeners', async () => {
     paired.mockImplementation(() => {
       void transport.stopListeningForNewPeers()
+      return true
     })
     await start()
     approval.resolve(session('valid'))

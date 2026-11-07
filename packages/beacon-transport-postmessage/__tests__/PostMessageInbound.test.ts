@@ -1,4 +1,4 @@
-import { getSenderId, Logger, windowRef } from '@ecadlabs/beacon-core'
+import { PendingPairingRequests, getSenderId, Logger, windowRef } from '@ecadlabs/beacon-core'
 import {
   ExposedPromise,
   KeyPair,
@@ -25,10 +25,12 @@ vi.mock('@ecadlabs/beacon-utils', async (importOriginal) => ({
   openCryptobox: vi.fn()
 }))
 
+const plaintext = JSON.stringify({ senderId: 'beacon-sender-id' })
+
 class TestClient extends PostMessageClient {
   readonly decrypt = vi
     .fn<(...args: [string, string]) => Promise<string>>()
-    .mockResolvedValue('plaintext')
+    .mockResolvedValue(plaintext)
 
   protected override async decryptMessage(
     senderPublicKey: string,
@@ -102,7 +104,9 @@ describe('PostMessageClient inbound envelopes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(openCryptobox).mockResolvedValue(JSON.stringify(pairingResponse))
-    client = new TestClient('Dapp', keyPair)
+    const pendingPairings = new PendingPairingRequests()
+    pendingPairings.add(pairingResponse.id)
+    client = new TestClient('Dapp', keyPair, pendingPairings)
   })
 
   it.each([
@@ -125,7 +129,7 @@ describe('PostMessageClient inbound envelopes', () => {
     expect(openCryptobox).not.toHaveBeenCalled()
     expect(openingCallback).not.toHaveBeenCalled()
     expect(client.decrypt).toHaveBeenCalledWith('peer-public-key', 'ciphertext')
-    expect(callback).toHaveBeenCalledWith('plaintext', {
+    expect(callback).toHaveBeenCalledWith(plaintext, {
       origin: Origin.EXTENSION,
       id: expectedId
     })
@@ -256,7 +260,8 @@ describe('PostMessageClient inbound envelopes', () => {
         ...pairingResponse,
         extensionId: 'extension-id',
         senderId: 'beacon-sender-id'
-      })
+      }),
+      expect.any(Function)
     )
   })
 
@@ -367,7 +372,7 @@ describe('PostMessageClient inbound envelopes', () => {
     await dispatchMessage(event)
     await notification.promise
 
-    expect(callback).toHaveBeenCalledWith('plaintext', {
+    expect(callback).toHaveBeenCalledWith(plaintext, {
       origin: Origin.EXTENSION,
       id: 'extension-id'
     })
@@ -389,7 +394,8 @@ describe('PostMessageClient inbound envelopes', () => {
       expect.objectContaining({
         ...pairingResponse,
         extensionId: 'extension-id'
-      })
+      }),
+      expect.any(Function)
     )
     expect(client.decrypt).not.toHaveBeenCalled()
     expect(encryptedCallback).not.toHaveBeenCalled()
@@ -426,7 +432,7 @@ describe('PostMessageClient inbound envelopes', () => {
 
       expect(error).toHaveBeenCalledWith('subscribeToMessages', failure)
       expect(rejectedCallback).toHaveBeenCalledTimes(1)
-      expect(healthyCallback).toHaveBeenCalledWith('plaintext', {
+      expect(healthyCallback).toHaveBeenCalledWith(plaintext, {
         origin: Origin.EXTENSION,
         id: 'extension-id'
       })
@@ -478,6 +484,9 @@ describe('PostMessageClient inbound envelopes', () => {
       keyPair.publicKey,
       keyPair.secretKey
     )
-    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ extensionId: 'extension-id' }))
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({ extensionId: 'extension-id' }),
+      expect.any(Function)
+    )
   })
 })

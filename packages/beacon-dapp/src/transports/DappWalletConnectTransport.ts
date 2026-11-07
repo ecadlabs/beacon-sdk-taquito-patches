@@ -40,7 +40,7 @@ export class DappWalletConnectTransport extends WalletConnectTransport<
   }
 
   public async listenForNewPeer(
-    newPeerListener: (peer: ExtendedWalletConnectPairingResponse) => void
+    newPeerListener: (peer: ExtendedWalletConnectPairingResponse) => boolean | Promise<boolean>
   ): Promise<void> {
     this.client.cancelPendingPairing()
     this.newPeerListener = newPeerListener
@@ -59,28 +59,18 @@ export class DappWalletConnectTransport extends WalletConnectTransport<
         return false
       }
 
-      // Peer storage is asynchronous. Cancellation must roll it back before the next approval.
-      await this.peerManager.addPeer(peer)
-      if (!ownsPairing()) {
-        await this.peerManager.removePeer(peer.publicKey)
+      const accepted = await this.addPairingPeer(peer, ownsPairing, async () => {
+        // Consume delivery before the winner retires sibling responses.
+        this.newPeerListener = undefined
+        this._isConnected = status
 
-        return false
-      }
-      await this.listen(peer.publicKey)
-      if (!ownsPairing()) {
-        await this.removePeer(peer)
-
-        return false
-      }
-
-      this._isConnected = status
-      if (this.isReady.isPending()) {
+        return listener(peer)
+      })
+      if (accepted && isCurrent() && this.isReady.isPending()) {
         this.isReady.resolve(true)
       }
-      this.newPeerListener = undefined
-      listener(peer)
 
-      return true
+      return accepted
     })
   }
 

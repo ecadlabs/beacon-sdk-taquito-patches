@@ -454,12 +454,12 @@ describe('WalletConnectCommunicationClient basics', () => {
     vi.useRealTimers()
   })
 
-  it('unsubscribeFromEncryptedMessages clears all listeners', async () => {
+  it('unsubscribeFromEncryptedMessages clears activeListeners while preserving channelOpeningListeners', async () => {
     await client.listenForEncryptedMessage('k', () => {})
-    await client.listenForChannelOpening(() => {})
+    await client.listenForChannelOpening(() => true)
     await client.unsubscribeFromEncryptedMessages()
     expect((client as any).activeListeners.size).toBe(0)
-    expect((client as any).channelOpeningListeners.size).toBe(0)
+    expect((client as any).channelOpeningListeners.size).toBe(1)
   })
 
   it('getTopicFromSession returns session.topic', () => {
@@ -472,6 +472,176 @@ describe('WalletConnectCommunicationClient basics', () => {
     } as any
     expect((client as any).getTopicFromSession(dummy)).toBe('t1')
   })
+
+  it('ignores session_update events for non-active session topics', () => {
+    const resolvedClient = createResolvedSignClient()
+    const activeSession = {
+      topic: 'active-topic',
+      namespaces: {
+        tezos: {
+          accounts: ['tezos:mainnet:tz1active'],
+          methods: ['tezos_getAccounts', 'tezos_send', 'tezos_sign'],
+          events: []
+        }
+      },
+      pairingTopic: 'active-pairing',
+      peer: { metadata: { name: 'Active Wallet', icons: [], redirect: {} } },
+      sessionProperties: {}
+    } as unknown as SessionTypes.Struct
+    const inactiveSession = {
+      topic: 'inactive-topic',
+      namespaces: {
+        tezos: {
+          accounts: ['tezos:mainnet:tz1inactive'],
+          methods: ['tezos_getAccounts', 'tezos_send', 'tezos_sign'],
+          events: []
+        }
+      },
+      pairingTopic: 'inactive-pairing',
+      peer: { metadata: { name: 'Inactive Wallet', icons: [], redirect: {} } },
+      sessionProperties: {}
+    } as unknown as SessionTypes.Struct
+
+    resolvedClient.session.get.mockImplementation((topic: string) => {
+      if (topic === 'active-topic') return activeSession
+      if (topic === 'inactive-topic') return inactiveSession
+      return undefined
+    })
+    ;(client as any).session = activeSession
+    const updateActiveAccountSpy = vi
+      .spyOn(client as any, 'updateActiveAccount')
+      .mockImplementation(() => {})
+
+    ;(client as any).subscribeToSessionEvents(resolvedClient)
+    const sessionUpdateHandler = resolvedClient.on.mock.calls.find(
+      ([eventName]: [string]) => eventName === 'session_update'
+    )?.[1]
+    expect(sessionUpdateHandler).toBeDefined()
+
+    sessionUpdateHandler({
+      topic: 'inactive-topic',
+      params: {
+        namespaces: inactiveSession.namespaces
+      }
+    })
+
+    expect((client as any).session).toBe(activeSession)
+    expect(updateActiveAccountSpy).not.toHaveBeenCalled()
+    updateActiveAccountSpy.mockRestore()
+  })
+
+  it('updates currentSession before invoking channelOpeningListeners when a new session is approved', async () => {
+    const resolvedClient = createPairingSignClient()
+    let resolveApproval: ((session: SessionTypes.Struct) => void) | undefined
+    resolvedClient.connect.mockResolvedValue({
+      uri: 'wc:new-pairing-topic@2?relay-protocol=irn&symKey=abc',
+      approval: () =>
+        new Promise<SessionTypes.Struct>((resolve) => {
+          resolveApproval = resolve
+        })
+    })
+    ;(SignClient.init as Mock).mockResolvedValue(resolvedClient)
+
+    let observedSessionTopicInListener: string | undefined
+    await client.listenForChannelOpening(() => {
+      observedSessionTopicInListener = client.currentSession()?.topic
+      return true
+    })
+
+    const newSession = {
+      topic: 'reconnected-session-topic',
+      controller: 'new-controller-pubkey',
+      namespaces: {
+        tezos: {
+          accounts: ['tezos:mainnet:tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb'],
+          methods: ['tezos_getAccounts', 'tezos_send', 'tezos_sign'],
+          events: []
+        }
+      },
+      pairingTopic: 'new-pairing-topic',
+      peer: {
+        publicKey: 'reconnected-peer-pubkey',
+        metadata: { name: 'Reconnected Wallet', icons: [], redirect: {} }
+      },
+      sessionProperties: {}
+    } as unknown as SessionTypes.Struct
+
+    await client.init(true)
+    expect(resolveApproval).toBeDefined()
+    resolveApproval!(newSession)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(observedSessionTopicInListener).toBe('reconnected-session-topic')
+    expect((client as any).activeAccountOrPbk).toBeUndefined()
+  })
+
+  it('ignores out-of-order stale fetchAccounts completion in updateActiveAccount', async () => {
+    const { isPublicKeySC } = await import('@ecadlabs/beacon-utils')
+    ;(isPublicKeySC as Mock).mockReturnValue(false)
+
+    const session = {
+      topic: 'active-topic',
+      namespaces: {},
+      pairingTopic: 'active-pairing',
+      peer: {
+        publicKey: 'peer-pk',
+        metadata: { name: 'Wallet', icons: [], redirect: {} }
+      },
+      sessionProperties: {}
+    } as unknown as SessionTypes.Struct
+    ;(client as any).session = session
+
+    let resolveFirstFetch!: (res: { address: string; pubkey: string }[]) => void
+    let resolveSecondFetch!: (res: { address: string; pubkey: string }[]) => void
+    const fetchAccountsSpy = vi
+      .spyOn(client as any, 'fetchAccounts')
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstFetch = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecondFetch = resolve
+          })
+      )
+    const notifyListenersSpy = vi.spyOn(client as any, 'notifyListeners')
+
+    try {
+      const firstUpdate = (client as any).updateActiveAccount(
+        ['tezos:mainnet:tz1FirstAccount'],
+        session
+      )
+      const secondUpdate = (client as any).updateActiveAccount(
+        ['tezos:mainnet:tz1SecondAccount'],
+        session
+      )
+
+      // Second update resolves first
+      resolveSecondFetch([{ address: 'tz1SecondAccount', pubkey: 'pk-second' }])
+      await secondUpdate
+
+      // Stale first update resolves afterwards
+      resolveFirstFetch([{ address: 'tz1FirstAccount', pubkey: 'pk-first' }])
+      await firstUpdate
+
+      expect((client as any).activeAccountOrPbk).toBe('tz1SecondAccount')
+      expect(notifyListenersSpy).toHaveBeenCalledTimes(1)
+      expect(notifyListenersSpy).toHaveBeenCalledWith(
+        'active-topic',
+        expect.objectContaining({
+          type: BeaconMessageType.ChangeAccountRequest,
+          publicKey: 'pk-second'
+        })
+      )
+    } finally {
+      fetchAccountsSpy.mockRestore()
+      notifyListenersSpy.mockRestore()
+      ;(isPublicKeySC as Mock).mockReturnValue(true)
+    }
+  })
 })
 
 describe('String message dispatching', () => {
@@ -482,12 +652,6 @@ describe('String message dispatching', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     client = new WalletConnectCommunicationClient(wcOptions, isLeader)
-  })
-
-  it('sendMessage no-op on unknown type', async () => {
-    const raw = JSON.stringify({ id: '1', type: 'Foo' })
-    await client.sendMessage(raw)
-    // no errors
   })
 
   it('sendMessage dispatches PermissionRequest', async () => {
@@ -645,7 +809,7 @@ describe('String message dispatching', () => {
     })
   })
 
-  it('does not let an outbound Disconnect message poison correlation of a subsequent SignPayloadResponse', async () => {
+  it('does not let an outbound Disconnect message affect correlation of a subsequent SignPayloadResponse', async () => {
     const publicKey = 'edpktp3QT23n223n223n223n223n223n223n223n223n223n223n1'
     const session = createApprovedSession('session-topic-1', publicKey)
 

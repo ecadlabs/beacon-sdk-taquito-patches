@@ -206,14 +206,14 @@ export class MatrixClientStore {
    */
   private setState(partialState: Partial<MatrixState>): void {
     this.state = {
-      isRunning: partialState.isRunning || this.state.isRunning,
-      userId: partialState.userId || this.state.userId,
-      deviceId: partialState.deviceId || this.state.deviceId,
-      txnNo: partialState.txnNo || this.state.txnNo,
-      accessToken: partialState.accessToken || this.state.accessToken,
-      syncToken: partialState.syncToken || this.state.syncToken,
-      pollingTimeout: partialState.pollingTimeout || this.state.pollingTimeout,
-      pollingRetries: partialState.pollingRetries || this.state.pollingRetries,
+      isRunning: partialState.isRunning ?? this.state.isRunning,
+      userId: partialState.userId ?? this.state.userId,
+      deviceId: partialState.deviceId ?? this.state.deviceId,
+      txnNo: partialState.txnNo ?? this.state.txnNo,
+      accessToken: partialState.accessToken ?? this.state.accessToken,
+      syncToken: partialState.syncToken ?? this.state.syncToken,
+      pollingTimeout: partialState.pollingTimeout ?? this.state.pollingTimeout,
+      pollingRetries: partialState.pollingRetries ?? this.state.pollingRetries,
       rooms: this.mergeRooms(this.state.rooms, partialState.rooms)
     }
   }

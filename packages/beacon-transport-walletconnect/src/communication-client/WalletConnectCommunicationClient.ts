@@ -114,10 +114,11 @@ interface PendingRequest {
 type ChannelOpeningListener = (
   pairingResponse: ExtendedWalletConnectPairingResponse,
   isCurrent: () => boolean
-) => void | boolean | Promise<void | boolean>
+) => boolean | Promise<boolean>
 
 export class WalletConnectCommunicationClient extends CommunicationClient {
-  protected readonly activeListeners: Map<string, (message: string) => void> = new Map()
+  protected readonly activeListeners: Map<string, (message: string) => void | Promise<void>> =
+    new Map()
 
   protected readonly channelOpeningListeners: Map<string, ChannelOpeningListener> = new Map()
   private pairingGeneration = 0
@@ -131,6 +132,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   private session: SessionTypes.Struct | undefined
   private activeAccountOrPbk: string | undefined
   private activeNetwork: string | undefined
+  private accountUpdateGeneration: number = 0
   readonly disconnectionEvents: Set<string> = new Set()
   private pingInterval: NodeJS.Timeout | undefined
 
@@ -231,14 +233,14 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
   public async listenForEncryptedMessage(
     senderPublicKey: string,
-    messageCallback: (message: string) => void
+    messageCallback: (message: string) => void | Promise<void>
   ): Promise<void> {
     if (this.activeListeners.has(senderPublicKey)) {
       return
     }
 
     const callbackFunction = async (message: string): Promise<void> => {
-      messageCallback(message)
+      await messageCallback(message)
     }
 
     this.activeListeners.set(senderPublicKey, callbackFunction)
@@ -330,7 +332,6 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     this.clearRequests()
     this.cancelPendingPairing()
     this.activeListeners.clear()
-    this.channelOpeningListeners.clear()
   }
 
   public async unsubscribeFromEncryptedMessage(senderPublicKey: string): Promise<void> {
@@ -840,7 +841,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
               if (!ownsSession()) {
                 break
               }
-              accepted = (await listener(pairingResponse, ownsSession)) !== false
+              accepted = await listener(pairingResponse, ownsSession)
             }
           } finally {
             if (!accepted) {
@@ -853,8 +854,10 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
           if (accepted && this.session?.topic === session.topic) {
             this.updateStorageWallet(session)
           }
+
+          return accepted
         })
-        this.approvalQueue = delivery.catch(() => undefined)
+        this.approvalQueue = delivery.then(() => undefined, () => undefined)
 
         return delivery
       })
@@ -884,7 +887,11 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
           fun && fun('error')
         }
       })
-      .then(async () => {
+      .then(async (accepted) => {
+        // A declined proposal restored the previous session; it still owns its connection.
+        if (!accepted) {
+          return
+        }
         const isLeader = await this.isLeader()
         if (isCurrent() && !isLeader && !this.isMobileOS()) {
           await this.closeSignClient()
@@ -1020,6 +1027,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   }
 
   private async updateActiveAccount(accounts: string[], session: SessionTypes.Struct) {
+    const generation = ++this.accountUpdateGeneration
     try {
       if (this.session !== session) {
         return
@@ -1027,9 +1035,6 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       if (accounts.length) {
         const [_namespace, chainId, addressOrPbk] = accounts[0].split(':', 3)
         let publicKey: string | undefined
-
-        this.activeNetwork = chainId
-        this.activeAccountOrPbk = addressOrPbk
 
         if (!isPublicKeySC(addressOrPbk)) {
           const token = accounts[1] ? accounts[1].split(':', 3)[2] : ''
@@ -1046,14 +1051,21 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
           publicKey = addressOrPbk
         }
 
+        if (generation !== this.accountUpdateGeneration || this.session !== session) {
+          return
+        }
+
         if (!publicKey) {
           throw new Error('Public key for the new account not provided')
         }
 
         const id = await generateGUID()
-        if (this.session !== session) {
+        if (generation !== this.accountUpdateGeneration || this.session !== session) {
           return
         }
+        this.activeNetwork = chainId
+        this.activeAccountOrPbk = addressOrPbk
+
         await this.notifyListeners(this.getTopicFromSession(session), {
           id,
           type: BeaconMessageType.ChangeAccountRequest,
@@ -1564,7 +1576,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   private async notifyListeners(
     topic: string,
     partialResponse: BeaconInputMessage,
-    listeners: ((message: string) => void)[] = [...this.activeListeners.values()]
+    listeners: ((message: string) => void | Promise<void>)[] = [...this.activeListeners.values()]
   ) {
     const response: BeaconBaseMessage = {
       ...partialResponse,
@@ -1576,9 +1588,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     const serializer = new Serializer()
     const serialized = await serializer.serialize(response)
 
-    listeners.forEach((listener) => {
-      listener(serialized)
-    })
+    await Promise.all(listeners.map(async (listener) => listener(serialized)))
   }
 
   public currentSession(): SessionTypes.Struct | undefined {

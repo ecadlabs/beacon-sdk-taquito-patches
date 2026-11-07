@@ -1,4 +1,4 @@
-import { Logger, Transport, PeerManager } from '@ecadlabs/beacon-core'
+import { PendingPairingRequests, Logger, Transport, PeerManager } from '@ecadlabs/beacon-core'
 import {
   ConnectionContext,
   ExtendedP2PPairingResponse,
@@ -35,11 +35,21 @@ export class P2PTransport<
     matrixNodes: NodeDistributions,
     storageKey: K,
     iconUrl?: string,
-    appUrl?: string
+    appUrl?: string,
+    pendingPairings?: PendingPairingRequests
   ) {
     super(
       name,
-      new P2PCommunicationClient(name, keyPair, 1, storage, matrixNodes, iconUrl, appUrl),
+      new P2PCommunicationClient(
+        name,
+        keyPair,
+        1,
+        storage,
+        matrixNodes,
+        iconUrl,
+        appUrl,
+        pendingPairings
+      ),
       new PeerManager<K>(storage, storageKey)
     )
   }
@@ -105,9 +115,11 @@ export class P2PTransport<
 
   public async disconnect(): Promise<void> {
     this.connectionGeneration = Symbol('P2P connection')
-    await this.client.stop()
-
-    return super.disconnect()
+    try {
+      await this.client.stop()
+    } finally {
+      await super.disconnect()
+    }
   }
 
   public async startOpenChannelListener(): Promise<void> {

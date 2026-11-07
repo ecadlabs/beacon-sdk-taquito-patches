@@ -1,4 +1,4 @@
-import { Logger, windowRef } from '@ecadlabs/beacon-core'
+import { Logger, PendingPairingRequests, windowRef } from '@ecadlabs/beacon-core'
 import {
   ExposedPromise,
   KeyPair,
@@ -66,7 +66,9 @@ describe('PostMessageClient pairing callback failures', () => {
   it.each(['throw', 'reject'])(
     'logs a callback that fails by %s and handles the next message',
     async (mode) => {
-      const client = new PostMessageClient('Dapp', keyPair)
+      const pendingPairings = new PendingPairingRequests()
+      pendingPairings.add(pairingResponse.id)
+      const client = new PostMessageClient('Dapp', keyPair, pendingPairings)
       const error = new Error('Cannot save pairing peer')
       const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
       const callback = vi.fn()
@@ -85,6 +87,7 @@ describe('PostMessageClient pairing callback failures', () => {
       expect(logged).toHaveBeenCalledTimes(1)
       expect(logged).toHaveBeenCalledWith('listenForChannelOpening', error)
 
+      pendingPairings.add(pairingResponse.id)
       await dispatchMessage()
 
       expect(callback).toHaveBeenCalledTimes(2)
@@ -93,7 +96,9 @@ describe('PostMessageClient pairing callback failures', () => {
   )
 
   it('logs a callback rejection after asynchronous work before its handler settles', async () => {
-    const client = new PostMessageClient('Dapp', keyPair)
+    const pendingPairings = new PendingPairingRequests()
+    pendingPairings.add(pairingResponse.id)
+    const client = new PostMessageClient('Dapp', keyPair, pendingPairings)
     const entered = new ExposedPromise<void>()
     const completion = new ExposedPromise<void>()
     const error = new Error('Cannot finish saving pairing peer')
@@ -117,7 +122,9 @@ describe('PostMessageClient pairing callback failures', () => {
   it.each(['cryptobox rejection', 'invalid JSON'])(
     'ignores %s without calling or blaming the callback',
     async (mode) => {
-      const client = new PostMessageClient('Dapp', keyPair)
+      const pendingPairings = new PendingPairingRequests()
+      pendingPairings.add(pairingResponse.id)
+      const client = new PostMessageClient('Dapp', keyPair, pendingPairings)
       const callback = vi.fn()
       const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
       if (mode === 'cryptobox rejection') {

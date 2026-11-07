@@ -495,6 +495,44 @@ describe('WalletConnect request ownership (#102)', () => {
     ])
   })
 
+  it('preserves a replacement session while the closing session notification is held', async () => {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const delivered: unknown[] = []
+    let completed = false
+    await client.listenForEncryptedMessage('held-disconnect', async (encoded) => {
+      const message = await serializer.deserialize(encoded)
+      if (message.type !== BeaconMessageType.Disconnect) return
+      delivered.push(message)
+      await held
+      completed = true
+    })
+    const handler = mockHandlers.get('session_delete')
+    if (!handler) throw new Error('Missing session_delete registration')
+    handler({ topic: 'current' })
+    try {
+      await flush()
+      expect(delivered).toEqual([
+        expect.objectContaining({ type: BeaconMessageType.Disconnect, senderId: 'current' })
+      ])
+      expect(client.currentSession()).toBeUndefined()
+      expect(completed).toBe(false)
+
+      restoreSession('replacement')
+      await client.init()
+      expect(client.currentSession()?.topic).toBe('replacement')
+      release()
+      await flush()
+      expect(completed).toBe(true)
+      expect(client.currentSession()?.topic).toBe('replacement')
+    } finally {
+      release()
+      await flush()
+    }
+  })
+
   it('resets pairing state when the current session closes before account selection', async () => {
     await client.listenForChannelOpening(() => true)
     await client.init(true)

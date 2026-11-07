@@ -12,7 +12,13 @@ import {
   Origin
 } from '@ecadlabs/beacon-types'
 import { Storage } from '@ecadlabs/beacon-types'
-import { Transport, PeerManager, Logger, windowRef } from '@ecadlabs/beacon-core'
+import {
+  PendingPairingRequests,
+  Transport,
+  PeerManager,
+  Logger,
+  windowRef
+} from '@ecadlabs/beacon-core'
 import { KeyPair } from '@ecadlabs/beacon-utils'
 import { PostMessageClient } from './PostMessageClient'
 
@@ -50,8 +56,18 @@ export class PostMessageTransport<
 
   public readonly type: TransportType = TransportType.POST_MESSAGE
 
-  constructor(name: string, keyPair: KeyPair, storage: Storage, storageKey: K) {
-    super(name, new PostMessageClient(name, keyPair), new PeerManager<K>(storage, storageKey))
+  constructor(
+    name: string,
+    keyPair: KeyPair,
+    storage: Storage,
+    storageKey: K,
+    pendingPairings?: PendingPairingRequests
+  ) {
+    super(
+      name,
+      new PostMessageClient(name, keyPair, pendingPairings),
+      new PeerManager<K>(storage, storageKey)
+    )
   }
 
   public static async isAvailable(): Promise<boolean> {
@@ -195,9 +211,16 @@ export class PostMessageTransport<
 
   public async disconnect(): Promise<void> {
     ++this.connectionGeneration
-    await this.client.unsubscribeFromEncryptedMessages()
     this.newPeerListener = undefined
-    await super.disconnect()
+    try {
+      // Retire listeners immediately while pending peer writes finish rolling back.
+      await Promise.all([
+        this.client.cancelPairingRequests(),
+        this.client.unsubscribeFromEncryptedMessages()
+      ])
+    } finally {
+      await super.disconnect()
+    }
   }
 
   public async startOpenChannelListener(): Promise<void> {

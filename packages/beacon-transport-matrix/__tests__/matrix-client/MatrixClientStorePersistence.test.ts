@@ -52,7 +52,8 @@ describe('Matrix preserved room state', () => {
           id: '!room:relay',
           status: MatrixRoomStatus.JOINED,
           members: [],
-          messages: []
+          messages: [],
+          invitations: []
         }
       }
     })

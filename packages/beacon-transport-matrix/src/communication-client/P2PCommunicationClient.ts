@@ -24,6 +24,8 @@ import {
   Regions
 } from '@ecadlabs/beacon-types'
 import {
+  PendingPairingRequests,
+  Serializer,
   PeerManager,
   BEACON_VERSION,
   getSenderId,
@@ -87,6 +89,13 @@ const isMatrixError = (error: unknown): error is { errcode: string } =>
  * @internalapi
  */
 export class P2PCommunicationClient extends CommunicationClient {
+  public cancelPairingRequests(): Promise<void> {
+    return this.pendingPairings.cancel()
+  }
+
+  private startingClient: MatrixClient | undefined
+  private startupGeneration = 0
+
   private client: ExposedPromise<MatrixClient> = new ExposedPromise()
 
   private matrixClient: MatrixClient | undefined
@@ -116,6 +125,9 @@ export class P2PCommunicationClient extends CommunicationClient {
   > = new Map()
 
   private ignoredRooms: string[] = []
+  private readonly knownRelayServers: Set<string> = new Set()
+  private readonly seenCiphertexts: Set<string> = new Set()
+  private readonly inFlightCiphertexts: Set<string> = new Set()
   private loginCounter: number = 0
 
   constructor(
@@ -125,7 +137,8 @@ export class P2PCommunicationClient extends CommunicationClient {
     private readonly storage: Storage,
     matrixNodes?: NodeDistributions,
     private readonly iconUrl?: string,
-    private readonly appUrl?: string
+    private readonly appUrl?: string,
+    private readonly pendingPairings = new PendingPairingRequests()
   ) {
     super(keyPair)
 
@@ -142,6 +155,7 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async getPairingRequestInfo(): Promise<P2PPairingRequest> {
+    const generation = this.pendingPairings.generation
     const info: P2PPairingRequest = new P2PPairingRequest(
       await generateGUID(),
       this.name,
@@ -157,6 +171,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       info.appUrl = this.appUrl
     }
 
+    this.pendingPairings.add(info.id, generation)
     return info
   }
 
@@ -372,12 +387,57 @@ export class P2PCommunicationClient extends CommunicationClient {
       throw new Error(`getBeaconInfo ${server} failed: ${response.status} ${response.statusText}`)
     }
     const data = (await response.json()) as BeaconInfoResponse
+    this.knownRelayServers.add(server)
+    for (const knownServer of data.known_servers ?? []) {
+      if (typeof knownServer === 'string' && knownServer.length > 0) {
+        this.knownRelayServers.add(knownServer)
+      }
+    }
 
     return {
       region: data.region,
       known_servers: data.known_servers,
       timestamp: Math.floor(data.timestamp)
     }
+  }
+
+  private async isTrustedRelayServer(relay: string): Promise<boolean> {
+    if (
+      Object.values(this.ENABLED_RELAY_SERVERS).some((servers) => servers.includes(relay)) ||
+      this.knownRelayServers.has(relay)
+    ) {
+      return true
+    }
+    if (this.relayServer?.isResolved()) {
+      const current = await this.relayServer.promise.catch(() => undefined)
+      if (current?.server === relay) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  private async isAuthorizedPeerInviter(
+    inviter: string,
+    peers: { publicKey: string; relayServer: string }[]
+  ): Promise<boolean> {
+    const [inviterHash, ...inviterRelayParts] = inviter.split(':')
+    const inviterRelay = inviterRelayParts.join(':')
+    if (!inviterHash.startsWith('@') || !inviterRelay) {
+      return false
+    }
+    for (const peer of peers) {
+      const peerHash = `@${await getHexHash(Buffer.from(peer.publicKey, 'hex'))}`
+      if (
+        peerHash === inviterHash &&
+        (peer.relayServer === inviterRelay || (await this.isTrustedRelayServer(inviterRelay)))
+      ) {
+        return true
+      }
+    }
+
+    return false
   }
 
   private captureSession(): MatrixSessionIdentity {
@@ -418,18 +478,26 @@ export class P2PCommunicationClient extends CommunicationClient {
     })
   }
 
-  public async tryJoinRooms(roomId: string, retry: number = 1): Promise<void> {
+  public async tryJoinRooms(
+    roomId: string,
+    retry: number = 1,
+    isAuthorized: () => Promise<boolean> = async () => true
+  ): Promise<void> {
     const session = this.captureSession()
     const matrixClient = await session.ready.promise
-    await this.joinRoomsForSession(roomId, retry, { ...session, matrixClient })
+    await this.joinRoomsForSession(roomId, retry, { ...session, matrixClient }, isAuthorized)
   }
 
   private async joinRoomsForSession(
     roomId: string,
     retry: number,
-    session: MatrixJoinSession
+    session: MatrixJoinSession,
+    isAuthorized: () => Promise<boolean>
   ): Promise<void> {
     if (!this.isCurrentSession(session)) {
+      return
+    }
+    if (!(await isAuthorized()) || !this.isCurrentSession(session)) {
       return
     }
     try {
@@ -442,7 +510,7 @@ export class P2PCommunicationClient extends CommunicationClient {
         // Federated nodes can briefly reject a join immediately after an invite.
         logger.log('Retrying to join...', error)
         setTimeout(() => {
-          this.joinRoomsForSession(roomId, retry + 1, session).catch((retryError) => {
+          this.joinRoomsForSession(roomId, retry + 1, session, isAuthorized).catch((retryError) => {
             logger.error('tryJoinRooms', retryError)
           })
         }, 200)
@@ -453,6 +521,7 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async start(): Promise<void> {
+    const generation = ++this.startupGeneration
     const owner = this.captureSession()
     const session = owner.id
     logger.log('start', 'starting client')
@@ -460,14 +529,15 @@ export class P2PCommunicationClient extends CommunicationClient {
     logger.log('start', `connecting to server`)
 
     const relayServer: { server: string; timestamp: number } = await this.getRelayServer()
-    if (session !== this.session) {
-      return
+    if (generation !== this.startupGeneration || session !== this.session) {
+      throw new DOMException('Matrix startup cancelled', 'AbortError')
     }
 
     const client = MatrixClient.create({
       baseUrl: `https://${relayServer.server}`,
       storage: this.storage
     })
+    this.startingClient = client
     this.matrixClient = client
 
     const replay = this.initialReplay
@@ -488,77 +558,122 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
     client.subscribe(MatrixClientEventType.MESSAGE, this.initialListener)
 
-    client.subscribe(MatrixClientEventType.INVITE, async (event) => {
+    const handleInvite = async (
+      event: MatrixClientEvent<MatrixClientEventType.INVITE>
+    ): Promise<void> => {
       if (!this.isCurrentSession(owner)) {
         return
       }
-      const { roomId, members } = event.content
-      const member = members.length === 1 ? members[0] : undefined
-      await this.tryJoinRooms(roomId)
+      const pairingGeneration = this.pendingPairings.hasPending()
+        ? this.pendingPairings.generation
+        : undefined
+      const ownId = recipientString(await this.getPublicKeyHash(), relayServer.server)
       if (!this.isCurrentSession(owner)) {
         return
       }
-      if (member) {
-        await this.updateRelayServer(member)
-        if (this.isCurrentSession(owner)) {
-          await this.updatePeerRoom(member, roomId)
+      const rejectedTargets =
+        (event.content.invitations as { rejectedTargets?: string[] } | undefined)
+          ?.rejectedTargets ?? []
+      if (rejectedTargets.includes(ownId)) {
+        return
+      }
+      const targetInvitations = (event.content.invitations ?? []).filter(
+        ({ target }) => target === ownId
+      )
+      const uniqueInviters = Array.from(new Set(targetInvitations.map(({ sender }) => sender)))
+      if (uniqueInviters.length !== 1) {
+        return
+      }
+      const isAuthorized = async (): Promise<boolean> => {
+        if (
+          pairingGeneration !== undefined &&
+          pairingGeneration === this.pendingPairings.generation &&
+          this.pendingPairings.hasPending()
+        ) {
+          return true
         }
+        const dappPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
+        const walletPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_WALLET)
+
+        return this.isAuthorizedPeerInviter(uniqueInviters[0], [
+          ...(Array.isArray(dappPeers) ? dappPeers : []),
+          ...(Array.isArray(walletPeers) ? walletPeers : [])
+        ])
       }
-    })
-
-    if (!relayServer.timestamp) {
-      throw new Error('No timestamp received from relay server')
+      if ((await isAuthorized()) && this.isCurrentSession(owner)) {
+        await this.tryJoinRooms(event.content.roomId, 1, isAuthorized)
+      }
     }
-
-    const time = Math.floor(relayServer.timestamp)
-
-    const loginString = `login:${Math.floor(time / (5 * 60))}`
-
-    logger.log(
-      'start',
-      `login ${loginString}, ${await this.getPublicKeyHash()} on ${relayServer.server}`
-    )
-
-    const loginRawDigest = hash(encode(loginString), 32)
+    client.subscribe(MatrixClientEventType.INVITE, handleInvite)
 
     const keyPair = this.keyPair
     if (!keyPair) {
       throw new Error('Missing key pair')
     }
-    const rawSignature = sign(keyPair.secretKey, loginRawDigest)
+    let initialPasswordUsed = false
+    const password = async (): Promise<string> => {
+      const useFallback = !initialPasswordUsed
+      initialPasswordUsed = true
+      const timestamp = await this.getBeaconInfo(relayServer.server)
+        .then((info) => info.timestamp)
+        .catch((error) => {
+          if (useFallback && Number.isFinite(relayServer.timestamp) && relayServer.timestamp > 0) {
+            return relayServer.timestamp
+          }
+          throw error
+        })
+      if (!Number.isFinite(timestamp) || timestamp <= 0) {
+        throw new Error('Invalid relay timestamp')
+      }
+      const loginString = `login:${Math.floor(timestamp / (5 * 60))}`
+      const secretKey =
+        keyPair.secretKey ?? (keyPair as unknown as { privateKey: Uint8Array }).privateKey
+      const signature = sign(secretKey, hash(encode(loginString), 32))
 
-    const login = {
-      id: await this.getPublicKeyHash(),
-      password: `ed:${toHex(rawSignature)}:${await this.getPublicKey()}`,
-      deviceId: toHex(keyPair.publicKey)
-    }
-    if (session !== this.session) {
-      return
+      return `ed:${toHex(signature)}:${await this.getPublicKey()}`
     }
     try {
-      await client.start(login)
-    } catch (error: unknown) {
-      if (session !== this.session) {
-        return
+      const id = await this.getPublicKeyHash()
+      if (generation !== this.startupGeneration || session !== this.session) {
+        throw new DOMException('Matrix startup cancelled', 'AbortError')
       }
+      await client.start({
+        id,
+        password,
+        deviceId: toHex(keyPair.publicKey)
+      })
+    } catch (error: unknown) {
+      if (this.startingClient === client) {
+        this.startingClient = undefined
+      }
+      if (this.matrixClient === client) {
+        this.matrixClient = undefined
+      }
+      if (
+        (error instanceof Error && error.name === 'AbortError') ||
+        generation !== this.startupGeneration ||
+        session !== this.session
+      ) {
+        throw new DOMException('Matrix startup cancelled', 'AbortError')
+      }
+      await client.stop().catch((stopError) => logger.error(stopError))
       logger.error('start', 'Could not log in, retrying', error)
 
       if (isMatrixError(error) && error.errcode === 'M_USER_DEACTIVATED') {
         await this.generateNewKeyPair(session)
-        if (session !== this.session) {
-          return
+        if (generation !== this.startupGeneration || session !== this.session) {
+          throw new DOMException('Matrix startup cancelled', 'AbortError')
         }
         await this.resetSession(session)
-        if (session !== this.session) {
-          return
+        if (generation !== this.startupGeneration || session !== this.session) {
+          throw new DOMException('Matrix startup cancelled', 'AbortError')
         }
         throw new Error('The account is deactivated.')
       }
 
-      await client.stop()
       await this.resetSession(session)
-      if (session !== this.session) {
-        return
+      if (generation !== this.startupGeneration || session !== this.session) {
+        throw new DOMException('Matrix startup cancelled', 'AbortError')
       }
       if (!this.selectedRegion) {
         throw new Error('No region selected.')
@@ -577,24 +692,47 @@ export class P2PCommunicationClient extends CommunicationClient {
       }
     }
 
-    if (session !== this.session) {
-      return
+    if (this.startingClient === client) {
+      this.startingClient = undefined
     }
+    if (generation !== this.startupGeneration || session !== this.session) {
+      if (this.matrixClient === client) {
+        this.matrixClient = undefined
+      }
+      await client.stop()
+      throw new DOMException('Matrix startup cancelled', 'AbortError')
+    }
+
     logger.log('start', 'login successful, client is ready')
     this.client.resolve(client)
   }
 
   public async stop(): Promise<void> {
     logger.log('stop', 'stopping client')
+    ++this.startupGeneration
     const session = Symbol('Matrix session')
     this.session = session
-    const client =
-      this.matrixClient ?? (this.client.isResolved() ? await this.client.promise : undefined)
+    const starting = this.startingClient
+    this.startingClient = undefined
+    const activeMatrixClient = this.matrixClient
     this.matrixClient = undefined
-    if (client) {
-      await client.stop().catch((error) => logger.error(error))
+    try {
+      await this.cancelPairingRequests()
+    } finally {
+      try {
+        await starting?.stop()
+      } finally {
+        const client =
+          activeMatrixClient !== starting
+            ? (activeMatrixClient ??
+              (this.client.isResolved() ? await this.client.promise : undefined))
+            : (this.client.isResolved() ? await this.client.promise : undefined)
+        if (client && client !== starting) {
+          await client.stop().catch((error) => logger.error(error))
+        }
+        await this.resetSession(session)
+      }
     }
-    await this.resetSession(session)
   }
 
   public async reset(): Promise<void> {
@@ -633,6 +771,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     this.initialReplay = { pending: 0, buffered: new WeakSet(), claimed: new WeakSet() }
     this.initialEvent = undefined
     this.initialListener = undefined
+    this.seenCiphertexts.clear()
   }
 
   public async listenForEncryptedMessage(
@@ -673,24 +812,52 @@ export class P2PCommunicationClient extends CommunicationClient {
           if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
             return
           }
-          let payload
-          await this.updateRelayServer(event.content.message.sender)
-          if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
+          const [, ...senderRelayParts] = event.content.message.sender.split(':')
+          const senderRelay = senderRelayParts.join(':')
+          const dappPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
+          const walletPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_WALLET)
+          const peers = [
+            ...(Array.isArray(dappPeers) ? dappPeers : []),
+            ...(Array.isArray(walletPeers) ? walletPeers : [])
+          ]
+          const matchingPeers = peers.filter((peer) => peer.publicKey === senderPublicKey)
+          const trustedSenderRelay =
+            matchingPeers.length === 0 ||
+            matchingPeers.some((peer) => peer.relayServer === senderRelay) ||
+            (await this.isTrustedRelayServer(senderRelay))
+          if (
+            !trustedSenderRelay ||
+            replay !== this.initialReplay ||
+            !this.isCurrentSession(session)
+          ) {
             return
           }
-          await this.updatePeerRoom(event.content.message.sender, event.content.roomId)
-          if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
+          const rawContent = event.content.message.content
+          if (
+            typeof rawContent !== 'string' ||
+            rawContent.length === 0 ||
+            rawContent.length % 2 !== 0 ||
+            !/^[0-9a-f]+$/i.test(rawContent)
+          ) {
             return
           }
-          try {
-            payload = Buffer.from(event.content.message.content, 'hex')
-          } catch {
-            // Connection-open requests may contain non-hex content.
-          }
-          if (payload && payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
+          const ciphertext = rawContent.toLowerCase()
+          const payload = Buffer.from(ciphertext, 'hex')
+          if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
             let decryptedMessage: string
             try {
               decryptedMessage = await decryptCryptoboxPayload(payload, sharedKey.receive)
+              if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
+                return
+              }
+              const message = (
+                decryptedMessage.startsWith('{')
+                  ? JSON.parse(decryptedMessage)
+                  : await new Serializer().deserialize(decryptedMessage)
+              ) as { senderId?: string }
+              if (message.senderId !== (await getSenderId(senderPublicKey))) {
+                return
+              }
             } catch {
               // Some messages are encrypted for other recipients.
               return
@@ -698,22 +865,45 @@ export class P2PCommunicationClient extends CommunicationClient {
             if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
               return
             }
-            if (replay.buffered.has(event)) {
-              if (replay.claimed.has(event)) {
+            if (this.seenCiphertexts.has(ciphertext) || this.inFlightCiphertexts.has(ciphertext)) {
+              return
+            }
+            this.inFlightCiphertexts.add(ciphertext)
+            try {
+              await this.updateRelayServer(event.content.message.sender)
+              if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
                 return
               }
-              replay.claimed.add(event)
-              if (this.initialEvent === event) {
-                this.initialEvent = undefined
+              await this.updatePeerRoom(event.content.message.sender, event.content.roomId)
+              if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
+                return
               }
-            }
-            logger.log(
-              'listenForEncryptedMessage',
-              `received a message from ${senderPublicKey}`,
-              decryptedMessage
-            )
-            if (this.isCurrentSession(session)) {
-              await messageCallback(decryptedMessage)
+              if (replay.buffered.has(event)) {
+                if (replay.claimed.has(event)) {
+                  return
+                }
+                replay.claimed.add(event)
+                if (this.initialEvent === event) {
+                  this.initialEvent = undefined
+                }
+              }
+              if (this.seenCiphertexts.size >= 1000) {
+                const oldest = this.seenCiphertexts.values().next().value
+                if (oldest !== undefined) {
+                  this.seenCiphertexts.delete(oldest)
+                }
+              }
+              this.seenCiphertexts.add(ciphertext)
+              logger.log(
+                'listenForEncryptedMessage',
+                `received a message from ${senderPublicKey}`,
+                decryptedMessage
+              )
+              if (this.isCurrentSession(session)) {
+                await messageCallback(decryptedMessage)
+              }
+            } finally {
+              this.inFlightCiphertexts.delete(ciphertext)
             }
           }
         }
@@ -835,8 +1025,26 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
   }
 
+  private isValidPairingResponseShape(response: unknown): response is P2PPairingResponse {
+    if (!response || typeof response !== 'object') {
+      return false
+    }
+    const candidate = response as Partial<P2PPairingResponse>
+
+    return (
+      typeof candidate.id === 'string' &&
+      typeof candidate.publicKey === 'string' &&
+      /^[a-f0-9]{64}$/i.test(candidate.publicKey) &&
+      typeof candidate.name === 'string' &&
+      typeof candidate.version === 'string'
+    )
+  }
+
   public async listenForChannelOpening(
-    messageCallback: (pairingResponse: ExtendedP2PPairingResponse) => void | Promise<void>
+    messageCallback: (
+      pairingResponse: ExtendedP2PPairingResponse,
+      isActive: () => boolean
+    ) => void | Promise<void>
   ): Promise<void> {
     logger.debug('listenForChannelOpening')
     const session = this.captureSession()
@@ -857,19 +1065,14 @@ export class P2PCommunicationClient extends CommunicationClient {
         'channel opening received, trying to decrypt',
         JSON.stringify(event)
       )
-      if (!this.isCurrentSession(session)) {
-        return
-      }
-      await this.updateRelayServer(content.message.sender)
-      if (!this.isCurrentSession(session)) {
-        return
-      }
-      await this.updatePeerRoom(content.message.sender, content.roomId)
-      if (!this.isCurrentSession(session)) {
-        return
-      }
+
       const splits = content.message.content.split(':')
-      const payload = Buffer.from(splits[splits.length - 1], 'hex')
+      const hexPayload = splits[splits.length - 1]
+      if (!hexPayload || hexPayload.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(hexPayload)) {
+        return
+      }
+      const payload = Buffer.from(hexPayload, 'hex')
+
       if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
         let response: ExtendedP2PPairingResponse
         try {
@@ -881,20 +1084,40 @@ export class P2PCommunicationClient extends CommunicationClient {
           if (!this.isCurrentSession(session)) {
             return
           }
-          const pairingResponse: P2PPairingResponse = JSON.parse(plaintext)
+          const pairingResponse: unknown = JSON.parse(plaintext)
+
           logger.log(
             'listenForChannelOpening',
             'channel opening received and decrypted',
             JSON.stringify(pairingResponse)
           )
+
+          if (
+            !this.isValidPairingResponseShape(pairingResponse) ||
+            !(await this.isSender(event, pairingResponse.publicKey)) ||
+            !this.isCurrentSession(session)
+          ) {
+            return
+          }
           const senderId = await getSenderId(pairingResponse.publicKey)
-          response = { ...pairingResponse, senderId }
+          if (!this.isCurrentSession(session)) {
+            return
+          }
+          response = {
+            ...pairingResponse,
+            relayServer: content.message.sender.split(':').slice(1).join(':'),
+            senderId
+          }
         } catch {
           // Some channel messages are encrypted for other recipients.
           return
         }
         if (this.isCurrentSession(session)) {
-          await messageCallback(response)
+          await this.pendingPairings.accept(response.id, async (isActive) => {
+            if (this.isCurrentSession(session)) {
+              await messageCallback(response, isActive)
+            }
+          })
         }
       }
     })
@@ -991,21 +1214,37 @@ export class P2PCommunicationClient extends CommunicationClient {
     const relayServer = split.join(':')
 
     return this.writeSessionState(session, async () => {
-      const dappPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
-      const manager = new PeerManager(
-        this.storage,
-        dappPeers?.length
-          ? StorageKey.TRANSPORT_P2P_PEERS_DAPP
-          : StorageKey.TRANSPORT_P2P_PEERS_WALLET
-      )
-      const peers = await manager.getPeers()
-      for (const peer of peers) {
-        const peerHash = `@${await getHexHash(Buffer.from(peer.publicKey, 'hex'))}`
-        if (!this.isCurrentSession(session)) {
-          return
+      const dappManager = new PeerManager(this.storage, StorageKey.TRANSPORT_P2P_PEERS_DAPP)
+      const dappPeers = await dappManager.getPeers()
+      if (!this.isCurrentSession(session)) {
+        return
+      }
+      if (Array.isArray(dappPeers)) {
+        for (const peer of dappPeers) {
+          const peerHash = `@${await getHexHash(Buffer.from(peer.publicKey, 'hex'))}`
+          if (!this.isCurrentSession(session)) {
+            return
+          }
+          if (peerHash === senderHash && peer.relayServer !== relayServer) {
+            await dappManager.addPeer({ ...peer, relayServer })
+          }
         }
-        if (peerHash === senderHash && peer.relayServer !== relayServer) {
-          await manager.addPeer({ ...peer, relayServer })
+      }
+
+      const walletManager = new PeerManager(this.storage, StorageKey.TRANSPORT_P2P_PEERS_WALLET)
+      const walletPeers = await walletManager.getPeers()
+      if (!this.isCurrentSession(session)) {
+        return
+      }
+      if (Array.isArray(walletPeers)) {
+        for (const peer of walletPeers) {
+          const peerHash = `@${await getHexHash(Buffer.from(peer.publicKey, 'hex'))}`
+          if (!this.isCurrentSession(session)) {
+            return
+          }
+          if (peerHash === senderHash && peer.relayServer !== relayServer) {
+            await walletManager.addPeer({ ...peer, relayServer })
+          }
         }
       }
     })
@@ -1024,7 +1263,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     senderPublicKey: string
   ): Promise<boolean> {
     return event.content.message.sender.startsWith(
-      `@${await getHexHash(Buffer.from(senderPublicKey, 'hex'))}`
+      `@${await getHexHash(Buffer.from(senderPublicKey, 'hex'))}:`
     )
   }
 

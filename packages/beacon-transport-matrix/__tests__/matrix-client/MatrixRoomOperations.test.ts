@@ -164,8 +164,10 @@ describe('Matrix room operation completion', () => {
     const release = deferred<void>()
     const update = store.update.bind(store)
     vi.spyOn(store, 'update').mockImplementation(async (state) => {
-      updating.resolve(undefined)
-      await release.promise
+      if (state.txnNo !== undefined) {
+        updating.resolve(undefined)
+        await release.promise
+      }
       await update(state)
     })
     const send = vi.spyOn(eventService, 'sendMessage').mockResolvedValue({ event_id: '$event' })

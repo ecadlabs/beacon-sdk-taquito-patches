@@ -1,4 +1,6 @@
 import type { Mock, MockInstance } from 'vitest'
+import { PostMessageClient } from '../../../beacon-transport-postmessage/src/PostMessageClient'
+import { Serializer, getSenderId, PendingPairingRequests, windowRef } from '@ecadlabs/beacon-core'
 // __tests__/communication-client/P2PCommunicationClient.test.ts
 
 // Mock external dependencies
@@ -160,7 +162,7 @@ describe('P2PCommunicationClient', () => {
       joinRooms: vi.fn(),
       sendTextMessage: vi.fn(),
       start: vi.fn(),
-      stop: vi.fn(),
+      stop: vi.fn().mockResolvedValue(undefined),
       getRoomById: vi.fn().mockResolvedValue({ members: ['@peer:relay'] }),
       createTrustedPrivateRoom: vi.fn().mockResolvedValue('!room:id'),
       joinedRooms: Promise.resolve([])
@@ -280,10 +282,14 @@ describe('P2PCommunicationClient', () => {
   })
 
   describe('encrypted message listener lifetime', () => {
-    beforeEach(() => {
+    let decryptedPayload: string
+
+    beforeEach(async () => {
       mockStorage.delete.mockResolvedValue(undefined)
       fakeMatrixClient.stop.mockResolvedValue(undefined)
       vi.spyOn(client as any, 'createCryptoBoxServer').mockResolvedValue({ receive: 'key' })
+      decryptedPayload = JSON.stringify({ senderId: await getSenderId('sender-pub') })
+      ;(decryptCryptoboxPayload as Mock).mockResolvedValue(decryptedPayload)
     })
 
     const initialMessage = () => ({
@@ -321,7 +327,7 @@ describe('P2PCommunicationClient', () => {
       gate.resolve({ receive: 'key' })
       await matching
       expect(handler).toHaveBeenCalledTimes(1)
-      expect(handler).toHaveBeenCalledWith('decrypted-payload')
+      expect(handler).toHaveBeenCalledWith(decryptedPayload)
       expect(fakeMatrixClient.unsubscribe).toHaveBeenCalledWith(
         MatrixClientEventType.MESSAGE,
         buffer
@@ -444,7 +450,7 @@ describe('P2PCommunicationClient', () => {
         const room = vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
         ;(decryptCryptoboxPayload as Mock).mockImplementation(async () => {
           if (boundary === 'decrypt') await gate.promise
-          return 'decrypted-payload'
+          return decryptedPayload
         })
         const handler = vi.fn()
         await client.listenForEncryptedMessage('sender-pub', handler)
@@ -460,7 +466,7 @@ describe('P2PCommunicationClient', () => {
         gate.resolve()
         await delivery
         expect(handler).not.toHaveBeenCalled()
-        if (boundary !== 'decrypt') expect(room).not.toHaveBeenCalled()
+        expect(room).not.toHaveBeenCalled()
       }
     )
     it('finalizes the buffer after standalone peer registration', async () => {
@@ -525,7 +531,7 @@ describe('P2PCommunicationClient', () => {
           }
         })
       ).rejects.toBe(failure)
-      expect(handler).toHaveBeenCalledWith('decrypted-payload')
+      expect(handler).toHaveBeenCalledWith(decryptedPayload)
     })
   })
 
@@ -547,7 +553,16 @@ describe('P2PCommunicationClient', () => {
       vi.spyOn(client, 'isChannelOpenMessage').mockResolvedValue(true)
       vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
       vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
-      vi.mocked(openCryptobox).mockResolvedValue(JSON.stringify({ publicKey: 'ab'.repeat(32) }))
+      const request = await client.getPairingRequestInfo()
+      vi.mocked(openCryptobox).mockResolvedValue(
+        JSON.stringify({
+          id: request.id,
+          publicKey: 'ab'.repeat(32),
+          name: 'Wallet',
+          version: '2',
+          type: 'p2p-pairing-response'
+        })
+      )
       const failure = new Error('pairing callback failed')
       const rejected = Promise.reject(failure)
       // Observe the original promise even on the broken path that discards it.
@@ -557,7 +572,9 @@ describe('P2PCommunicationClient', () => {
       const listener: (event: MatrixClientEvent<MatrixClientEventType.MESSAGE>) => Promise<void> =
         fakeMatrixClient.subscribe.mock.calls[0][1]
 
-      await expect(listener(messageEvent('ab'.repeat(24)))).rejects.toBe(failure)
+      const event = messageEvent('ab'.repeat(24))
+      event.content.message.sender = '@hex-hash:relay'
+      await expect(listener(event)).rejects.toBe(failure)
       expect(callback).toHaveBeenCalledTimes(1)
     })
 
@@ -585,6 +602,517 @@ describe('P2PCommunicationClient', () => {
     )
   })
 
+  it.each([true, false])(
+    'discovers a room for the first outbound send, existing room=%s',
+    async (existing) => {
+      const recipient = '@hex-hash:relay.server'
+      const room = {
+        id: existing ? '!existing:relay' : '!created:relay',
+        members: [recipient, '@self:relay']
+      }
+      fakeMatrixClient.joinedRooms = Promise.resolve(existing ? [room] : [])
+      fakeMatrixClient.getRoomById.mockResolvedValue(room)
+      fakeMatrixClient.createTrustedPrivateRoom.mockResolvedValue(room.id)
+      ;(client as any).client.resolve(fakeMatrixClient)
+      mockStorage.get.mockResolvedValue({})
+      vi.spyOn(client as any, 'createCryptoBoxClient').mockResolvedValue({ send: 'shared' })
+      await client.sendMessage('first request', {
+        publicKey: '11'.repeat(32),
+        relayServer: 'relay.server'
+      } as any)
+      expect(fakeMatrixClient.sendTextMessage).toHaveBeenCalledWith(room.id, 'encrypted-payload')
+      if (existing) expect(fakeMatrixClient.createTrustedPrivateRoom).not.toHaveBeenCalled()
+      else expect(fakeMatrixClient.createTrustedPrivateRoom).toHaveBeenCalledWith(recipient)
+      expect(mockStorage.set).toHaveBeenCalledWith(StorageKey.MATRIX_PEER_ROOM_IDS, {
+        [recipient]: room.id
+      })
+    }
+  )
+
+  describe('encrypted message sender matching', () => {
+    it('requires the complete Matrix localpart', async () => {
+      const event = { content: { message: { sender: '@hex-hash-extra:relay' } } }
+      await expect(client.isSender(event as any, '11'.repeat(32))).resolves.toBe(false)
+      event.content.message.sender = '@hex-hash:relay'
+      await expect(client.isSender(event as any, '11'.repeat(32))).resolves.toBe(true)
+    })
+
+    it.each(['base58', 'json'])(
+      'delivers matching %s messages and rejects mismatched sender IDs',
+      async (encoding) => {
+        const key = '11'.repeat(32)
+        const senderId = await getSenderId(key)
+        const callback = vi.fn()
+        vi.spyOn(client as any, 'createCryptoBoxServer').mockResolvedValue({ receive: 'key' })
+        vi.spyOn(client as any, 'isTextMessage').mockReturnValue(true)
+        const room = vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+        vi.spyOn(client as any, 'updateRelayServer').mockResolvedValue(undefined)
+        await client.listenForEncryptedMessage(key, callback)
+        const listener = fakeMatrixClient.subscribe.mock.calls.at(-1)![1]
+        const event = {
+          content: {
+            roomId: '!room',
+            message: {
+              sender: '@hex-hash:relay',
+              content: '00'.repeat(64)
+            }
+          }
+        }
+        const message = { id: 'message', version: '2', type: 'disconnect', senderId }
+        const payload =
+          encoding === 'json' ? JSON.stringify(message) : await new Serializer().serialize(message)
+        ;(decryptCryptoboxPayload as Mock).mockResolvedValue(payload)
+        await listener(event)
+        expect(callback).toHaveBeenCalledWith(payload)
+        callback.mockClear()
+        room.mockClear()
+        const mismatched = { ...message, senderId: 'another-wallet' }
+        ;(decryptCryptoboxPayload as Mock).mockResolvedValue(
+          encoding === 'json' ? JSON.stringify(mismatched) : await new Serializer().serialize(mismatched)
+        )
+        await listener(event)
+        expect(callback).not.toHaveBeenCalled()
+        expect(room).not.toHaveBeenCalled()
+      }
+    )
+
+    it('rejects encrypted messages from an untrusted relay domain and rejects replayed ciphertexts', async () => {
+      const key = '11'.repeat(32)
+      const senderId = await getSenderId(key)
+      const callback = vi.fn()
+      const actualUtils = await vi.importActual<typeof import('@ecadlabs/beacon-utils')>('@ecadlabs/beacon-utils')
+      const sharedKey = new Uint8Array(32).fill(7)
+      mockStorage.get.mockResolvedValue([{ publicKey: key, relayServer: 'relay.server' }])
+      vi.spyOn(client as any, 'createCryptoBoxServer').mockResolvedValue({ receive: sharedKey })
+      vi.spyOn(client as any, 'isTextMessage').mockReturnValue(true)
+      const room = vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      const relay = vi.spyOn(client as any, 'updateRelayServer').mockResolvedValue(undefined)
+      await client.listenForEncryptedMessage(key, callback)
+      const listener = fakeMatrixClient.subscribe.mock.calls.at(-1)![1]
+      const payload = JSON.stringify({
+        id: 'message-1',
+        version: '2',
+        type: 'disconnect',
+        senderId
+      })
+      const realCiphertext = await actualUtils.encryptCryptoboxPayload(payload, sharedKey)
+      ;(decryptCryptoboxPayload as Mock).mockImplementation((ct: string, rx: Uint8Array) =>
+        actualUtils.decryptCryptoboxPayload(ct, rx)
+      )
+
+      // 1) Cross-domain ciphertext from an untrusted server must be rejected
+      await listener({
+        content: {
+          roomId: '!other-room',
+          message: {
+            sender: '@hex-hash:other.server',
+            content: realCiphertext
+          }
+        }
+      })
+      expect(callback).not.toHaveBeenCalled()
+      expect(room).not.toHaveBeenCalled()
+      expect(relay).not.toHaveBeenCalled()
+
+      // 2) Legitimate message from peer's relayServer succeeds once
+      const validEvent = {
+        content: {
+          roomId: '!valid-room',
+          message: {
+            sender: '@hex-hash:relay.server',
+            content: realCiphertext
+          }
+        }
+      }
+      await listener(validEvent)
+      expect(callback).toHaveBeenCalledTimes(1)
+      expect(room).toHaveBeenCalledTimes(1)
+      expect(relay).toHaveBeenCalledTimes(1)
+
+      // 3) Replaying the exact same ciphertext must be rejected
+      await listener(validEvent)
+      expect(callback).toHaveBeenCalledTimes(1)
+      expect(room).toHaveBeenCalledTimes(1)
+      expect(relay).toHaveBeenCalledTimes(1)
+
+      // 4) Replaying uppercase equivalent or trailing non-hex suffix must also be rejected
+      await listener({
+        content: {
+          roomId: '!valid-room',
+          message: {
+            sender: '@hex-hash:relay.server',
+            content: realCiphertext.toUpperCase()
+          }
+        }
+      })
+      await listener({
+        content: {
+          roomId: '!valid-room',
+          message: {
+            sender: '@hex-hash:relay.server',
+            content: `${realCiphertext}:nonhex`
+          }
+        }
+      })
+      expect(callback).toHaveBeenCalledTimes(1)
+      expect(room).toHaveBeenCalledTimes(1)
+      expect(relay).toHaveBeenCalledTimes(1)
+    })
+
+    it('allows retrying an identical ciphertext if routing persistence fails before delivery', async () => {
+      const key = '11'.repeat(32)
+      const senderId = await getSenderId(key)
+      const callback = vi.fn()
+      mockStorage.get.mockResolvedValue([{ publicKey: key, relayServer: 'relay.server' }])
+      vi.spyOn(client as any, 'createCryptoBoxServer').mockResolvedValue({ receive: 'key' })
+      vi.spyOn(client as any, 'isTextMessage').mockReturnValue(true)
+      const room = vi
+        .spyOn(client, 'updatePeerRoom')
+        .mockRejectedValueOnce(new Error('room storage write failed'))
+        .mockResolvedValue(undefined)
+      const relay = vi
+        .spyOn(client as any, 'updateRelayServer')
+        .mockRejectedValueOnce(new Error('storage write failed'))
+        .mockResolvedValue(undefined)
+      await client.listenForEncryptedMessage(key, callback)
+      const listener = fakeMatrixClient.subscribe.mock.calls.at(-1)![1]
+      const payload = JSON.stringify({
+        id: 'message-retry',
+        version: '2',
+        type: 'disconnect',
+        senderId
+      })
+      ;(decryptCryptoboxPayload as Mock).mockResolvedValue(payload)
+
+      const validEvent = {
+        content: {
+          roomId: '!valid-room',
+          message: {
+            sender: '@hex-hash:relay.server',
+            content: 'cc'.repeat(64)
+          }
+        }
+      }
+
+      // First attempt fails during updateRelayServer and does not deliver to callback
+      await listener(validEvent).catch(() => undefined)
+      expect(callback).not.toHaveBeenCalled()
+
+      // Second attempt fails during updatePeerRoom and does not deliver to callback
+      await listener(validEvent).catch(() => undefined)
+      expect(callback).not.toHaveBeenCalled()
+
+      // Retrying the same ciphertext concurrently delivers to callback exactly once
+      await Promise.all([listener(validEvent), listener(validEvent)])
+      expect(callback).toHaveBeenCalledTimes(1)
+      expect(room).toHaveBeenCalledTimes(2)
+      expect(relay).toHaveBeenCalledTimes(3)
+    })
+
+    it('migrates a known peer to a new trusted relay server end-to-end on invite and encrypted message', async () => {
+      const key = '11'.repeat(32)
+      const senderId = await getSenderId(key)
+      const newTrustedRelay = 'beacon-node-1.octez.io'
+      const dappPeers = [{ publicKey: key, relayServer: 'relay.server', name: 'Wallet' }]
+      let peerRooms: Record<string, string> = {}
+
+      mockStorage.get.mockImplementation(async (storageKey: StorageKey) => {
+        if (storageKey === StorageKey.TRANSPORT_P2P_PEERS_DAPP) return dappPeers
+        if (storageKey === StorageKey.TRANSPORT_P2P_PEERS_WALLET) return []
+        if (storageKey === StorageKey.MATRIX_PEER_ROOM_IDS) return peerRooms
+        return undefined
+      })
+      mockStorage.set.mockImplementation(async (storageKey: StorageKey, value: any) => {
+        if (storageKey === StorageKey.MATRIX_PEER_ROOM_IDS) {
+          peerRooms = value
+        }
+      })
+
+      vi.spyOn(client as any, 'getPublicKeyHash').mockResolvedValue('hex-hash')
+      const join = vi.spyOn(client as any, 'tryJoinRooms').mockResolvedValue(undefined)
+      await client.start().catch(() => undefined)
+      const invite = fakeMatrixClient.subscribe.mock.calls.find(([type]) => type === 'invite')![1]
+
+      await invite({
+        content: {
+          roomId: '!migrated-room',
+          members: [`@hex-hash:${newTrustedRelay}`],
+          invitations: [
+            {
+              sender: `@hex-hash:${newTrustedRelay}`,
+              target: '@hex-hash:relay.server'
+            }
+          ]
+        }
+      })
+      expect(join).toHaveBeenCalledWith('!migrated-room', 1, expect.any(Function))
+
+      const callback = vi.fn()
+      vi.spyOn(client as any, 'createCryptoBoxServer').mockResolvedValue({ receive: 'key' })
+      vi.spyOn(client as any, 'isTextMessage').mockReturnValue(true)
+      await client.listenForEncryptedMessage(key, callback)
+      const listener = fakeMatrixClient.subscribe.mock.calls.at(-1)![1]
+      const payload = JSON.stringify({
+        id: 'migrated-msg',
+        version: '2',
+        type: 'disconnect',
+        senderId
+      })
+      ;(decryptCryptoboxPayload as Mock).mockResolvedValue(payload)
+
+      await listener({
+        content: {
+          roomId: '!migrated-room',
+          message: {
+            sender: `@hex-hash:${newTrustedRelay}`,
+            content: 'dd'.repeat(64)
+          }
+        }
+      })
+
+      expect(callback).toHaveBeenCalledWith(payload)
+      expect(dappPeers[0].relayServer).toBe(newTrustedRelay)
+      expect(peerRooms[`@hex-hash:${newTrustedRelay}`]).toBe('!migrated-room')
+    })
+  })
+
+  describe('room invitation matching', () => {
+    it.each([
+      [
+        'persisted identity before listeners start',
+        '@hex-hash:relay.server',
+        '@hex-hash:relay.server',
+        false,
+        true
+      ],
+      [
+        'known peer migrating to another trusted Beacon relay server',
+        '@hex-hash:beacon-node-1.octez.io',
+        '@hex-hash:relay.server',
+        false,
+        true
+      ],
+      ['wrong homeserver', '@hex-hash:other.server', '@hex-hash:relay.server', false, false],
+      ['wrong target', '@hex-hash:relay.server', '@other:relay.server', false, false],
+      ['unknown peer', '@unknown:relay.server', '@hex-hash:relay.server', false, false],
+      ['pending pairing, wrong target', '@unknown:relay.server', '@other:relay.server', true, false],
+      ['pending pairing', '@unknown:relay.server', '@hex-hash:relay.server', true, true]
+    ])('%s', async (_name, sender, target, pending, allowed) => {
+      mockStorage.get.mockResolvedValue([
+        { publicKey: '11'.repeat(32), relayServer: 'relay.server' }
+      ])
+      vi.spyOn(client as any, 'getPublicKeyHash').mockResolvedValue('hex-hash')
+      const join = vi.spyOn(client as any, 'tryJoinRooms').mockResolvedValue(undefined)
+      const routing = vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      // The invitation subscription is registered before login.
+      await client.start().catch(() => undefined)
+      const invite = fakeMatrixClient.subscribe.mock.calls.find(([type]) => type === 'invite')![1]
+      if (pending) await client.getPairingRequestInfo()
+      await invite({
+        content: {
+          roomId: '!room',
+          members: ['@hex-hash:relay.server'],
+          invitations: [{ sender, target }]
+        }
+      })
+      expect(join).toHaveBeenCalledTimes(allowed ? 1 : 0)
+      expect(routing).not.toHaveBeenCalled()
+    })
+
+    it('rejects an invite with conflicting inviters for ownId when no pairing is pending', async () => {
+      mockStorage.get.mockResolvedValue([
+        { publicKey: '11'.repeat(32), relayServer: 'relay.server' }
+      ])
+      vi.spyOn(client as any, 'getPublicKeyHash').mockResolvedValue('hex-hash')
+      const join = vi.spyOn(client as any, 'tryJoinRooms').mockResolvedValue(undefined)
+      await client.start().catch(() => undefined)
+      const invite = fakeMatrixClient.subscribe.mock.calls.find(([type]) => type === 'invite')![1]
+      await invite({
+        content: {
+          roomId: '!room',
+          members: ['@hex-hash:relay.server', '@unpaired:relay.server'],
+          invitations: [
+            { sender: '@hex-hash:relay.server', target: '@hex-hash:relay.server' },
+            { sender: '@unpaired:relay.server', target: '@hex-hash:relay.server' }
+          ]
+        }
+      })
+      expect(join).not.toHaveBeenCalled()
+    })
+
+    it('rejects a room parsed by MatrixRoom.fromSync with conflicting invite_state for ownId even when pairing is pending', async () => {
+      const { MatrixRoom } = await import('../../src/matrix-client/models/MatrixRoom')
+      const [conflictingRoom] = MatrixRoom.fromSync({
+        invite: {
+          '!conflict-during-pending:relay': {
+            invite_state: {
+              events: [
+                {
+                  type: 'm.room.member',
+                  sender: '@trusted:relay.server',
+                  state_key: '@hex-hash:relay.server',
+                  content: { membership: 'invite' }
+                },
+                {
+                  type: 'm.room.member',
+                  sender: '@unpaired:relay.server',
+                  state_key: '@hex-hash:relay.server',
+                  content: { membership: 'invite' }
+                }
+              ]
+            }
+          }
+        }
+      })
+
+      mockStorage.get.mockResolvedValue([])
+      vi.spyOn(client as any, 'getPublicKeyHash').mockResolvedValue('hex-hash')
+      const join = vi.spyOn(client as any, 'tryJoinRooms').mockResolvedValue(undefined)
+      await client.start().catch(() => undefined)
+      const invite = fakeMatrixClient.subscribe.mock.calls.find(([type]) => type === 'invite')![1]
+      await client.getPairingRequestInfo()
+
+      await invite({
+        content: {
+          roomId: conflictingRoom.id,
+          members: conflictingRoom.members,
+          invitations: conflictingRoom.invitations
+        }
+      })
+
+      expect(join).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('pairing response matching', () => {
+    const key = '11'.repeat(32)
+    const event = {
+      content: {
+        roomId: '!unpaired:relay',
+        message: {
+          sender: '@hex-hash:relay.server',
+          content: '@channel-open:00'.padEnd(100, '0')
+        }
+      }
+    }
+    let routing: MockInstance
+    let relay: MockInstance
+    let accept: Mock
+    let handler: (event: unknown) => Promise<void>
+
+    beforeEach(async () => {
+      routing = vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      relay = vi.spyOn(client as any, 'updateRelayServer').mockResolvedValue(undefined)
+      vi.spyOn(client as any, 'isTextMessage').mockReturnValue(true)
+      vi.spyOn(client as any, 'isChannelOpenMessage').mockResolvedValue(true)
+      vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      accept = vi.fn()
+      await client.listenForChannelOpening(accept)
+      handler = fakeMatrixClient.subscribe.mock.calls.at(-1)![1]
+    })
+    const respond = (id: string) => {
+      ;(openCryptobox as Mock).mockResolvedValue(
+        JSON.stringify({
+          id,
+          publicKey: key,
+          name: 'Wallet',
+          version: '2',
+          type: 'p2p-pairing-request',
+          relayServer: 'relay.server'
+        })
+      )
+    }
+
+    it('allows only one response across Matrix and extension transports', async () => {
+      const shared = new PendingPairingRequests()
+      ;(client as any).pendingPairings = shared
+      const extension = new PostMessageClient('App', fakeKeyPair as any, shared)
+      const listen = vi.spyOn(windowRef, 'addEventListener')
+      const extensionAccept = vi.fn()
+      await extension.listenForChannelOpening(extensionAccept)
+      const extensionHandler = listen.mock.calls.at(-1)![1] as unknown as (
+        event: unknown
+      ) => Promise<void>
+      const request = await client.getPairingRequestInfo()
+      respond(request.id)
+      await Promise.all([
+        handler(event),
+        extensionHandler({
+          source: windowRef,
+          origin: windowRef.location.origin,
+          data: {
+            sender: { id: 'wallet-extension' },
+            message: {
+              target: 'toPage',
+              payload: '00'.repeat(64)
+            }
+          }
+        })
+      ])
+      expect(accept.mock.calls.length + extensionAccept.mock.calls.length).toBe(1)
+      listen.mockRestore()
+    })
+
+    it('rejects a mismatched sender response without routing writes or peer acceptance', async () => {
+      await client.getPairingRequestInfo()
+      respond('wrong-id')
+      await handler(event)
+      expect(accept).not.toHaveBeenCalled()
+      expect(routing).not.toHaveBeenCalled()
+      expect(relay).not.toHaveBeenCalled()
+    })
+
+    it('accepts a matching response once under concurrent delivery', async () => {
+      const request = await client.getPairingRequestInfo()
+      respond(request.id)
+      await Promise.all([handler(event), handler(event)])
+      expect(accept).toHaveBeenCalledTimes(1)
+      expect(routing).not.toHaveBeenCalled()
+      expect(relay).not.toHaveBeenCalled()
+    })
+
+    it('rejects a matching response from another Matrix identity', async () => {
+      const request = await client.getPairingRequestInfo()
+      respond(request.id)
+      ;(client as any).isSender.mockResolvedValue(false)
+      await handler(event)
+      expect(accept).not.toHaveBeenCalled()
+      expect(routing).not.toHaveBeenCalled()
+    })
+
+    it('revokes requests on cancellation', async () => {
+      const request = await client.getPairingRequestInfo()
+      respond(request.id)
+      client.cancelPairingRequests()
+      await handler(event)
+      expect(accept).not.toHaveBeenCalled()
+    })
+
+    it('does not issue a capability after cancellation during generation', async () => {
+      const relay = createDeferred<{ server: string; timestamp: number }>()
+      ;(client as any).getRelayServer.mockReturnValue(relay.promise)
+      const request = client.getPairingRequestInfo()
+      client.cancelPairingRequests()
+      relay.resolve({ server: 'relay.server', timestamp: 1 })
+      await expect(request).rejects.toThrow('cancelled')
+    })
+
+    it('rejects a channel-open message with non-hex payload without calling openCryptobox', async () => {
+      await client.getPairingRequestInfo()
+      ;(openCryptobox as Mock).mockClear()
+      await handler({
+        content: {
+          roomId: '!unpaired:relay',
+          message: {
+            sender: '@hex-hash:relay.server',
+            content: `@channel-open:${'a'.repeat(49)}`
+          }
+        }
+      })
+      expect(openCryptobox).not.toHaveBeenCalled()
+      expect(accept).not.toHaveBeenCalled()
+    })
+  })
   describe('getPairingRequestInfo', () => {
     it('builds a P2PPairingRequest with id, name, publicKey, version & relayServer', async () => {
       const req = await client.getPairingRequestInfo()
@@ -977,6 +1505,40 @@ describe('P2PCommunicationClient', () => {
       expect(mockStorage.set).toHaveBeenCalledWith(StorageKey.MATRIX_PEER_ROOM_IDS, {
         [sender]: '!new:room'
       })
+    })
+  })
+
+  describe('updateRelayServer', () => {
+    it('updates matching dApp peer relayServer via storage without requiring raw localStorage', async () => {
+      localStorage.removeItem('beacon:communication-peers-dapp')
+      const dappPeer = {
+        id: 'peer-id',
+        name: 'Wallet',
+        publicKey: '11'.repeat(32),
+        version: '3',
+        relayServer: 'relay.server',
+        senderId: 'sender-id',
+        type: 'p2p-pairing-response'
+      }
+      mockStorage.get.mockImplementation(async (key: StorageKey) => {
+        if (key === StorageKey.TRANSPORT_P2P_PEERS_DAPP) {
+          return [dappPeer]
+        }
+        return []
+      })
+      mockStorage.set.mockResolvedValue(undefined)
+
+      await client.updateRelayServer('@hex-hash:beacon-node-1.octez.io')
+
+      expect(mockStorage.set).toHaveBeenCalledWith(
+        StorageKey.TRANSPORT_P2P_PEERS_DAPP,
+        expect.arrayContaining([
+          expect.objectContaining({
+            publicKey: '11'.repeat(32),
+            relayServer: 'beacon-node-1.octez.io'
+          })
+        ])
+      )
     })
   })
 })

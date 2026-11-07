@@ -14,6 +14,7 @@ export type MatrixClientEventContent<T> = T extends MatrixClientEventType.INVITE
 export interface MatrixClientEventInviteContent {
   roomId: string
   members: string[]
+  invitations?: { sender: string; target: string }[]
 }
 
 export interface MatrixClientEventMessageContent<T> {

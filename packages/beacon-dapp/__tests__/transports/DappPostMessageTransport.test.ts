@@ -1,5 +1,5 @@
 import { DappPostMessageTransport } from '../../src/transports/DappPostMessageTransport'
-import { LocalStorage, windowRef } from '@ecadlabs/beacon-core'
+import { LocalStorage, windowRef, getSenderId } from '@ecadlabs/beacon-core'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
   ExtendedPostMessagePairingResponse,
@@ -47,11 +47,11 @@ async function setup() {
 it('registers an opening listener, persists a peer and consumes the new-peer callback once', async () => {
   const { transport, client } = await setup()
   const opening = vi.spyOn(client, 'listenForChannelOpening').mockResolvedValue(undefined)
-  const listener = vi.fn()
+  const listener = vi.fn().mockReturnValue(true)
   await transport.listenForNewPeer(listener)
   await transport.startOpenChannelListener()
   const callback = opening.mock.calls[0][0]
-  await callback(peer)
+  await callback(peer, () => true)
   expect(await transport.getPeers()).toEqual([peer])
   expect(await new LocalStorage().get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)).toEqual([peer])
   expect(client.listenForEncryptedMessage).toHaveBeenCalledWith(
@@ -60,7 +60,7 @@ it('registers an opening listener, persists a peer and consumes the new-peer cal
   )
   expect(transport.connectionStatus).toBe(TransportStatus.CONNECTED)
   expect(listener).toHaveBeenCalledExactlyOnceWith(peer)
-  await callback(peer)
+  await callback(peer, () => true)
   expect(listener).toHaveBeenCalledTimes(1)
   await transport.removePeer(peer)
   expect(client.unsubscribeFromEncryptedMessage).toHaveBeenCalledWith(peer.publicKey)
@@ -70,11 +70,11 @@ it('registers an opening listener, persists a peer and consumes the new-peer cal
 it('cancels new-peer notifications and removes peer subscriptions explicitly on teardown', async () => {
   const { transport, client } = await setup()
   const opening = vi.spyOn(client, 'listenForChannelOpening').mockResolvedValue(undefined)
-  const listener = vi.fn()
+  const listener = vi.fn().mockReturnValue(true)
   await transport.startOpenChannelListener()
   await transport.listenForNewPeer(listener)
   await transport.stopListeningForNewPeers()
-  await opening.mock.calls[0][0](peer)
+  await opening.mock.calls[0][0](peer, () => true)
   expect(listener).not.toHaveBeenCalled()
   await transport.removeAllPeers()
   expect(client.unsubscribeFromEncryptedMessages).toHaveBeenCalledTimes(1)
@@ -111,6 +111,12 @@ it('delivers encrypted extension messages after disconnecting and reconnecting',
   const transport = new DappPostMessageTransport('Dapp', dappKeys, new LocalStorage())
   const wallet = new DappPostMessageTransport('Wallet', walletKeys, new LocalStorage())['client']
   const connectedPeer = { ...peer, publicKey: Buffer.from(walletKeys.publicKey).toString('hex') }
+  const plaintext = JSON.stringify({
+    id: 'reconnect-response',
+    senderId: await getSenderId(connectedPeer.publicKey),
+    type: 'acknowledge',
+    version: '2'
+  })
   const received = vi.fn()
   await transport.addPeer(connectedPeer)
   await transport.addListener(received)
@@ -121,7 +127,7 @@ it('delivers encrypted extension messages after disconnecting and reconnecting',
     expect(transport.connectionStatus).toBe(TransportStatus.CONNECTED)
     const encryptedPayload = await wallet['encryptMessage'](
       Buffer.from(dappKeys.publicKey).toString('hex'),
-      'response after reconnect'
+      plaintext
     )
     window.dispatchEvent(
       new MessageEvent('message', {
@@ -134,7 +140,7 @@ it('delivers encrypted extension messages after disconnecting and reconnecting',
       })
     )
     await vi.waitFor(() =>
-      expect(received).toHaveBeenCalledExactlyOnceWith('response after reconnect', {
+      expect(received).toHaveBeenCalledExactlyOnceWith(plaintext, {
         origin: Origin.EXTENSION,
         id: connectedPeer.extensionId
       })
@@ -144,6 +150,31 @@ it('delivers encrypted extension messages after disconnecting and reconnecting',
     await transport['client'].unsubscribeFromEncryptedMessages()
     await wallet.unsubscribeFromEncryptedMessages()
   }
+})
+
+it('removes extension listeners before waiting for pairing cancellation', async () => {
+  const transport = new DappPostMessageTransport(
+    'Dapp',
+    await getKeypairFromSeed('pending-cancellation'),
+    new LocalStorage()
+  )
+  const cancellation = new ExposedPromise<void>()
+  vi.spyOn(transport['client'], 'cancelPairingRequests').mockReturnValue(cancellation.promise)
+  const remove = vi.spyOn(windowRef, 'removeEventListener')
+  await transport.listen(peer.publicKey)
+  await transport.startOpenChannelListener()
+  const registrations = windowListeners.mock.calls.filter(([type]) => type === 'message')
+  expect(registrations).toHaveLength(2)
+  const disconnecting = transport.disconnect()
+  try {
+    for (const [, listener] of registrations) {
+      expect(remove).toHaveBeenCalledWith('message', listener)
+    }
+  } finally {
+    cancellation.resolve()
+    await disconnecting
+  }
+  expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
 })
 
 it('keeps a disconnected transport stopped when an earlier connect resumes', async () => {
@@ -176,13 +207,18 @@ it('does not reconnect when pairing persistence finishes after disconnect', asyn
     .mockResolvedValue(undefined)
   await transport.startOpenChannelListener()
   const gate = new ExposedPromise<void>()
-  const write = vi.spyOn(storage, 'set').mockReturnValue(gate.promise)
-  const pairing = opening.mock.calls[0][0](peer)
+  const persist = storage.set.bind(storage)
+  const write = vi.spyOn(storage, 'set').mockImplementationOnce(async (key, value) => {
+    await gate.promise
+    await persist(key, value)
+  })
+  const pairing = opening.mock.calls[0][0](peer, () => true)
   await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1))
-  await transport.disconnect()
+  const disconnecting = transport.disconnect()
   const registrations = windowListeners.mock.calls.length
   gate.resolve()
-  await pairing
+  await Promise.all([pairing, disconnecting])
+  expect(await transport.getPeers()).toEqual([])
   expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
   expect(windowListeners).toHaveBeenCalledTimes(registrations)
 })

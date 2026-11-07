@@ -269,12 +269,12 @@ describe('MatrixClientEventEmitter state dispatch', () => {
     expect(received).toEqual([
       {
         type: MatrixClientEventType.INVITE,
-        content: { roomId: 'invited-room', members: [] },
+        content: { roomId: 'invited-room', members: [], invitations: [] },
         timestamp: undefined
       },
       {
         type: MatrixClientEventType.INVITE,
-        content: { roomId: 'invited-with-message', members: [] },
+        content: { roomId: 'invited-with-message', members: [], invitations: [] },
         timestamp: undefined
       },
       {
@@ -327,7 +327,7 @@ describe('MatrixClientEventEmitter state dispatch', () => {
 
     expect(listener).toHaveBeenCalledWith({
       type: MatrixClientEventType.INVITE,
-      content: { roomId: 'invited-room', members: ['@member:matrix.example'] },
+      content: { roomId: 'invited-room', members: ['@member:matrix.example'], invitations: [] },
       timestamp: undefined
     })
   })
@@ -382,12 +382,12 @@ describe('MatrixClientEventEmitter state dispatch', () => {
     expect(received).toEqual([
       {
         type: MatrixClientEventType.INVITE,
-        content: { roomId: 'first-invite', members: [] },
+        content: { roomId: 'first-invite', members: [], invitations: [] },
         timestamp: undefined
       },
       {
         type: MatrixClientEventType.INVITE,
-        content: { roomId: 'second-invite', members: [] },
+        content: { roomId: 'second-invite', members: [], invitations: [] },
         timestamp: undefined
       },
       {

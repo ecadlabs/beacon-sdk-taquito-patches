@@ -18,7 +18,11 @@ export class MatrixClientEventEmitter extends EventEmitter<MatrixEventArguments>
   ): void {
     stateChange.rooms
       ?.filter((room) => room.status === MatrixRoomStatus.INVITED)
-      .map((room) => ({ roomId: room.id, members: room.members }))
+      .map((room) => ({
+        roomId: room.id,
+        members: room.members,
+        invitations: room.invitations
+      }))
       .forEach((content) => {
         this.emit(MatrixClientEventType.INVITE, {
           type: MatrixClientEventType.INVITE,

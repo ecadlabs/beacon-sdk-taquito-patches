@@ -1,12 +1,18 @@
 import {
+  Logger,
+  PendingPairingRequests,
   windowRef,
   Serializer,
   getSenderId,
-  MessageBasedClient,
-  Logger
+  MessageBasedClient
 } from '@ecadlabs/beacon-core'
 
-import { openCryptobox, secretbox_NONCEBYTES, secretbox_MACBYTES } from '@ecadlabs/beacon-utils'
+import {
+  openCryptobox,
+  secretbox_NONCEBYTES,
+  secretbox_MACBYTES,
+  KeyPair
+} from '@ecadlabs/beacon-utils'
 import {
   ExtensionMessage,
   ExtensionMessageTarget,
@@ -45,6 +51,26 @@ const isEncryptedMessage = (message: unknown): message is EncryptedExtensionMess
  *
  */
 export class PostMessageClient extends MessageBasedClient {
+  constructor(
+    name: string,
+    keyPair: KeyPair,
+    private readonly pendingPairings = new PendingPairingRequests()
+  ) {
+    super(name, keyPair)
+  }
+
+  public cancelPairingRequests(): Promise<void> {
+    return this.pendingPairings.cancel()
+  }
+
+  public async getPairingRequestInfo(): Promise<PostMessagePairingRequest> {
+    const generation = this.pendingPairings.generation
+    const request = await super.getPairingRequestInfo()
+    this.pendingPairings.add(request.id, generation)
+
+    return request
+  }
+
   protected readonly activeListeners: Map<
     string,
     (message: EncryptedExtensionMessage, context: ConnectionContext) => Promise<void>
@@ -54,7 +80,8 @@ export class PostMessageClient extends MessageBasedClient {
   declare private messageListener: ((event: unknown) => void) | undefined
   private channelOpeningListener?: (event: unknown) => Promise<void>
   private channelOpeningCallback?: (
-    response: ExtendedPostMessagePairingResponse
+    response: ExtendedPostMessagePairingResponse,
+    isActive: () => boolean
   ) => void | Promise<void>
 
   public async init(): Promise<void> {
@@ -77,6 +104,14 @@ export class PostMessageClient extends MessageBasedClient {
       let decryptedMessage: string
       try {
         decryptedMessage = await this.decryptMessage(senderPublicKey, message.encryptedPayload)
+        const beaconMessage = (
+          decryptedMessage.startsWith('{')
+            ? JSON.parse(decryptedMessage)
+            : await new Serializer().deserialize(decryptedMessage)
+        ) as { senderId?: string }
+        if (beaconMessage.senderId !== (await getSenderId(senderPublicKey))) {
+          return
+        }
       } catch {
         // Some messages are encrypted for other recipients.
         return
@@ -109,7 +144,10 @@ export class PostMessageClient extends MessageBasedClient {
   }
 
   public async listenForChannelOpening(
-    messageCallback: (pairingResponse: ExtendedPostMessagePairingResponse) => void | Promise<void>
+    messageCallback: (
+      pairingResponse: ExtendedPostMessagePairingResponse,
+      isActive: () => boolean
+    ) => void | Promise<void>
   ): Promise<void> {
     this.channelOpeningCallback = messageCallback
     if (this.channelOpeningListener) {
@@ -133,34 +171,54 @@ export class PostMessageClient extends MessageBasedClient {
       const payloadHex = data.message.payload
       const extensionId = data.sender.id
       if (await this.isChannelOpenMessage(data.message)) {
+        if (
+          payloadHex.length === 0 ||
+          payloadHex.length % 2 !== 0 ||
+          !/^[0-9a-f]+$/i.test(payloadHex)
+        ) {
+          return
+        }
         const payload = Buffer.from(payloadHex, 'hex')
 
         if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
-          let response: ExtendedPostMessagePairingResponse
           try {
             const pairingResponse: PostMessagePairingResponse = JSON.parse(
               await openCryptobox(payload, this.keyPair!.publicKey, this.keyPair!.secretKey)
             )
 
-            response = new ExtendedPostMessagePairingResponse(
-              pairingResponse.id,
-              pairingResponse.name,
-              pairingResponse.publicKey,
-              pairingResponse.version,
-              await getSenderId(pairingResponse.publicKey),
-              extensionId
-            )
+            if (
+              !pairingResponse ||
+              typeof pairingResponse.publicKey !== 'string' ||
+              !/^[a-f0-9]{64}$/i.test(pairingResponse.publicKey) ||
+              typeof pairingResponse.name !== 'string' ||
+              typeof pairingResponse.version !== 'string'
+            ) {
+              return
+            }
+            const senderId = await getSenderId(pairingResponse.publicKey)
+            if (this.channelOpeningListener !== fn) {
+              return
+            }
+            await this.pendingPairings
+              .accept(pairingResponse.id, async (isActive) => {
+                if (this.channelOpeningListener !== fn) {
+                  return
+                }
+                await this.channelOpeningCallback?.(
+                  new ExtendedPostMessagePairingResponse(
+                    pairingResponse.id,
+                    pairingResponse.name,
+                    pairingResponse.publicKey,
+                    pairingResponse.version,
+                    senderId,
+                    extensionId
+                  ),
+                  () => this.channelOpeningListener === fn && isActive()
+                )
+              })
+              .catch((error) => logger.error('listenForChannelOpening', error))
           } catch {
             // Some messages are encrypted for other recipients.
-            return
-          }
-
-          try {
-            if (this.channelOpeningListener === fn) {
-              await this.channelOpeningCallback?.(response)
-            }
-          } catch (error) {
-            logger.error('listenForChannelOpening', error)
           }
         }
       }

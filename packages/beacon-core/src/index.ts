@@ -89,6 +89,8 @@ export { getSenderId, getAccountIdentifier, windowRef, MultiTabChannel }
 // Others
 export { Serializer, Logger, setLogger, getLogger }
 
+export { PendingPairingRequests } from './transports/clients/PendingPairingRequests'
+
 // Debug
 export { setDebugEnabled, getDebugEnabled }
 

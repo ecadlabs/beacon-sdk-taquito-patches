@@ -6,8 +6,7 @@ import { MatrixMessageType } from '../models/MatrixMessage'
  *
  * @param event MatrixStateEvent
  */
-export const isCreateEvent = (event: MatrixStateEvent): boolean =>
-  event.type === 'm.room.create' && event.content instanceof Object && 'creator' in event.content
+export const isCreateEvent = (event: MatrixStateEvent): boolean => event.type === 'm.room.create'
 
 /**
  * Check if an event is a join event

@@ -31,11 +31,11 @@ async function setup() {
 it('registers an opening listener, persists a peer and consumes the new-peer callback once', async () => {
   const { transport, client } = await setup()
   const opening = vi.spyOn(client, 'listenForChannelOpening').mockResolvedValue(undefined)
-  const listener = vi.fn()
+  const listener = vi.fn().mockReturnValue(true)
   await transport.listenForNewPeer(listener)
   await transport.startOpenChannelListener()
   const callback = opening.mock.calls[0][0]
-  await callback(peer)
+  await callback(peer, () => true)
   expect(await transport.getPeers()).toEqual([peer])
   expect(await new LocalStorage().get(StorageKey.TRANSPORT_P2P_PEERS_DAPP)).toEqual([peer])
   expect(client.listenForEncryptedMessage).toHaveBeenCalledWith(
@@ -44,7 +44,7 @@ it('registers an opening listener, persists a peer and consumes the new-peer cal
   )
   expect(transport.connectionStatus).toBe(TransportStatus.CONNECTED)
   expect(listener).toHaveBeenCalledExactlyOnceWith(peer)
-  await callback(peer)
+  await callback(peer, () => true)
   expect(listener).toHaveBeenCalledTimes(1)
   await transport.removePeer(peer)
   expect(client.unsubscribeFromEncryptedMessage).toHaveBeenCalledWith(peer.publicKey)
@@ -54,11 +54,11 @@ it('registers an opening listener, persists a peer and consumes the new-peer cal
 it('cancels new-peer notifications and removes peer subscriptions explicitly on teardown', async () => {
   const { transport, client } = await setup()
   const opening = vi.spyOn(client, 'listenForChannelOpening').mockResolvedValue(undefined)
-  const listener = vi.fn()
+  const listener = vi.fn().mockReturnValue(true)
   await transport.startOpenChannelListener()
   await transport.listenForNewPeer(listener)
   await transport.stopListeningForNewPeers()
-  await opening.mock.calls[0][0](peer)
+  await opening.mock.calls[0][0](peer, () => true)
   expect(listener).not.toHaveBeenCalled()
   await transport.removeAllPeers()
   expect(client.unsubscribeFromEncryptedMessages).toHaveBeenCalledTimes(1)

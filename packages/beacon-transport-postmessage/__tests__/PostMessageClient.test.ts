@@ -23,7 +23,8 @@ vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
 
   const Serializer = vi.fn().mockImplementation(function () {
     return {
-      serialize: vi.fn().mockResolvedValue('serialized-payload')
+      serialize: vi.fn().mockResolvedValue('serialized-payload'),
+      deserialize: vi.fn().mockResolvedValue({ senderId: 'sender-id' })
     }
   })
 
@@ -31,6 +32,9 @@ vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
 
   class MessageBasedClient {
     public keyPair: any
+    async getPairingRequestInfo() {
+      return { id: 'id1' }
+    }
     constructor(_name: string, keyPair: any) {
       this.keyPair = keyPair
     }
@@ -85,6 +89,22 @@ describe('PostMessageClient', () => {
 
       expect(client.decryptMessage).toHaveBeenCalledWith('sender-pub', 'payload')
       expect(cb).toHaveBeenCalledWith('decrypted-text', { origin: Origin.EXTENSION, id: 'ctx' })
+    })
+
+    it('rejects an encrypted message claiming another sender', async () => {
+      const cb = vi.fn()
+      client.decryptMessage = vi.fn().mockResolvedValue('decrypted-text')
+      ;(Serializer as Mock).mockImplementationOnce(function () {
+        return {
+          deserialize: vi.fn().mockResolvedValue({ senderId: 'mismatched-sender' })
+        }
+      })
+      await client.listenForEncryptedMessage('sender-pub', cb)
+      await client.activeListeners.get('sender-pub')(
+        { encryptedPayload: 'payload' },
+        { origin: Origin.EXTENSION, id: 'ctx' }
+      )
+      expect(cb).not.toHaveBeenCalled()
     })
 
     it('does not register the same listener twice', async () => {
@@ -158,6 +178,7 @@ describe('PostMessageClient', () => {
   describe('listenForChannelOpening()', () => {
     it('registers a message listener', async () => {
       const cb = vi.fn()
+      await client.getPairingRequestInfo()
       await client.listenForChannelOpening(cb)
       expect(windowRef.addEventListener).toHaveBeenCalledWith('message', expect.any(Function))
     })
@@ -173,7 +194,8 @@ describe('PostMessageClient', () => {
     })
 
     it('decrypts a valid channel-open event and calls back', async () => {
-      const raw = { id: 'id1', name: 'n', publicKey: 'p', version: 'v' }
+      await client.getPairingRequestInfo()
+      const raw = { id: 'id1', name: 'n', publicKey: '11'.repeat(32), version: 'v' }
       ;(openCryptobox as Mock).mockResolvedValueOnce(JSON.stringify(raw))
 
       const cb = vi.fn()
@@ -201,7 +223,7 @@ describe('PostMessageClient', () => {
       const resp = cb.mock.calls[0][0] as ExtendedPostMessagePairingResponse
       expect(resp.id).toBe('id1')
       expect(resp.name).toBe('n')
-      expect(resp.publicKey).toBe('p')
+      expect(resp.publicKey).toBe('11'.repeat(32))
       expect(resp.version).toBe('v')
       expect(resp.senderId).toBe('sender-id')
       expect(resp.extensionId).toBe('sender-ext')
@@ -216,6 +238,37 @@ describe('PostMessageClient', () => {
 
       await listener({ source: {}, origin: windowRef.location.origin, data: {} })
       await listener({ source: windowRef, origin: 'bad', data: {} })
+
+      expect(openCryptobox).not.toHaveBeenCalled()
+      expect(cb).not.toHaveBeenCalled()
+    })
+
+    it('rejects non-hex or odd-length hex channel-open payloads without calling openCryptobox', async () => {
+      await client.getPairingRequestInfo()
+      const cb = vi.fn()
+      await client.listenForChannelOpening(cb)
+      const listener = (windowRef.addEventListener as Mock).mock.calls.find(
+        ([e]) => e === 'message'
+      )![1] as (e: any) => Promise<void>
+
+      const validHexPrefixWithNonHexSuffix = `${Buffer.alloc(
+        secretbox_NONCEBYTES + secretbox_MACBYTES
+      ).toString('hex')}zz`
+      for (const badPayload of [
+        'zz'.repeat(32),
+        'a'.repeat(49),
+        '',
+        validHexPrefixWithNonHexSuffix
+      ]) {
+        await listener({
+          source: windowRef,
+          origin: windowRef.location.origin,
+          data: {
+            message: { target: ExtensionMessageTarget.PAGE, payload: badPayload },
+            sender: { id: 'sender-ext' }
+          }
+        })
+      }
 
       expect(openCryptobox).not.toHaveBeenCalled()
       expect(cb).not.toHaveBeenCalled()
