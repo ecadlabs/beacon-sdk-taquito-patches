@@ -51,6 +51,7 @@ const hasNonEmptyWalletConnectLocalStorageEntries = (name: string): boolean =>
 export class WCStorage {
   private readonly indexedDB = new IndexedDBStorage()
   private readonly channel: BroadcastChannel = new BroadcastChannel('WALLET_CONNECT_V2_INDEXED_DB')
+  private closed = false
   public onMessageHandler: ((type: string) => void) | undefined
   public onErrorHandler: ((data: unknown) => void) | undefined
 
@@ -60,7 +61,21 @@ export class WCStorage {
   }
 
   public notify(type: string) {
-    this.channel?.postMessage({ type })
+    if (!this.closed) {
+      this.channel.postMessage({ type })
+    }
+  }
+
+  public close(): void {
+    if (this.closed) {
+      return
+    }
+    this.closed = true
+    this.onMessageHandler = undefined
+    this.onErrorHandler = undefined
+    this.channel.onmessage = null
+    this.channel.onmessageerror = null
+    this.channel.close()
   }
 
   public async hasPairings() {
@@ -100,13 +115,13 @@ export class WCStorage {
   }
 
   private onMessage(message: MessageEvent) {
-    if (this.onMessageHandler) {
+    if (!this.closed && this.onMessageHandler) {
       this.onMessageHandler(message.data.type)
     }
   }
 
   private onError({ data }: MessageEvent) {
-    if (this.onErrorHandler) {
+    if (!this.closed && this.onErrorHandler) {
       this.onErrorHandler(data)
     }
   }

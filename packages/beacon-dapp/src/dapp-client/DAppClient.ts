@@ -1213,9 +1213,14 @@ export class DAppClient extends Client {
 
       await Promise.all(
         transports.map(async (transport) => {
+          if (transport instanceof DappWalletConnectTransport) {
+            await transport.release()
+
+            return
+          }
           await transport.disconnect()
 
-          if ('doClientCleanup' in transport) {
+          if (this.hasClientCleanup(transport)) {
             await transport.doClientCleanup()
           }
         })
@@ -1546,7 +1551,9 @@ export class DAppClient extends Client {
               const stopped = await Promise.allSettled([
                 postMessageTransport.disconnect(),
                 p2pTransport.disconnect(),
-                walletConnectTransport.disconnect()
+                walletConnectTransport
+                  .disconnect()
+                  .finally(() => this.releaseWalletConnectTransport(walletConnectTransport))
               ])
               for (const result of stopped) {
                 if (result.status === 'rejected') {
@@ -1836,7 +1843,9 @@ export class DAppClient extends Client {
     await Promise.all([
       postMessageTransport?.disconnect(),
       p2pTransport?.disconnect(),
-      walletConnectTransport?.disconnect()
+      walletConnectTransport
+        ?.disconnect()
+        .finally(() => this.releaseWalletConnectTransport(walletConnectTransport))
     ])
     if (!this.isCurrentAccountTransition(transition)) {
       return
@@ -1992,6 +2001,7 @@ export class DAppClient extends Client {
     const secondaryTransports = this.getInitializedTransports().filter(
       (candidate) => candidate !== transport
     )
+    const walletConnectTransport = this.walletConnectTransport
     this.postMessageTransport = this.p2pTransport = this.walletConnectTransport = undefined
     try {
       const disconnects = secondaryTransports.map((secondary) => secondary.disconnect())
@@ -2006,6 +2016,8 @@ export class DAppClient extends Client {
       }
     } finally {
       this.debounceSetActiveAccount = false
+      // A secondary tab delegates session logout to its leader.
+      await this.releaseWalletConnectTransport(walletConnectTransport, false)
     }
   }
 
@@ -3348,11 +3360,18 @@ export class DAppClient extends Client {
         (await this.getActiveAccount()) === undefined
       ) {
         this._initPromise = undefined
+        const walletConnectTransport = this.walletConnectTransport
         this.postMessageTransport = undefined
         this.p2pTransport = undefined
         this.walletConnectTransport = undefined
-        await this.setTransport()
-        await this.setActivePeer()
+        // Retire ownership before selection observers can initialize another client.
+        await Promise.all([
+          this.releaseWalletConnectTransport(walletConnectTransport, false),
+          (async () => {
+            await this.setTransport()
+            await this.setActivePeer()
+          })()
+        ])
       }
 
       this.events
@@ -4124,12 +4143,18 @@ export class DAppClient extends Client {
   private async disconnectResolvedTransports(transports: DAppInternalTransport[]): Promise<void> {
     const results = await Promise.allSettled(
       transports.map(async (transport) => {
-        if (this.isTransportConnected(transport)) {
-          await transport.disconnect()
-        }
+        try {
+          if (this.isTransportConnected(transport)) {
+            await transport.disconnect()
+          }
 
-        if (this.hasClientCleanup(transport)) {
-          await transport.doClientCleanup()
+          if (this.hasClientCleanup(transport)) {
+            await transport.doClientCleanup()
+          }
+        } finally {
+          if (transport instanceof DappWalletConnectTransport) {
+            await transport.release()
+          }
         }
       })
     )
@@ -4139,6 +4164,15 @@ export class DAppClient extends Client {
         logger.warn('disconnectResolvedTransports', result.reason)
       }
     })
+  }
+
+  private async releaseWalletConnectTransport(
+    transport?: DappWalletConnectTransport,
+    closeSession = true
+  ): Promise<void> {
+    if (transport instanceof DappWalletConnectTransport) {
+      await transport.release(closeSession)
+    }
   }
 
   private hasClientCleanup(

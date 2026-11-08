@@ -42,11 +42,14 @@ export class DappWalletConnectTransport extends WalletConnectTransport<
   public async listenForNewPeer(
     newPeerListener: (peer: ExtendedWalletConnectPairingResponse) => boolean | Promise<boolean>
   ): Promise<void> {
+    if (this.released) {
+      return
+    }
     this.client.cancelPendingPairing()
     this.newPeerListener = newPeerListener
     await this.client.listenForChannelOpening(async (peer, isCurrent) => {
       const listener = this.newPeerListener
-      const ownsPairing = () => isCurrent() && this.newPeerListener === listener
+      const ownsPairing = () => !this.released && isCurrent() && this.newPeerListener === listener
       if (!listener || !ownsPairing()) {
         return false
       }
@@ -71,13 +74,13 @@ export class DappWalletConnectTransport extends WalletConnectTransport<
       }
 
       return accepted
-    })
+    }, this.owner)
   }
 
   public async stopListeningForNewPeers(): Promise<void> {
     logger.log('stopListeningForNewPeers')
     // Successful delivery has already consumed the listener; it still owns session cleanup.
-    if (this.newPeerListener) {
+    if (!this.released && this.newPeerListener) {
       this.client.cancelPendingPairing()
     }
     this.newPeerListener = undefined

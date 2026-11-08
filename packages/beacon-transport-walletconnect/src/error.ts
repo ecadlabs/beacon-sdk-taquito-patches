@@ -99,3 +99,7 @@ export class InvalidNetworkOrAccount extends Error {
     )
   }
 }
+
+export class InitializationUnavailable extends Error {
+  public readonly name = 'InitializationUnavailable'
+}

@@ -8,6 +8,7 @@ import {
   SDK_VERSION
 } from '@ecadlabs/beacon-core'
 import Client from '@walletconnect/sign-client'
+import KeyValueStorage from '@walletconnect/keyvaluestorage'
 import { ProposalTypes, SessionTypes, SignClientTypes } from '@walletconnect/types'
 import { getSdkError } from '@walletconnect/utils'
 import {
@@ -40,9 +41,11 @@ import {
   InvalidNetworkOrAccount,
   InvalidReceivedSessionNamespace,
   InvalidSession,
+  InitializationUnavailable,
   MissingRequiredScope,
   NotConnected
 } from '../error'
+import { WalletConnectStorageOwner } from './WalletConnectStorageOwner'
 
 const TEZOS_PLACEHOLDER = 'tezos'
 const BEACON_SDK_VERSION = 'beacon_sdk_version'
@@ -106,6 +109,22 @@ function getStringBetween(str: string | undefined, startChar: string, endChar: s
   return str.substring(startIndex + 1, endIndex)
 }
 
+interface ExposedProposal {
+  readonly proposal: ProposalTypes.Struct
+  readonly completion: Promise<void>
+  readonly complete: () => void
+  delivered: boolean
+  timer?: ReturnType<typeof setTimeout>
+}
+
+interface ProposalRetirement {
+  readonly proposals: readonly ExposedProposal[]
+  readonly pairingTopics: Set<string>
+  readonly sessions: readonly SessionTypes.Struct[]
+  closeSessions: boolean
+  disconnecting: Promise<boolean>
+}
+
 interface PendingRequest {
   readonly id: string
   readonly topic: string
@@ -133,7 +152,30 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   private pairingGeneration = 0
   private approvalQueue: Promise<void> = Promise.resolve()
 
-  private static instance: WalletConnectCommunicationClient
+  private static storageReset: Promise<void> | undefined
+  private static readonly coreOwners = new WeakMap<Client['core'], object>()
+  private static instance: WalletConnectCommunicationClient | undefined
+  private readonly owners = new Set<object>()
+  private readonly ownerListeners = new Map<object, Map<string, () => void>>()
+  private retired = false
+  private clientGeneration = 0
+  private startup:
+    | {
+        promise: Promise<{ uri: string; topic: string } | undefined>
+        cancel: () => void
+      }
+    | undefined
+  private closing: Promise<void> | undefined
+  private readonly storageOwners = new WeakMap<Client, WalletConnectStorageOwner>()
+  private readonly initializingStorageOwners = new Set<WalletConnectStorageOwner>()
+  private readonly suppliedCoreClaims = new WeakMap<Client, object>()
+  private readonly proposalRetirements = new WeakMap<Client, ProposalRetirement>()
+  private readonly exposedProposals = new WeakMap<Client, Set<ExposedProposal>>()
+  private readonly clientDisposals = new WeakMap<Client, Promise<void>>()
+  private readonly eventDisposers = new WeakMap<Client, (() => void)[]>()
+  private closingSession: SessionTypes.Struct | undefined
+  private closingClient: Client | undefined
+  private closingSessionCleanup: Promise<void> | undefined
   public signClient: Client | undefined
   private signClientPromise: Promise<Client | undefined> | undefined
   private pairingRequestPromise: Promise<ExtendedWalletConnectPairingRequest> | undefined
@@ -182,6 +224,9 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       this.clearRequests(keep)
     }
     this.session = session
+    if (this.closingSession?.topic !== session?.topic) {
+      this.closingSession = undefined
+    }
   }
 
   private async runRequest(
@@ -215,7 +260,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
   constructor(
     private readonly wcOptions: { network: NetworkType; opts: SignClientTypes.Options },
-    private readonly isLeader: Function
+    private readonly isLeader: () => boolean | Promise<boolean>
   ) {
     super()
     this.storage.onMessageHandler = this.onStorageMessageHandler.bind(this)
@@ -227,13 +272,43 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       network: NetworkType
       opts: SignClientTypes.Options
     },
-    isLeader: Function
+    isLeader: () => boolean | Promise<boolean>,
+    owner?: object
   ): WalletConnectCommunicationClient {
     if (!this.instance) {
       this.instance = new WalletConnectCommunicationClient(wcOptions, isLeader)
     }
 
-    return WalletConnectCommunicationClient.instance
+    if (owner) {
+      this.instance.owners.add(owner)
+    }
+
+    return this.instance
+  }
+
+  public async releaseOwner(owner: object, closeSession = true): Promise<void> {
+    if (!this.owners.delete(owner) || this.retired) {
+      return
+    }
+    for (const dispose of this.ownerListeners.get(owner)?.values() ?? []) {
+      dispose()
+    }
+    this.ownerListeners.delete(owner)
+    if (this.owners.size > 0) {
+      return
+    }
+    this.retired = true
+    if (WalletConnectCommunicationClient.instance === this) {
+      WalletConnectCommunicationClient.instance = undefined
+    }
+    try {
+      await (closeSession ? this.close() : this.closeSignClient())
+    } finally {
+      this.clearMessageListeners()
+      this.storage.close()
+      this.channelOpeningListeners.clear()
+      this.eventHandlers.clear()
+    }
   }
 
   private getTopicFromSession(session: SessionTypes.Struct): string {
@@ -243,7 +318,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   public async listenForEncryptedMessage(
     senderPublicKey: string,
     messageCallback: (message: string) => void | Promise<void>,
-    sessionUpdateCallback?: SessionUpdateListener
+    sessionUpdateCallback?: SessionUpdateListener,
+    owner?: object
   ): Promise<void> {
     if (this.activeListeners.has(senderPublicKey)) {
       return
@@ -264,10 +340,44 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     }
 
     this.activeListeners.set(senderPublicKey, callbackFunction)
+    if (owner) {
+      this.addOwnerListener(owner, `message:${senderPublicKey}`, () => {
+        if (this.activeListeners.get(senderPublicKey) === callbackFunction) {
+          this.activeListeners.delete(senderPublicKey)
+        }
+      })
+    }
   }
 
-  public async listenForChannelOpening(messageCallback: ChannelOpeningListener): Promise<void> {
+  public async listenForChannelOpening(
+    messageCallback: ChannelOpeningListener,
+    owner?: object
+  ): Promise<void> {
     this.channelOpeningListeners.set('channelOpening', messageCallback)
+    if (owner) {
+      this.addOwnerListener(owner, 'channel', () => {
+        if (this.channelOpeningListeners.get('channelOpening') === messageCallback) {
+          this.channelOpeningListeners.delete('channelOpening')
+        }
+      })
+    }
+  }
+
+  private addOwnerListener(owner: object, key: string, dispose: () => void): void {
+    const listeners = this.ownerListeners.get(owner) ?? new Map<string, () => void>()
+    listeners.set(key, dispose)
+    this.ownerListeners.set(owner, listeners)
+  }
+
+  private clearMessageListeners(): void {
+    this.activeListeners.clear()
+    for (const listeners of this.ownerListeners.values()) {
+      for (const key of listeners.keys()) {
+        if (key.startsWith('message:')) {
+          listeners.delete(key)
+        }
+      }
+    }
   }
 
   public cancelPendingPairing(): void {
@@ -280,20 +390,24 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
    * differ from a wallet state
    */
   private async refreshState() {
+    const closing = this.closeSignClient()
     const generation = this.pairingGeneration
-    await this.closeSignClient()
+    await closing
     if (generation !== this.pairingGeneration) {
       return
     }
 
-    const client = (await this.getSignClient())!
+    const client = await this.getSignClient()
+    if (!client || generation !== this.pairingGeneration || this.retired) {
+      return
+    }
     const lastIndex = client.session.keys.length - 1
 
     if (lastIndex > -1) {
       const restoredSession = client.session.get(client.session.keys[lastIndex])
 
       // Validate session is not stale
-      const valid = await this.isSessionValid(restoredSession)
+      const valid = await this.isSessionValid(restoredSession, client)
       if (generation !== this.pairingGeneration || this.signClient !== client) {
         return
       }
@@ -303,40 +417,43 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         this.setDefaultAccountAndNetwork()
       } else {
         logger.warn('Restored session is stale during refresh, cleaning up')
-        await this.cleanupStaleSession(restoredSession)
-        this.clearState()
+        await this.cleanupStaleSession(restoredSession, client)
+        if (generation === this.pairingGeneration && this.signClient === client) {
+          this.clearState()
+        }
       }
     } else {
       this.clearState()
     }
   }
 
-  private clearEvents(signClient?: Client) {
+  private clearEvents(signClient?: Client): void {
     const client = signClient ?? this.signClient
-    client?.removeAllListeners?.('session_event')
-    client?.removeAllListeners?.('session_update')
-    client?.removeAllListeners?.('session_delete')
-    client?.removeAllListeners?.('session_expire')
-    client?.removeAllListeners?.('session_extend')
-    client?.removeAllListeners?.('proposal_expire')
-    client?.core?.pairing?.events?.removeAllListeners?.('pairing_delete')
-    client?.core?.pairing?.events?.removeAllListeners?.('pairing_expire')
+    if (!client) {
+      return
+    }
+    const disposers = this.eventDisposers.get(client) ?? []
+    this.eventDisposers.delete(client)
+    for (const dispose of disposers) {
+      try {
+        dispose()
+      } catch (error: unknown) {
+        logger.warn('listener cleanup', getErrorDiagnostic(error))
+      }
+    }
   }
 
   private onStorageMessageHandler(type: string) {
-    if (!this.isMobileOS()) {
+    if (this.retired || !this.isMobileOS()) {
       return
     }
 
     logger.debug('onStorageMessageHandler', type)
 
     if (type === 'RESET') {
-      this.clearEvents()
-      // no need to invoke `closeSignClinet` as the other tab already closed the connection
-      this.signClient = undefined
-      this.signClientPromise = undefined
-      this.pairingRequestPromise = undefined
-      this.clearState()
+      this.closeSignClient().catch((error: unknown) =>
+        logger.warn('storage reset', getErrorDiagnostic(error))
+      )
 
       return
     }
@@ -345,30 +462,223 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   }
 
   private onStorageErrorHandler(data: unknown) {
-    logger.error('onStorageError', data)
+    if (!this.retired) {
+      logger.error('onStorageError', data)
+    }
   }
 
   async unsubscribeFromEncryptedMessages(): Promise<void> {
     this.clearRequests()
     this.cancelPendingPairing()
-    this.activeListeners.clear()
+    this.clearMessageListeners()
   }
 
   public async unsubscribeFromEncryptedMessage(senderPublicKey: string): Promise<void> {
     this.activeListeners.delete(senderPublicKey)
+    for (const listeners of this.ownerListeners.values()) {
+      listeners.delete(`message:${senderPublicKey}`)
+    }
   }
 
-  async closeSignClient() {
-    this.clearRequests()
-    if (!this.signClient) {
-      logger.error('No client active')
+  private revokeStartup(): void {
+    this.cancelPendingPairing()
+    this.startup?.cancel()
+    this.startup = undefined
+    this.clientGeneration++
+    this.signClientPromise = undefined
+    for (const owner of this.initializingStorageOwners) {
+      owner
+        .retire([])
+        .catch((error: unknown) =>
+          logger.warn('initialization storage cleanup', getErrorDiagnostic(error))
+        )
+    }
+  }
 
-      return
+  public closeSignClient(): Promise<void> {
+    return this.stop(false)
+  }
+
+  private stop(closeSessions: boolean): Promise<void> {
+    if (this.closing) {
+      if (closeSessions && this.closingClient && !this.closingSessionCleanup) {
+        this.closingSessionCleanup = this.closePairings(this.closingClient)
+
+        return this.trackClosing(
+          Promise.all([this.closing, this.closingSessionCleanup]).then(() => undefined)
+        )
+      }
+
+      return this.closing
+    }
+    // Revoke admission before awaiting cleanup of the captured client.
+    this.revokeStartup()
+    this.clearRequests()
+    const client = this.signClient
+    this.signClient = undefined
+    this.clearState()
+    this.closingClient = client
+    if (client && this.pendingProposals(client).length > 0) {
+      return this.trackClosing(this.retireProposals(client, closeSessions))
+    }
+    this.closingSessionCleanup = client && closeSessions ? this.closePairings(client) : undefined
+    const cleanup = async () => {
+      try {
+        await this.closingSessionCleanup
+      } finally {
+        if (client) {
+          await this.disposeSignClient(client)
+        }
+      }
     }
 
-    const signClient = this.signClient
+    return this.trackClosing(cleanup())
+  }
 
-    // The timeout only lets cleanup continue; transportClose may still finish later.
+  private trackClosing(cleanup: Promise<void>): Promise<void> {
+    const closing = cleanup.finally(() => {
+      if (this.closing === closing) {
+        this.closing = undefined
+        this.closingClient = undefined
+        this.closingSessionCleanup = undefined
+      }
+    })
+    this.closing = closing
+
+    return closing
+  }
+
+  private pendingProposals(client: Client): ExposedProposal[] {
+    return [...(this.exposedProposals.get(client) ?? [])].filter((entry) => !entry.delivered)
+  }
+
+  private trackProposal(client: Client, topic: string): ExposedProposal | undefined {
+    const proposal = client.proposal?.getAll().find((candidate) => candidate.pairingTopic === topic)
+    if (!proposal) {
+      return undefined
+    }
+    this.storageOwners.get(client)?.trackProposal(proposal)
+    let complete: () => void = () => undefined
+    const completion = new Promise<void>((resolve) => {
+      complete = resolve
+    })
+    const entry: ExposedProposal = { proposal, completion, complete, delivered: false }
+    const proposals = this.exposedProposals.get(client) ?? new Set<ExposedProposal>()
+    proposals.add(entry)
+    this.exposedProposals.set(client, proposals)
+
+    return entry
+  }
+
+  private completeProposal(client: Client, entry?: ExposedProposal): void {
+    if (!entry) {
+      return
+    }
+    clearTimeout(entry.timer)
+    this.exposedProposals.get(client)?.delete(entry)
+    this.storageOwners.get(client)?.forgetProposal(entry.proposal.id)
+    entry.complete()
+  }
+
+  private retireProposals(client: Client, closeSessions: boolean): Promise<void> {
+    const existing = this.clientDisposals.get(client)
+    if (existing) {
+      const priorRetirement = this.proposalRetirements.get(client)
+      if (closeSessions && priorRetirement && !priorRetirement.closeSessions) {
+        priorRetirement.closeSessions = true
+        this.storageOwners
+          .get(client)
+          ?.retire(
+            priorRetirement.proposals.map((entry) => entry.proposal),
+            [],
+            priorRetirement.sessions.map((session) => session.topic)
+          )
+          .catch((error: unknown) =>
+            logger.warn('proposal storage cleanup', getErrorDiagnostic(error))
+          )
+        priorRetirement.disconnecting = this.disconnectStoredTopics(
+          client,
+          priorRetirement.pairingTopics
+        )
+
+        return priorRetirement.disconnecting.then(() => undefined)
+      }
+
+      return existing
+    }
+    const proposals = this.pendingProposals(client)
+    const pairingTopics = new Set(proposals.map((entry) => entry.proposal.pairingTopic))
+    const sessions = client.session
+      .getAll()
+      .filter((session) => !pairingTopics.has(session.pairingTopic))
+    const retirement = this.storageOwners.get(client)?.retire(
+      proposals.map((entry) => entry.proposal),
+      closeSessions ? [] : sessions,
+      closeSessions ? sessions.map((session) => session.topic) : []
+    )
+    retirement?.catch((error: unknown) =>
+      logger.warn('proposal storage cleanup', getErrorDiagnostic(error))
+    )
+    this.clearEvents(client)
+    if (this.signClient === client) {
+      this.signClient = undefined
+      this.signClientPromise = undefined
+      this.clientGeneration++
+    }
+    // Public ownership ends now; only the captured proposal intake remains until expiry.
+    const released = Promise.resolve()
+    this.clientDisposals.set(client, released)
+    for (const entry of proposals) {
+      entry.timer = setTimeout(
+        () => this.completeProposal(client, entry),
+        Math.max(0, entry.proposal.expiryTimestamp * 1000 - Date.now())
+      )
+    }
+    const retirementState: ProposalRetirement = {
+      proposals,
+      pairingTopics,
+      sessions,
+      closeSessions,
+      disconnecting: closeSessions
+        ? this.disconnectStoredTopics(client, pairingTopics)
+        : Promise.resolve(false)
+    }
+    this.proposalRetirements.set(client, retirementState)
+    retirementState.disconnecting.catch((error: unknown) =>
+      logger.warn('retiring session cleanup', getErrorDiagnostic(error))
+    )
+    Promise.all(proposals.map((entry) => entry.completion))
+      .then(async () => {
+        try {
+          await retirementState.disconnecting
+        } finally {
+          await this.closeClientResources(client)
+        }
+      })
+      .catch((error: unknown) => logger.warn('proposal relay cleanup', getErrorDiagnostic(error)))
+
+    return released
+  }
+
+  private disposeSignClient(signClient: Client): Promise<void> {
+    const pending = this.clientDisposals.get(signClient)
+    if (pending) {
+      return pending
+    }
+    if (this.pendingProposals(signClient).length > 0) {
+      return this.retireProposals(signClient, false)
+    }
+    this.storageOwners
+      .get(signClient)
+      ?.retire([])
+      .catch((error: unknown) => logger.warn('client storage cleanup', getErrorDiagnostic(error)))
+    const disposal = this.closeClientResources(signClient)
+    this.clientDisposals.set(signClient, disposal)
+
+    return disposal
+  }
+
+  private async closeClientResources(signClient: Client): Promise<void> {
     try {
       await this.withTimeout(
         signClient.core.relayer.transportClose(),
@@ -376,24 +686,27 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         'WalletConnect relayer transport close timed out.'
       )
     } catch (error: unknown) {
-      logger.warn(error instanceof Error ? error.message : String(error))
+      logger.warn('relayer cleanup', getErrorDiagnostic(error))
     }
-
-    try {
-      signClient.core.events.removeAllListeners()
-      signClient.core.relayer.events.removeAllListeners()
-      signClient.core.heartbeat.stop()
-      signClient.core.relayer.provider.events.removeAllListeners()
-      signClient.core.relayer.subscriber.events.removeAllListeners()
-      signClient.core.relayer.provider.connection.events.removeAllListeners()
-      this.clearEvents(signClient)
-    } finally {
-      // A reconnect can swap in a new SignClient while the old relayer is closing.
-      if (this.signClient === signClient) {
-        this.signClient = undefined
-        this.signClientPromise = undefined
-        this.pairingRequestPromise = undefined
+    const cleanup = [
+      () => this.clearEvents(signClient),
+      () => signClient.core.events.removeAllListeners(),
+      () => signClient.core.relayer.events.removeAllListeners(),
+      () => signClient.core.heartbeat.stop(),
+      () => signClient.core.relayer.provider.events.removeAllListeners(),
+      () => signClient.core.relayer.subscriber.events.removeAllListeners(),
+      () => signClient.core.relayer.provider.connection.events.removeAllListeners()
+    ]
+    for (const dispose of cleanup) {
+      try {
+        dispose()
+      } catch (error: unknown) {
+        logger.warn('client cleanup', getErrorDiagnostic(error))
       }
+    }
+    const claim = this.suppliedCoreClaims.get(signClient)
+    if (claim && WalletConnectCommunicationClient.coreOwners.get(signClient.core) === claim) {
+      WalletConnectCommunicationClient.coreOwners.delete(signClient.core)
     }
   }
 
@@ -582,6 +895,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
       return permissionResponse
     }
+
     return permissionResponse
   }
 
@@ -711,16 +1025,50 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     localStorage.setItem(StorageKey.LAST_SELECTED_WALLET, JSON.stringify(selectedWallet))
   }
 
-  public async init(
-    forceNewConnection: boolean = false
-  ): Promise<{ uri: string; topic: string } | undefined> {
+  public init(forceNewConnection = false): Promise<{ uri: string; topic: string } | undefined> {
+    if (this.retired) {
+      return Promise.resolve(undefined)
+    }
+    if (this.startup && !forceNewConnection) {
+      return this.startup.promise
+    }
+    this.startup?.cancel()
     const generation = ++this.pairingGeneration
-    const isCurrent = () => generation === this.pairingGeneration
+    let cancel: () => void = () => undefined
+    const cancelled = new Promise<undefined>((resolve) => {
+      cancel = () => resolve(undefined)
+    })
+    const promise = Promise.race([this.start(forceNewConnection, generation), cancelled]).finally(
+      () => {
+        if (this.startup?.promise === promise) {
+          this.startup = undefined
+        }
+      }
+    )
+    this.startup = { promise, cancel }
+
+    return promise
+  }
+
+  private async start(
+    forceNewConnection: boolean,
+    generation: number
+  ): Promise<{ uri: string; topic: string } | undefined> {
+    const isCurrent = () => !this.retired && generation === this.pairingGeneration
+    if (this.closing) {
+      await this.closing
+    }
+    if (!isCurrent()) {
+      return
+    }
     logger.warn('init')
     this.disconnectionEvents.size && this.disconnectionEvents.clear()
 
     if (forceNewConnection) {
       await this.closePairings()
+      if (!isCurrent()) {
+        return
+      }
     }
 
     const signClient = await this.getSignClient()
@@ -731,6 +1079,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     if (!signClient) {
       throw new Error('Failed to connect to the relayer.')
     }
+    const ownsClient = () => isCurrent() && this.signClient === signClient
 
     const lastIndex = signClient.session.keys.length - 1
 
@@ -738,8 +1087,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       const restoredSession = signClient.session.get(signClient.session.keys[lastIndex])
 
       // Validate session is not stale
-      const valid = await this.isSessionValid(restoredSession)
-      if (!isCurrent()) {
+      const valid = await this.isSessionValid(restoredSession, signClient)
+      if (!ownsClient()) {
         return
       }
       if (valid) {
@@ -753,7 +1102,10 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         return undefined
       } else {
         logger.warn('Restored session is stale, cleaning up and creating new connection')
-        await this.cleanupStaleSession(restoredSession)
+        await this.cleanupStaleSession(restoredSession, signClient)
+        if (!ownsClient()) {
+          return
+        }
         // Fall through to create new connection below
       }
     }
@@ -775,22 +1127,52 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       }
     }
 
-    const { uri, approval }: { uri: string; approval: () => Promise<SessionTypes.Struct> } =
-      await Promise.race([
-        signClient.connect(connectParams),
-        new Promise<any>((_, reject) =>
-          setTimeout(
-            () => reject(new Error('The connection timed out.')),
-            WALLETCONNECT_CONNECT_TIMEOUT_MS
-          )
-        )
-      ]).catch((error) => {
-        logger.error(`Init error: ${error.message}`)
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(StorageKey.WC_INIT_ERROR, error.message)
+    const proposal = signClient.connect(connectParams)
+    let waiting = true
+    let discarded = false
+    const discardProposal = (candidate: Awaited<ReturnType<Client['connect']>>) => {
+      if (discarded) {
+        return
+      }
+      discarded = true
+      candidate
+        .approval()
+        .then((session) => this.discardApproval(signClient, session))
+        .catch(() => undefined)
+    }
+    proposal.then(
+      (candidate) => {
+        if (!waiting || !ownsClient()) {
+          discardProposal(candidate)
         }
-        throw new Error(error.message)
-      })
+      },
+      () => undefined
+    )
+    let connection: Awaited<ReturnType<Client['connect']>>
+    try {
+      connection = await this.withTimeout(
+        proposal,
+        WALLETCONNECT_CONNECT_TIMEOUT_MS,
+        'The connection timed out.'
+      )
+    } catch (error: unknown) {
+      waiting = false
+      if (!ownsClient()) {
+        return
+      }
+      const message = error instanceof Error ? error.message : String(error)
+      logger.error(`Init error: ${message}`)
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(StorageKey.WC_INIT_ERROR, message)
+      }
+      throw new Error(message)
+    }
+    if (!ownsClient()) {
+      discardProposal(connection)
+
+      return
+    }
+    const { uri, approval } = connection
 
     // Extract topic from uri. Format is wc:topic@2...
     const topic = getStringBetween(uri, ':', '@')
@@ -799,6 +1181,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       return
     }
 
+    const exposed = this.trackProposal(signClient, topic)
     let hasResponse = false
 
     this.withTimeout(
@@ -807,7 +1190,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       'WalletConnect pairing ping timed out.'
     )
       .then(async () => {
-        if (!hasResponse && isCurrent()) {
+        if (!hasResponse && ownsClient()) {
           // Only show "waiting for acknowledge" message if pong arrives before response
           const fun = this.eventHandlers.get(ClientEvents.WC_ACK_NOTIFICATION)
           fun && fun('pending')
@@ -815,12 +1198,21 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       })
       .catch(() => undefined)
 
-    approval()
-      .then((session) => {
+    const handledApproval = approval()
+      .then(async (session) => {
         hasResponse = true
+        if (exposed) {
+          exposed.delivered = true
+          clearTimeout(exposed.timer)
+        }
+        if (!ownsClient()) {
+          await this.discardApproval(signClient, session)
+
+          return undefined
+        }
         // Finish rollback before another approval can persist the same wallet public key.
         const delivery = this.approvalQueue.then(async () => {
-          if (!isCurrent()) {
+          if (!ownsClient()) {
             await this.discardApproval(signClient, session)
 
             return
@@ -836,7 +1228,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
           }
           const previousSession = this.session
           this.setSession(session)
-          const ownsSession = () => isCurrent() && this.session?.topic === session.topic
+          const ownsSession = () => ownsClient() && this.session?.topic === session.topic
           const pairingResponse = new ExtendedWalletConnectPairingResponse(
             session.topic,
             session.peer.metadata.name,
@@ -868,13 +1260,16 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
           return accepted
         })
-        this.approvalQueue = delivery.then(() => undefined, () => undefined)
+        this.approvalQueue = delivery.then(
+          () => undefined,
+          () => undefined
+        )
 
         return delivery
       })
       .catch(async (error: any) => {
         hasResponse = true
-        if (!isCurrent()) {
+        if (!ownsClient()) {
           return
         }
         if (
@@ -898,19 +1293,22 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
           fun && fun('error')
         }
       })
+      .finally(() => this.completeProposal(signClient, exposed))
+    handledApproval
       .then(async (accepted) => {
         // A declined proposal restored the previous session; it still owns its connection.
         if (!accepted) {
           return
         }
         const isLeader = await this.isLeader()
-        if (isCurrent() && !isLeader && !this.isMobileOS()) {
+        if (ownsClient() && !isLeader && !this.isMobileOS()) {
           await this.closeSignClient()
-          if (isCurrent()) {
+          if (ownsClient()) {
             this.clearState()
           }
         }
       })
+      .catch((error: unknown) => logger.warn('approval completion', getErrorDiagnostic(error)))
 
     logger.warn('return uri and topic')
 
@@ -929,39 +1327,86 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     }
   }
 
-  public async close() {
-    this.clearRequests()
-    this.cancelPendingPairing()
-    await this.closePairings()
-    this.unsubscribeFromEncryptedMessages()
+  public close(): Promise<void> {
+    if (this.signClient && this.pendingProposals(this.signClient).length > 0) {
+      const stopping = this.stop(true)
+      this.clearMessageListeners()
+
+      return stopping
+    }
+    // An idle desktop proposal can reuse its relay connection for the next URI.
+    if (
+      !this.retired &&
+      !this.startup &&
+      !this.closing &&
+      this.signClient &&
+      this.signClient.session.getAll().length === 0 &&
+      this.signClient.pairing.getAll().length === 0 &&
+      !this.isMobileOS()
+    ) {
+      this.cancelPendingPairing()
+      this.clearState()
+      this.clearMessageListeners()
+
+      return Promise.resolve()
+    }
+    const closing = this.stop(true)
+    this.clearMessageListeners()
+
+    return closing
   }
 
   private subscribeToSessionEvents(signClient: Client): void {
-    // JWT validation error
-    const baseHandler = (signClient.core.relayer as any).onProviderErrorHandler
+    const generation = this.clientGeneration
+    const isCurrent = () =>
+      !this.retired && this.clientGeneration === generation && this.signClient === signClient
+    const disposers: (() => void)[] = []
+    this.eventDisposers.set(signClient, disposers)
+    const on = <E extends SignClientTypes.Event>(
+      event: E,
+      callback: (args: SignClientTypes.EventArguments[E]) => void
+    ) => {
+      signClient.on(event, callback)
+      disposers.push(() => signClient.off?.(event, callback))
+    }
+    const onPairing = (event: string, callback: (args: { topic: string }) => void) => {
+      signClient.core.pairing.events.on(event, callback)
+      disposers.push(() => signClient.core.pairing.events.off?.(event, callback))
+    }
+    const relayer = signClient.core.relayer as unknown as {
+      onProviderErrorHandler: (event: Error) => void | Promise<void>
+    }
+    const baseHandler = relayer.onProviderErrorHandler
     const handler = async (event: Error) => {
+      if (!isCurrent()) {
+        return
+      }
       logger.error('subscribeToSessionEvents', event)
-
       if (event.message?.includes('JWT validation error')) {
         const fun = this.eventHandlers.get(ClientEvents.ON_RELAYER_ERROR)
         fun && fun(TransportType.WALLETCONNECT)
       }
-
       await this.close()
-      this.clearState()
-      ;(signClient.core.relayer as any).onProviderErrorHandler = baseHandler
     }
+    relayer.onProviderErrorHandler = handler
+    disposers.push(() => {
+      if (relayer.onProviderErrorHandler === handler) {
+        relayer.onProviderErrorHandler = baseHandler
+      }
+    })
 
-    ;(signClient.core.relayer as any).onProviderErrorHandler = handler
-
-    signClient.on('session_event', () => {
+    on('session_event', () => {
       // Legacy requestAcknowledged events have no required Beacon request ID.
       // Ignore them, including their unrelated outer event IDs. Public request
       // deadlines stay active; correlated ACKs require negotiated wallet support.
     })
 
-    signClient.on('session_update', (event) => {
-      if (this.signClient !== signClient || this.session?.topic !== event.topic) {
+    on('session_update', (event) => {
+      if (
+        !isCurrent() ||
+        this.session?.topic !== event.topic ||
+        this.closingSession?.topic === event.topic
+      ) {
         return
       }
       const session = signClient.session.get(event.topic)
@@ -977,8 +1422,12 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       this.updateActiveAccount(this.getTezosNamespace(event.params.namespaces).accounts, session)
     })
 
-    signClient.on('session_delete', (event) => {
-      if (this.signClient !== signClient || this.session?.topic !== event.topic) {
+    on('session_delete', (event) => {
+      if (
+        !isCurrent() ||
+        this.session?.topic !== event.topic ||
+        this.closingSession?.topic === event.topic
+      ) {
         return
       }
       this.disconnectionEvents.add('session_delete')
@@ -992,8 +1441,12 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       )
     })
 
-    signClient.on('session_expire', (event) => {
-      if (this.signClient !== signClient || this.session?.topic !== event.topic) {
+    on('session_expire', (event) => {
+      if (
+        !isCurrent() ||
+        this.session?.topic !== event.topic ||
+        this.closingSession?.topic === event.topic
+      ) {
         return
       }
       this.disconnectionEvents.add('session_expire')
@@ -1006,22 +1459,26 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         }
       )
     })
-    signClient.core.pairing.events.on('pairing_delete', (event) => {
+    onPairing('pairing_delete', (event) => {
       logger.debug('Pairing deleted', { topic: event.topic })
       // Don't disconnect session - pairings can be deleted while sessions remain active
       // Sessions communicate directly through the relay after initial pairing
     })
-    signClient.core.pairing.events.on('pairing_expire', (event) => {
+    onPairing('pairing_expire', (event) => {
       logger.debug('Pairing expired', { topic: event.topic })
       // Don't disconnect session - pairings expire, but sessions can outlive them. Only disconnect on session_expire/session_delete
     })
 
-    signClient.on('proposal_expire', (event) => {
+    on('proposal_expire', (event) => {
       logger.debug('Session proposal expired', event.id)
     })
 
-    signClient.on('session_extend', (event) => {
-      if (this.signClient !== signClient || this.session?.topic !== event.topic) {
+    on('session_extend', (event) => {
+      if (
+        !isCurrent() ||
+        this.session?.topic !== event.topic ||
+        this.closingSession?.topic === event.topic
+      ) {
         return
       }
       logger.debug('Session extended', event.topic)
@@ -1113,7 +1570,11 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     if (this.signClient !== signClient || this.session?.topic !== trigger.topic) {
       return
     }
+    if (this.closingSession?.topic === trigger.topic) {
+      return
+    }
     const session = this.session
+    this.closingSession = session
     this.clearRequests()
     await this.onSessionClosed(signClient, trigger.topic)
     if (this.session !== session || this.signClient !== signClient) {
@@ -1193,48 +1654,84 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     )
   }
 
-  private async closePairings() {
-    if (!this.signClient) {
+  private async disconnectStoredTopics(
+    client: Client,
+    excludedPairings = new Set<string>()
+  ): Promise<boolean> {
+    const closedSessions = await this.closeSessions(client, excludedPairings)
+    const pairings = (client.pairing.getAll() ?? []).filter(
+      (pairing) => !excludedPairings.has(pairing.topic)
+    )
+    await Promise.allSettled(
+      pairings.map((pairing) =>
+        this.withTimeout(
+          client.disconnect({
+            topic: pairing.topic,
+            reason: { code: 0, message: 'Force new connection' }
+          }),
+          WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
+          'WalletConnect pairing disconnect timed out.'
+        )
+      )
+    )
+
+    return closedSessions || pairings.length > 0
+  }
+
+  private async closePairings(client = this.signClient) {
+    if (!client) {
       return
     }
+    if (this.pendingProposals(client).length > 0) {
+      await this.retireProposals(client, true)
 
-    const closedSessions = await this.closeSessions()
-    const signClient = (await this.getSignClient())!
-
-    const pairings = signClient.pairing.getAll() ?? []
-    pairings.length &&
-      (await Promise.allSettled(
-        pairings.map((pairing) =>
-          this.withTimeout(
-            signClient.disconnect({
-              topic: pairing.topic,
-              reason: {
-                code: 0, // TODO: Use constants
-                message: 'Force new connection'
-              }
-            }),
-            WALLETCONNECT_DISCONNECT_TIMEOUT_MS,
-            'WalletConnect pairing disconnect timed out.'
-          )
-        )
-      ))
-    if (closedSessions || pairings.length > 0 || this.isMobileOS()) {
-      await this.closeSignClient()
-      if (this.isMobileOS()) {
-        await this.storage.resetState()
-        this.storage.notify('RESET')
+      return
+    }
+    const pairingGeneration = this.pairingGeneration
+    const closedTopics = await this.disconnectStoredTopics(client)
+    if (closedTopics || this.isMobileOS()) {
+      const ownsCleanup = this.signClient === client || this.closingClient === client
+      if (this.signClient === client) {
+        this.clientGeneration++
+        this.signClient = undefined
+        this.signClientPromise = undefined
+      }
+      const generation = this.clientGeneration
+      const isCurrent = () =>
+        ownsCleanup &&
+        !this.retired &&
+        !this.signClient &&
+        generation === this.clientGeneration &&
+        pairingGeneration === this.pairingGeneration
+      await this.disposeSignClient(client)
+      if (this.isMobileOS() && isCurrent()) {
+        const reset = this.storage.resetState()
+        WalletConnectCommunicationClient.storageReset = reset
+        try {
+          await reset
+        } finally {
+          if (WalletConnectCommunicationClient.storageReset === reset) {
+            WalletConnectCommunicationClient.storageReset = undefined
+          }
+        }
+        if (isCurrent()) {
+          this.storage.notify('RESET')
+        }
       }
     }
   }
 
-  private async closeSessions(): Promise<boolean> {
-    if (!this.signClient) {
+  private async closeSessions(
+    signClient = this.signClient,
+    excludedPairings = new Set<string>()
+  ): Promise<boolean> {
+    if (!signClient) {
       return false
     }
 
-    const signClient = (await this.getSignClient())!
-
-    const sessions = signClient.session.getAll() ?? []
+    const sessions = (signClient.session.getAll() ?? []).filter(
+      (session) => !excludedPairings.has(session.pairingTopic)
+    )
     if (sessions.length) {
       await Promise.allSettled(
         sessions.map((session) =>
@@ -1253,7 +1750,9 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       )
     }
 
-    this.clearState()
+    if (this.signClient === signClient) {
+      this.clearState()
+    }
 
     return sessions.length > 0
   }
@@ -1644,7 +2143,19 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     return this.session
   }
 
-  private async tryConnectToRelayer() {
+  private async tryConnectToRelayer(generation = this.clientGeneration) {
+    const core = this.wcOptions.opts.core
+    if (core) {
+      if (WalletConnectCommunicationClient.coreOwners.has(core)) {
+        throw new InitializationUnavailable(
+          'WalletConnect Core is still owned by another client lifetime.'
+        )
+      }
+      const claim = {}
+      WalletConnectCommunicationClient.coreOwners.set(core, claim)
+
+      return this.initSignClientWithTimeout(this.wcOptions.opts.relayUrl, generation, claim)
+    }
     const urls = new Set([
       this.wcOptions.opts.relayUrl,
       undefined,
@@ -1657,9 +2168,15 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     const errMessages = new Set<string>()
 
     for (const relayUrl of urls) {
+      if (generation !== this.clientGeneration || this.retired) {
+        return undefined
+      }
       try {
-        return await this.initSignClientWithTimeout(relayUrl)
+        return await this.initSignClientWithTimeout(relayUrl, generation)
       } catch (error: unknown) {
+        if (error instanceof InitializationUnavailable) {
+          throw error
+        }
         const message = error instanceof Error ? error.message : String(error)
         errMessages.add(message)
         logger.warn(`Failed to connect to ${relayUrl}: ${message}`)
@@ -1669,16 +2186,102 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     throw new Error(`Failed to connect to relayer: ${Array.from(errMessages).join(',')}`)
   }
 
-  private async initSignClientWithTimeout(relayUrl: string | undefined): Promise<Client> {
+  private createStorageOwner(): WalletConnectStorageOwner {
+    const core = this.wcOptions.opts.core
+    const backing =
+      core?.storage ??
+      this.wcOptions.opts.storage ??
+      new KeyValueStorage({ database: ':memory:', ...this.wcOptions.opts.storageOptions })
+    const prefix =
+      core?.customStoragePrefix ??
+      (this.wcOptions.opts.customStoragePrefix ? `:${this.wcOptions.opts.customStoragePrefix}` : '')
+    const domain = core || this.wcOptions.opts.storage ? undefined : 'walletconnect-default-storage'
+
+    return new WalletConnectStorageOwner(backing, prefix, domain)
+  }
+
+  private async initSignClientWithTimeout(
+    relayUrl: string | undefined,
+    generation: number,
+    claim?: object
+  ): Promise<Client> {
+    const core = this.wcOptions.opts.core
+    const originalStorage = core?.storage
+    let installedOwner: WalletConnectStorageOwner | undefined
+    let owner: WalletConnectStorageOwner
+    let initialization: Promise<Client>
+    try {
+      owner = this.createStorageOwner()
+      const handoff = WalletConnectStorageOwner.pendingHandoff(owner)
+      if (handoff) {
+        try {
+          await handoff
+        } catch (error: unknown) {
+          logger.warn('storage handoff', getErrorDiagnostic(error))
+          throw new InitializationUnavailable(
+            'WalletConnect storage cleanup must complete before initialization.'
+          )
+        }
+      }
+      if (generation !== this.clientGeneration || this.retired) {
+        throw new Error('WalletConnect initialization was stopped.')
+      }
+      if (core) {
+        core.storage = owner
+        installedOwner = owner
+      }
+      this.initializingStorageOwners.add(owner)
+      initialization = Client.init({ ...this.wcOptions.opts, relayUrl, storage: owner })
+    } catch (error: unknown) {
+      if (core && installedOwner && core.storage === installedOwner && originalStorage) {
+        core.storage = originalStorage
+        this.initializingStorageOwners.delete(installedOwner)
+      }
+      if (core && WalletConnectCommunicationClient.coreOwners.get(core) === claim) {
+        WalletConnectCommunicationClient.coreOwners.delete(core)
+      }
+      throw error
+    }
     let timeout: ReturnType<typeof setTimeout> | undefined
+    let expired = false
+    initialization.then(
+      (client) => {
+        this.initializingStorageOwners.delete(owner)
+        this.storageOwners.set(client, owner)
+        if (claim) {
+          this.suppliedCoreClaims.set(client, claim)
+        }
+        if (expired || generation !== this.clientGeneration || this.retired) {
+          this.disposeSignClient(client).catch((error: unknown) =>
+            logger.warn('late client cleanup', getErrorDiagnostic(error))
+          )
+        }
+      },
+      () => {
+        this.initializingStorageOwners.delete(owner)
+        owner
+          .retire([])
+          .catch((error: unknown) =>
+            logger.warn('initialization storage cleanup', getErrorDiagnostic(error))
+          )
+        if (core && WalletConnectCommunicationClient.coreOwners.get(core) === claim) {
+          WalletConnectCommunicationClient.coreOwners.delete(core)
+        }
+      }
+    )
     try {
       return await Promise.race([
-        Client.init({ ...this.wcOptions.opts, relayUrl }),
+        initialization,
         new Promise<never>((_, reject) => {
-          timeout = setTimeout(
-            () => reject(new Error('WalletConnect initialization timed out.')),
-            WALLETCONNECT_INIT_TIMEOUT_MS
-          )
+          timeout = setTimeout(() => {
+            expired = true
+            owner
+              .retire([])
+              .catch((error: unknown) =>
+                logger.warn('initialization storage cleanup', getErrorDiagnostic(error))
+              )
+            reject(new Error('WalletConnect initialization timed out.'))
+          }, WALLETCONNECT_INIT_TIMEOUT_MS)
         })
       ])
     } finally {
@@ -1689,24 +2292,55 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   }
 
   private async getSignClient(): Promise<Client | undefined> {
+    const generation = this.clientGeneration
+    if (this.closing) {
+      await this.closing
+    }
+    const reset = WalletConnectCommunicationClient.storageReset
+    if (reset) {
+      await reset.catch((error: unknown) =>
+        logger.warn('storage cleanup', getErrorDiagnostic(error))
+      )
+    }
+    if (this.retired || generation !== this.clientGeneration) {
+      return undefined
+    }
     if (this.signClient !== undefined) {
       return this.signClient
     }
-
     if (!this.signClientPromise) {
-      this.signClientPromise = this.createSignClient().finally(() => {
-        this.signClientPromise = undefined
+      const promise = this.createSignClient(++this.clientGeneration).finally(() => {
+        if (this.signClientPromise === promise) {
+          this.signClientPromise = undefined
+        }
       })
+      this.signClientPromise = promise
     }
 
     return this.signClientPromise
   }
 
-  private async createSignClient(): Promise<Client | undefined> {
+  private async createSignClient(generation: number): Promise<Client | undefined> {
     try {
-      this.signClient = await this.tryConnectToRelayer()
-      this.subscribeToSessionEvents(this.signClient)
+      const client = await this.tryConnectToRelayer(generation)
+      if (generation !== this.clientGeneration || this.retired || !client) {
+        if (client) {
+          await this.disposeSignClient(client)
+        }
+
+        return undefined
+      }
+      this.signClient = client
+      this.subscribeToSessionEvents(client)
+
+      return client
     } catch (error: unknown) {
+      if (error instanceof InitializationUnavailable) {
+        throw error
+      }
+      if (generation !== this.clientGeneration || this.retired) {
+        return undefined
+      }
       const message = error instanceof Error ? error.message : String(error)
       logger.error(message)
       if (typeof localStorage !== 'undefined') {
@@ -1715,8 +2349,6 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
       return undefined
     }
-
-    return this.signClient
   }
 
   private getSession() {
@@ -1829,7 +2461,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
    * @param session The session to validate
    * @returns true if session is valid, false if stale/expired
    */
-  private async isSessionValid(session: SessionTypes.Struct): Promise<boolean> {
+  private async isSessionValid(session: SessionTypes.Struct, client?: Client): Promise<boolean> {
     // Check if Session is expired
     const now = Math.floor(Date.now() / 1000)
     if (session.expiry <= now) {
@@ -1843,7 +2475,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
     // Check if Wallet is still responsive
     try {
-      const signClient = await this.getSignClient()
+      const signClient = client ?? (await this.getSignClient())
       if (!signClient) {
         logger.warn('Session validation failed: no sign client available')
 
@@ -1869,9 +2501,9 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
    * @description Cleans up a stale session by disconnecting and removing it
    * @param session The stale session to cleanup
    */
-  private async cleanupStaleSession(session: SessionTypes.Struct): Promise<void> {
+  private async cleanupStaleSession(session: SessionTypes.Struct, client?: Client): Promise<void> {
     try {
-      const signClient = await this.getSignClient()
+      const signClient = client ?? (await this.getSignClient())
       if (signClient) {
         await this.withTimeout(
           signClient.disconnect({
