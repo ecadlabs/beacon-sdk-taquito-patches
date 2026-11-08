@@ -32,7 +32,9 @@ test('should send a request to sign', async () => {
   await dapp.click('#signPayloadRaw')
 
   await dapp.waitForSelector('p.toast-label', { state: 'visible', timeout: 30_000 })
-  await dapp.waitForSelector('div:has-text("Aborted")', { state: 'visible', timeout: 30_000 })
+  await expect(
+    dapp.locator('beacon-toast .toast-action-label').filter({ hasText: /^Aborted$/ })
+  ).toBeVisible()
 })
 
 test('should send 1 mutez', async () => {
@@ -40,7 +42,9 @@ test('should send 1 mutez', async () => {
   await dapp.click('#sendToSelf')
 
   await dapp.waitForSelector('p.toast-label', { state: 'visible', timeout: 30_000 })
-  await dapp.waitForSelector('div:has-text("Aborted")', { state: 'visible', timeout: 30_000 })
+  await expect(
+    dapp.locator('beacon-toast .toast-action-label').filter({ hasText: /^Aborted$/ })
+  ).toBeVisible()
 })
 
 test('should rate limit', async () => {
@@ -72,7 +76,9 @@ test('should send 1 mutez on second tab', async () => {
   await dapp2.click('#sendToSelf')
 
   await dapp2.waitForSelector('p.toast-label', { state: 'visible', timeout: 30_000 })
-  await dapp2.waitForSelector('div:has-text("Aborted")', { state: 'visible', timeout: 30_000 })
+  await expect(
+    dapp2.locator('beacon-toast .toast-action-label').filter({ hasText: /^Aborted$/ })
+  ).toBeVisible()
 })
 
 test('should send 1 mutez on both tabs', async () => {
@@ -85,12 +91,16 @@ test('should send 1 mutez on both tabs', async () => {
 
   const step1 = async () => {
     await dapp.waitForSelector('p.toast-label', { state: 'visible', timeout: 30_000 })
-    await dapp.waitForSelector('div:has-text("Aborted")', { state: 'visible', timeout: 30_000 })
+    await expect(
+      dapp.locator('beacon-toast .toast-action-label').filter({ hasText: /^Aborted$/ })
+    ).toBeVisible()
   }
 
   const step2 = async () => {
     await dapp2.waitForSelector('p.toast-label', { state: 'visible', timeout: 30_000 })
-    await dapp2.waitForSelector('div:has-text("Aborted")', { state: 'visible', timeout: 30_000 })
+    await expect(
+      dapp2.locator('beacon-toast .toast-action-label').filter({ hasText: /^Aborted$/ })
+    ).toBeVisible()
   }
 
   await Promise.all([step1(), step2()])

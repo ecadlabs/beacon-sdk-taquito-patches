@@ -120,7 +120,7 @@ async function forwardedSign() {
   )
     throw new Error('Missing broadcast request ID')
   const id = message.id
-  await vi.waitFor(() => expect(client['openRequests'].has(id)).toBe(true))
+  await vi.waitFor(() => expect(client['requestTracker'].get(id) !== undefined).toBe(true))
   return { id, pending }
 }
 it('forwards a secondary-tab request and resolves it from the leader RESPONSE', async () => {
@@ -150,7 +150,7 @@ it('forwards a secondary-tab request and resolves it from the leader RESPONSE', 
     }
   })
   await expect(pending).resolves.toMatchObject({ signature: 'sig', signingType: SigningType.RAW })
-  expect(client['openRequests'].has(id)).toBe(false)
+  expect(client['requestTracker'].get(id) !== undefined).toBe(false)
 })
 it('leader prepares delegated requests and broadcasts their responses with the original ID', async () => {
   channel.leader = true
@@ -165,7 +165,7 @@ it('leader prepares delegated requests and broadcasts their responses with the o
   await client['onBCMessageHandler'](request)
   await vi.waitFor(() => expect(makeRequest).toHaveBeenCalledWith(request.data, false, request.id))
   expect(transport.waitForResolution).toHaveBeenCalledTimes(1)
-  expect(client['openRequestsOtherTabs'].has(request.id)).toBe(true)
+  expect(client['requestTracker'].get(request.id)?.route === 'LeaderProxy').toBe(true)
   const response = {
     id: request.id,
     type: BeaconMessageType.SignPayloadResponse,
@@ -184,7 +184,7 @@ it('leader prepares delegated requests and broadcasts their responses with the o
     id: request.id,
     data: { message: response, connectionInfo }
   })
-  expect(client['openRequestsOtherTabs'].has(request.id)).toBe(false)
+  expect(client['requestTracker'].get(request.id)?.route === 'LeaderProxy').toBe(false)
 })
 it.each([
   {
@@ -220,7 +220,7 @@ it.each([
       }
     })
   )
-  expect(client['openRequestsOtherTabs'].size).toBe(0)
+  expect(client['requestTracker'].size).toBe(0)
 })
 it('secondary tabs ignore delegated requests instead of sending them again', async () => {
   const makeRequest = vi.spyOn(
@@ -229,7 +229,7 @@ it('secondary tabs ignore delegated requests instead of sending them again', asy
   )
   await client['prepareRequest']({ id: 'delegated', data: {} })
   expect(makeRequest).not.toHaveBeenCalled()
-  expect(client['openRequestsOtherTabs'].size).toBe(0)
+  expect(client['requestTracker'].size).toBe(0)
 })
 it('broadcasts DISCONNECT when a secondary tab clears its wallet selection', async () => {
   await client['clearWalletConnectSelection'](client['accountTransition'].signal)
@@ -286,22 +286,21 @@ it.each([
         ? client.requestBroadcast({ signedTransaction: 'deadbeef', network })
         : client.requestSignPayload({ payload: 'aa', signingType: SigningType.RAW })
   void pending.catch(() => {})
-  await vi.waitFor(() => expect(client['openRequests'].size).toBe(1))
+  await vi.waitFor(() => expect(client['requestTracker'].size).toBe(1))
   expect(channel.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type }))
   expect(emitted).toHaveBeenCalledTimes(1)
   expect(permissionEmitted).not.toHaveBeenCalled()
 })
-// Timeout registration already works through addOpenRequest on this base.
 it('times out an unanswered secondary-tab request and clears its ownership', async () => {
   vi.useFakeTimers()
   try {
     const { id, pending } = await forwardedSign()
     const outcome = pending.catch((error: unknown) => error)
-    expect(client['openRequestTimeouts'].has(id)).toBe(true)
+    expect(client['requestTracker'].get(id)?.deadline === 'Armed').toBe(true)
     await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
     expect(await outcome).toMatchObject({ errorType: BeaconErrorType.PEER_UNREACHABLE })
-    expect(client['openRequests'].has(id)).toBe(false)
-    expect(client['openRequestTimeouts'].has(id)).toBe(false)
+    expect(client['requestTracker'].get(id) !== undefined).toBe(false)
+    expect(client['requestTracker'].get(id)?.deadline === 'Armed').toBe(false)
   } finally {
     vi.useRealTimers()
   }
@@ -317,7 +316,7 @@ it('emits PERMISSION_REQUEST_SENT for a forwarded permission request', async () 
     scopes: []
   })
   void pending.catch(() => {})
-  await vi.waitFor(() => expect(client['openRequests'].size).toBe(1))
+  await vi.waitFor(() => expect(client['requestTracker'].size).toBe(1))
   expect(emitted).toHaveBeenCalledTimes(1)
   expect(channel.postMessage).toHaveBeenCalledWith(
     expect.objectContaining({ type: BeaconMessageType.PermissionRequest })

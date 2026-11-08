@@ -259,9 +259,7 @@ describe('Response metadata preparation', () => {
       expect(succeeded).not.toHaveBeenCalled()
       expect(changed).not.toHaveBeenCalled()
       expect(await dapp.getAccounts()).toEqual([])
-      expect(dapp['openRequests'].size).toBe(0)
-      expect(dapp['openRequestTimeouts'].size).toBe(0)
-      expect(dapp['acknowledgedRequests'].size).toBe(0)
+      expect(dapp['requestTracker'].size).toBe(0)
       await vi.advanceTimersByTimeAsync(1000)
       expect(closed).not.toHaveBeenCalled()
     }
@@ -300,9 +298,7 @@ describe('Response metadata preparation', () => {
       expect(succeeded).not.toHaveBeenCalled()
       expect(changed).not.toHaveBeenCalled()
       expect(await dapp.getAccounts()).toEqual([])
-      expect(dapp['openRequests'].size).toBe(0)
-      expect(dapp['openRequestTimeouts'].size).toBe(0)
-      expect(dapp['acknowledgedRequests'].size).toBe(0)
+      expect(dapp['requestTracker'].size).toBe(0)
       expect(closed).toHaveBeenCalledTimes(1)
     }
   )
@@ -340,9 +336,7 @@ describe('Response metadata preparation', () => {
       expect(succeeded).not.toHaveBeenCalled()
       expect(changed).not.toHaveBeenCalled()
       expect(await dapp.getAccounts()).toEqual([])
-      expect(dapp['openRequests'].size).toBe(0)
-      expect(dapp['openRequestTimeouts'].size).toBe(0)
-      expect(dapp['acknowledgedRequests'].size).toBe(0)
+      expect(dapp['requestTracker'].size).toBe(0)
       expect(closed).not.toHaveBeenCalled()
     }
   )

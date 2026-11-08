@@ -31,6 +31,34 @@ import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
 import { DappP2PTransport } from '../../src/transports/DappP2PTransport'
 import { getDAppClientInstance } from '../../src/utils/get-instance'
 
+type RequestResponse = Awaited<NonNullable<ReturnType<DAppClient['createRequest']>>['promise']>
+type RequestRoute = NonNullable<Parameters<DAppClient['createRequest']>[1]>
+
+function admitRequest<Failure>(
+  owner: DAppClient,
+  id: string,
+  pending: {
+    promise: Promise<unknown>
+    resolve(value: RequestResponse): void
+    reject(error?: Failure): void
+  },
+  route: RequestRoute = 'Direct',
+  armDeadline = true
+) {
+  const request = owner['createRequest'](id, route)
+  if (!request) throw new Error('Request already registered')
+  // Observe fixture teardown even when the test ends without a response.
+  void pending.promise.catch(() => undefined)
+  void request.promise.then(pending.resolve, pending.reject)
+  if (armDeadline) owner['armRequestDeadline'](request.key)
+  return request
+}
+
+function closeRequest(owner: DAppClient, id: string) {
+  const request = owner['requestTracker'].get(id)
+  if (request) owner['requestTracker'].abort(request.key, owner['createAbortedError'](id))
+}
+
 const mockLoggerWarn = vi.fn()
 const mockLoggerError = vi.fn()
 let mockBroadcastMessage: ((message: unknown) => Promise<void>) | undefined
@@ -250,10 +278,24 @@ describe('DAppClient: basic unit tests', () => {
     connectedAt: 1
   })
 
-  it('addOpenRequest stores given promise in openRequests map', () => {
-    const p = new ExposedPromise<{ foo: string }, any>()
-    ;(client as any).addOpenRequest('myId', p)
-    expect((client as any).openRequests.get('myId')).toBe(p)
+  it('settles an admitted request from its matching response', async () => {
+    const pending = new ExposedPromise<RequestResponse, ErrorResponse>()
+    const request = admitRequest(client, 'myId', pending)
+    expect(client['requestTracker'].isCurrent(request.key)).toBe(true)
+    const error: ErrorResponse = {
+      id: 'myId',
+      version: '2',
+      senderId: 'wallet-sender-id',
+      type: BeaconMessageType.Error,
+      errorType: BeaconErrorType.NOT_GRANTED_ERROR
+    }
+    const receive = client['handleResponse'] as (
+      message: BeaconMessage,
+      context: ConnectionContext
+    ) => Promise<void>
+    await receive(error, { origin: Origin.P2P, id: 'wallet-public-key' })
+    await expect(pending.promise).rejects.toEqual(error)
+    expect(client['requestTracker'].isCurrent(request.key)).toBe(false)
   })
 
   it('addBlockchain / removeBlockchain manage internal map', async () => {
@@ -352,9 +394,12 @@ describe('DAppClient: basic unit tests', () => {
     const acknowledgeHandler = vi.fn()
     const getWalletInfo = vi.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
 
-    ;(client as any).openRequests.set(
+    admitRequest(
+      client,
       'request-id',
-      new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
+      new ExposedPromise<RequestResponse, ErrorResponse>(),
+      'Direct',
+      false
     )
 
     client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
@@ -384,9 +429,12 @@ describe('DAppClient: basic unit tests', () => {
     const acknowledgeHandler = vi.fn()
     const getWalletInfo = vi.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
 
-    ;(client as any).openRequests.set(
+    admitRequest(
+      client,
       'wrapper-request-id',
-      new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
+      new ExposedPromise<RequestResponse, ErrorResponse>(),
+      'Direct',
+      false
     )
 
     client.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledgeHandler)
@@ -822,11 +870,11 @@ describe('DAppClient: basic unit tests', () => {
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
     await (client as any).storage.set(StorageKey.ACCOUNTS, [])
     await (client as any).setTransport(transport)
-    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+    admitRequest(client, 'pending-after-disconnect', pendingRequest, 'Direct', false)
 
     await client.disconnect()
 
-    expect((client as any).openRequests.size).toBe(0)
+    expect(client['requestTracker'].size).toBe(0)
     await expect(pendingRejection).resolves.toMatchObject({
       id: 'pending-after-disconnect',
       errorType: BeaconErrorType.ABORTED_ERROR
@@ -1389,13 +1437,13 @@ describe('DAppClient: basic unit tests', () => {
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
     await (client as any).storage.set(StorageKey.ACCOUNTS, [])
     await (client as any).setTransport(transport)
-    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+    admitRequest(client, 'pending-after-disconnect', pendingRequest, 'Direct', false)
 
     await expect(client.disconnect()).resolves.toBeUndefined()
 
     expect(transport.send).toHaveBeenCalledWith(expect.any(String), peer)
     expect(transport.disconnect).toHaveBeenCalledTimes(1)
-    expect((client as any).openRequests.size).toBe(0)
+    expect(client['requestTracker'].size).toBe(0)
     await expect(pendingRejection).resolves.toMatchObject({
       id: 'pending-after-disconnect',
       errorType: BeaconErrorType.ABORTED_ERROR
@@ -1409,12 +1457,12 @@ describe('DAppClient: basic unit tests', () => {
     const pendingRejection = pendingRequest.promise.catch((error) => error)
 
     ;(client as any)._activeAccount = ExposedPromise.resolve(staleAccount)
-    ;(client as any).openRequests.set('pending-after-disconnect', pendingRequest)
+    admitRequest(client, 'pending-after-disconnect', pendingRequest, 'Direct', false)
     await (client as any).storage.delete(StorageKey.ACTIVE_ACCOUNT)
 
     await expect(client.disconnect()).resolves.toBeUndefined()
 
-    expect((client as any).openRequests.size).toBe(0)
+    expect(client['requestTracker'].size).toBe(0)
     await expect(pendingRejection).resolves.toMatchObject({
       id: 'pending-after-disconnect',
       errorType: BeaconErrorType.ABORTED_ERROR
@@ -1486,8 +1534,8 @@ describe('DAppClient: basic unit tests', () => {
   it('cleans up v3 wrapped responses by the outer request id', async () => {
     await seedPeerStorage()
 
-    const request = new ExposedPromise<{ message: unknown; connectionInfo: unknown }, any>()
-    ;(client as any).openRequests.set('wrapper-request-id', request)
+    const request = new ExposedPromise<RequestResponse, ErrorResponse>()
+    admitRequest(client, 'wrapper-request-id', request, 'Direct', false)
 
     await (client as any).handleResponse(
       {
@@ -1508,7 +1556,7 @@ describe('DAppClient: basic unit tests', () => {
       }
     )
 
-    expect((client as any).openRequests.has('wrapper-request-id')).toBe(false)
+    expect(client['requestTracker'].get('wrapper-request-id') !== undefined).toBe(false)
   })
 
   it('rejects open requests when the wallet peer never answers', async () => {
@@ -1529,10 +1577,9 @@ describe('DAppClient: basic unit tests', () => {
     void operationRequest.promise.catch(rejection)
 
     try {
-      ;(timeoutClient as any).addOpenRequest('ghost-request-id', operationRequest)
+      admitRequest(timeoutClient, 'ghost-request-id', operationRequest)
 
-      vi.advanceTimersByTime(10)
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(10)
 
       expect(rejection).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1541,7 +1588,7 @@ describe('DAppClient: basic unit tests', () => {
           id: 'ghost-request-id'
         })
       )
-      expect((timeoutClient as any).openRequests.has('ghost-request-id')).toBe(false)
+      expect(timeoutClient['requestTracker'].get('ghost-request-id') !== undefined).toBe(false)
       expect(channelClosedHandler).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
@@ -1563,13 +1610,16 @@ describe('DAppClient: basic unit tests', () => {
     const postMessage = vi.spyOn((timeoutClient as any).multiTabChannel, 'postMessage')
 
     try {
-      ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-request-id')
-      ;(timeoutClient as any).addOpenRequest(
+      admitRequest(
+        timeoutClient,
         'delegated-request-id',
-        new ExposedPromise<unknown, unknown>()
+        new ExposedPromise<unknown, unknown>(),
+        'LeaderProxy'
       )
 
-      expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(true)
+      expect(
+        timeoutClient['requestTracker'].get('delegated-request-id')?.route === 'LeaderProxy'
+      ).toBe(true)
 
       await (timeoutClient as any).handleResponse(
         {
@@ -1591,11 +1641,12 @@ describe('DAppClient: basic unit tests', () => {
           type: 'RESPONSE'
         })
       )
-      expect((timeoutClient as any).openRequests.has('delegated-request-id')).toBe(false)
-      expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(false)
+      expect(timeoutClient['requestTracker'].get('delegated-request-id') !== undefined).toBe(false)
+      expect(
+        timeoutClient['requestTracker'].get('delegated-request-id')?.route === 'LeaderProxy'
+      ).toBe(false)
 
-      vi.advanceTimersByTime(10)
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(10)
 
       expect(channelClosedHandler).not.toHaveBeenCalled()
     } finally {
@@ -1622,8 +1673,12 @@ describe('DAppClient: basic unit tests', () => {
     void operationRequest.promise.catch(rejection)
 
     try {
-      ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-acknowledged-request-id')
-      ;(timeoutClient as any).addOpenRequest('delegated-acknowledged-request-id', operationRequest)
+      admitRequest(
+        timeoutClient,
+        'delegated-acknowledged-request-id',
+        operationRequest,
+        'LeaderProxy'
+      )
 
       await (timeoutClient as any).handleResponse(
         {
@@ -1638,8 +1693,7 @@ describe('DAppClient: basic unit tests', () => {
         }
       )
 
-      vi.advanceTimersByTime(10)
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(10)
 
       expect(postMessage).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1649,14 +1703,15 @@ describe('DAppClient: basic unit tests', () => {
       )
       expect(rejection).not.toHaveBeenCalled()
       expect(channelClosedHandler).not.toHaveBeenCalled()
-      expect((timeoutClient as any).openRequests.has('delegated-acknowledged-request-id')).toBe(
-        true
-      )
       expect(
-        (timeoutClient as any).openRequestsOtherTabs.has('delegated-acknowledged-request-id')
+        timeoutClient['requestTracker'].get('delegated-acknowledged-request-id') !== undefined
+      ).toBe(true)
+      expect(
+        timeoutClient['requestTracker'].get('delegated-acknowledged-request-id')?.route ===
+          'LeaderProxy'
       ).toBe(true)
     } finally {
-      ;(timeoutClient as any).clearOpenRequest('delegated-acknowledged-request-id')
+      closeRequest(timeoutClient, 'delegated-acknowledged-request-id')
       vi.useRealTimers()
     }
   })
@@ -1713,9 +1768,9 @@ describe('DAppClient: basic unit tests', () => {
         })
       })
     )
-    expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-send-failure-id')).toBe(
-      false
-    )
+    expect(
+      timeoutClient['requestTracker'].get('delegated-send-failure-id')?.route === 'LeaderProxy'
+    ).toBe(false)
   })
 
   it('clears open requests when transport send rejects asynchronously', async () => {
@@ -1764,7 +1819,7 @@ describe('DAppClient: basic unit tests', () => {
       })
     ).rejects.toBe(sendError)
 
-    expect((timeoutClient as any).openRequests.has('guid')).toBe(false)
+    expect(timeoutClient['requestTracker'].get('guid') !== undefined).toBe(false)
   })
 
   it('restores an upstream v4.8.0-style P2P persisted session without deactivating it', async () => {
@@ -2333,7 +2388,7 @@ describe('DAppClient: basic unit tests', () => {
       })
     ).rejects.toBe(sendError)
 
-    expect((timeoutClient as any).openRequests.has('guid')).toBe(false)
+    expect(timeoutClient['requestTracker'].get('guid') !== undefined).toBe(false)
   })
 
   it('clears delegated request markers when the delegated request times out', async () => {
@@ -2351,13 +2406,13 @@ describe('DAppClient: basic unit tests', () => {
     void operationRequest.promise.catch(() => undefined)
 
     try {
-      ;(timeoutClient as any).openRequestsOtherTabs.add('delegated-request-id')
-      ;(timeoutClient as any).addOpenRequest('delegated-request-id', operationRequest)
+      admitRequest(timeoutClient, 'delegated-request-id', operationRequest, 'LeaderProxy')
 
-      vi.advanceTimersByTime(10)
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(10)
 
-      expect((timeoutClient as any).openRequestsOtherTabs.has('delegated-request-id')).toBe(false)
+      expect(
+        timeoutClient['requestTracker'].get('delegated-request-id')?.route === 'LeaderProxy'
+      ).toBe(false)
     } finally {
       vi.useRealTimers()
     }
@@ -2384,11 +2439,11 @@ describe('DAppClient: basic unit tests', () => {
       void operationRequest.promise.catch(rejection)
 
       try {
-        ;(timeoutClient as any).addOpenRequest('acknowledged-request-id', operationRequest)
+        admitRequest(timeoutClient, 'acknowledged-request-id', operationRequest)
 
         if (ackKind === 'closed') {
-          timeoutClient['addOpenRequest']('closed-request-id', new ExposedPromise())
-          timeoutClient['clearOpenRequest']('closed-request-id')
+          admitRequest(timeoutClient, 'closed-request-id', new ExposedPromise())
+          closeRequest(timeoutClient, 'closed-request-id')
         }
 
         await timeoutClient['handleResponse'](
@@ -2404,13 +2459,14 @@ describe('DAppClient: basic unit tests', () => {
           }
         )
 
-        vi.advanceTimersByTime(10)
-        await Promise.resolve()
+        await vi.advanceTimersByTimeAsync(10)
 
         if (ackKind === 'valid') {
           expect(rejection).not.toHaveBeenCalled()
           expect(channelClosedHandler).not.toHaveBeenCalled()
-          expect(timeoutClient['openRequests'].has('acknowledged-request-id')).toBe(true)
+          expect(timeoutClient['requestTracker'].get('acknowledged-request-id') !== undefined).toBe(
+            true
+          )
         } else {
           expect(rejection).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -2419,10 +2475,12 @@ describe('DAppClient: basic unit tests', () => {
             })
           )
           expect(channelClosedHandler).toHaveBeenCalledTimes(1)
-          expect(timeoutClient['openRequests'].has('acknowledged-request-id')).toBe(false)
+          expect(timeoutClient['requestTracker'].get('acknowledged-request-id') !== undefined).toBe(
+            false
+          )
         }
       } finally {
-        ;(timeoutClient as any).clearOpenRequest('acknowledged-request-id')
+        closeRequest(timeoutClient, 'acknowledged-request-id')
         vi.useRealTimers()
       }
     }
@@ -2441,15 +2499,14 @@ describe('DAppClient: basic unit tests', () => {
     const channelClosedHandler = vi.fn()
     timeoutClient.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, channelClosedHandler)
 
-    const sessionUpdate: Parameters<DAppClient['addOpenRequest']>[1] = new ExposedPromise()
+    const sessionUpdate = new ExposedPromise<RequestResponse, ErrorResponse>()
     const rejection = vi.fn()
     void sessionUpdate.promise.catch(rejection)
 
     try {
-      timeoutClient['addOpenRequest']('session_update', sessionUpdate)
+      admitRequest(timeoutClient, 'session_update', sessionUpdate)
 
-      vi.advanceTimersByTime(10)
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(10)
 
       expect(rejection).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2458,9 +2515,9 @@ describe('DAppClient: basic unit tests', () => {
         })
       )
       expect(channelClosedHandler).toHaveBeenCalledTimes(1)
-      expect(timeoutClient['openRequests'].has('session_update')).toBe(false)
+      expect(timeoutClient['requestTracker'].get('session_update') !== undefined).toBe(false)
     } finally {
-      ;(timeoutClient as any).clearOpenRequest('session_update')
+      closeRequest(timeoutClient, 'session_update')
       vi.useRealTimers()
     }
   })
@@ -2504,7 +2561,7 @@ describe('DAppClient: basic unit tests', () => {
       vi.useRealTimers()
     })
 
-    function register(id = 'live-request') {
+    function register(id = 'live-request', route: RequestRoute = 'Direct') {
       const pending = new ExposedPromise<
         {
           message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>
@@ -2515,7 +2572,7 @@ describe('DAppClient: basic unit tests', () => {
       const resolved = vi.fn()
       const rejected = vi.fn()
       void pending.promise.then(resolved, rejected)
-      client['addOpenRequest'](id, pending)
+      admitRequest(client, id, pending, route)
       return { pending, resolved, rejected }
     }
 
@@ -2529,20 +2586,19 @@ describe('DAppClient: basic unit tests', () => {
       const request = register('session_update')
 
       client['abortOpenRequests']()
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(0)
 
       expect(request.rejected).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'session_update', errorType: BeaconErrorType.ABORTED_ERROR })
       )
       expect(request.resolved).not.toHaveBeenCalled()
-      expect(client['openRequests'].size).toBe(0)
+      expect(client['requestTracker'].size).toBe(0)
     })
 
     it.each([BeaconMessageType.ChangeAccountRequest, BeaconMessageType.Disconnect] as const)(
       'keeps a delegated request pending after a mismatched %s with the same ID',
       async (type) => {
-        const request = register()
-        client['openRequestsOtherTabs'].add('live-request')
+        const request = register('live-request', 'LeaderProxy')
         const forwarded = vi.spyOn(client['multiTabChannel'], 'postMessage')
 
         await receive(

@@ -211,7 +211,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
       expect(await dapp.getActiveAccount()).toEqual(
         expect.objectContaining({ address, publicKey, senderId: 'current' })
       )
-      expect(dapp['openRequests'].size).toBe(0)
+      expect(dapp['requestTracker'].size).toBe(0)
     }
   )
 
@@ -264,7 +264,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
           icon: 'https://wallet.example/updated.png'
         })
       }
-      expect(dapp['openRequests'].size).toBe(0)
+      expect(dapp['requestTracker'].size).toBe(0)
     }
   )
 
@@ -293,7 +293,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
 
     await expect(dapp['appMetadataManager'].getAppMetadata('other-topic')).resolves.toBeUndefined()
     expect(await dapp.getActiveAccount()).toEqual(selected)
-    expect(dapp['openRequests'].size).toBe(0)
+    expect(dapp['requestTracker'].size).toBe(0)
   })
 
   it('aborts a public request when an active wallet disconnect shares its ID', async () => {
