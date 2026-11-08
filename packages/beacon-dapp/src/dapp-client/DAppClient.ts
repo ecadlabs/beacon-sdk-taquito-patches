@@ -139,6 +139,7 @@ import {
 } from '../events'
 import { DAppClientOptions } from './DAppClientOptions'
 import { RequestTracker, RequestKey, RequestRoute } from './RequestTracker'
+import { PermissionRequestOwner } from './PermissionRequestOwner'
 
 interface RequestResponse {
   message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage | BlockchainMessage>
@@ -306,6 +307,8 @@ export class DAppClient extends Client {
 
   private destroyed = false
 
+  private readonly permissionRequests = new Set<PermissionRequestOwner>()
+
   private accountTransition = new AbortController()
 
   private readonly startupTransition = this.accountTransition.signal
@@ -334,13 +337,18 @@ export class DAppClient extends Client {
 
   private pendingActiveAccountWrites = 0
 
-  private beginAccountTransition(): AbortSignal {
+  private beginAccountTransition(owner?: PermissionRequestOwner): AbortSignal {
+    owner?.assertCurrent()
     this._accountChangeGeneration++
-    this.accountTransition.abort()
+    const previous = this.accountTransition
     this.accountTransition = new AbortController()
+    const transition = this.accountTransition.signal
     this.pendingAccountSelection = undefined
+    // A request may select its own account without revoking its public result.
+    owner?.follow(transition)
+    previous.abort()
 
-    return this.accountTransition.signal
+    return transition
   }
 
   private isCurrentAccountTransition(transition: AbortSignal): boolean {
@@ -1846,7 +1854,14 @@ export class DAppClient extends Client {
    * @param account The account that will be set as the active account
    */
   public async setActiveAccount(account?: AccountInfo): Promise<void> {
-    const transition = this.beginAccountTransition()
+    await this.selectActiveAccount(account)
+  }
+
+  private async selectActiveAccount(
+    account?: AccountInfo,
+    owner?: PermissionRequestOwner
+  ): Promise<void> {
+    const transition = this.beginAccountTransition(owner)
     if (account && this._disconnectPromise) {
       await this._disconnectPromise
     }
@@ -2310,6 +2325,7 @@ export class DAppClient extends Client {
    * Remove all accounts and set active account to undefined
    */
   public async removeAllAccounts(): Promise<void> {
+    this.abortPermissionRequests()
     this._accountChangeGeneration++
     const transition = await this.mutateAccounts(async () => {
       const removal = this.beginAccountTransition()
@@ -2500,68 +2516,61 @@ export class DAppClient extends Client {
 
     const logId = `makeRequestV3 ${Date.now()}`
     logger.time(true, logId)
-    let resolved: {
-      message: BeaconMessageWrapper<PermissionResponseV3>
-      connectionInfo: ConnectionContext
-    }
-    try {
-      resolved = await this.makeRequestV3<
+
+    return this.runPermissionRequest(request, logId, async (owner) => {
+      const { message: response, connectionInfo } = await this.makeRequestV3<
         PermissionRequestV3,
         BeaconMessageWrapper<PermissionResponseV3>
-      >(request)
-    } catch (requestError) {
-      await this.runRequestErrorSideEffects(request, requestError, logId)
-      throw requestError
-    }
-    const { message: response, connectionInfo } = resolved
-    logger.time(false, logId)
+      >(request, undefined, owner)
+      owner.assertCurrent()
 
-    logger.log('RESPONSE V3', response, connectionInfo)
-
-    const partialAccountInfos = await blockchain.getAccountInfosFromPermissionResponse(
-      response.message
-    )
-
-    const accountInfo: any = {
-      accountIdentifier: partialAccountInfos[0].accountId,
-      senderId: response.senderId,
-      origin: {
-        type: connectionInfo.origin,
-        id: connectionInfo.id
-      },
-      address: partialAccountInfos[0].address, // Store all addresses
-      publicKey: partialAccountInfos[0].publicKey,
-      scopes: response.message.blockchainData.scopes as any,
-      connectedAt: new Date().getTime(),
-      chainData: response.message.blockchainData
-    }
-
-    await this.accountManager.addAccount(accountInfo)
-    await this.setActiveAccount(accountInfo)
-
-    await blockchain.handleResponse({
-      request,
-      account: accountInfo,
-      output: response,
-      blockExplorer: this.blockExplorer,
-      connectionContext: connectionInfo,
-      walletInfo: await this.getWalletInfo()
-    })
-
-    await this.notifySuccess(request as any, {
-      account: accountInfo,
-      output: {
+      const partialAccountInfos = await blockchain.getAccountInfosFromPermissionResponse(
+        response.message
+      )
+      owner.assertCurrent()
+      // V3 retains its chain-specific account shape at the legacy account-store boundary.
+      const accountInfo = {
+        accountIdentifier: partialAccountInfos[0].accountId,
+        senderId: response.senderId,
+        origin: { type: connectionInfo.origin, id: connectionInfo.id },
         address: partialAccountInfos[0].address,
-        network: { type: input.blockchainIdentifier },
-        scopes: []
-      } as any,
-      blockExplorer: this.blockExplorer,
-      connectionContext: connectionInfo,
-      walletInfo: await this.getWalletInfo()
-    })
+        publicKey: partialAccountInfos[0].publicKey,
+        scopes: response.message.blockchainData.scopes,
+        connectedAt: new Date().getTime(),
+        chainData: response.message.blockchainData
+      } as unknown as AccountInfo
 
-    // return output
-    return response.message
+      await this.persistPermissionAccount(accountInfo, owner)
+      owner.assertCurrent()
+      await this.selectActiveAccount(accountInfo, owner)
+      owner.assertCurrent()
+      const callbackWalletInfo = await this.getWalletInfo()
+      owner.assertCurrent()
+      await blockchain.handleResponse({
+        request,
+        account: accountInfo,
+        output: response,
+        blockExplorer: this.blockExplorer,
+        connectionContext: connectionInfo,
+        walletInfo: callbackWalletInfo
+      })
+      owner.assertCurrent()
+      const walletInfo = await this.getWalletInfo()
+      owner.complete()
+      await this.notifySuccess(request as unknown as PermissionRequestInput, {
+        account: accountInfo,
+        output: {
+          address: partialAccountInfos[0].address,
+          network: { type: input.blockchainIdentifier },
+          scopes: []
+        } as unknown as PermissionResponseOutput,
+        blockExplorer: this.blockExplorer,
+        connectionContext: connectionInfo,
+        walletInfo
+      })
+
+      return response.message
+    })
   }
 
   public async request(input: BlockchainRequestV3): Promise<BlockchainResponseV3> {
@@ -2677,52 +2686,50 @@ export class DAppClient extends Client {
     const logId = `makeRequest ${Date.now()}`
     logger.time(true, logId)
 
-    const res =
-      (await this.checkMakeRequest()) || !(await this.getActiveAccount())
-        ? this.makeRequest<PermissionRequest, PermissionResponse>(request, undefined, undefined)
-        : this.makeRequestBC<PermissionRequest, PermissionResponse>(request)
+    return this.runPermissionRequest(request, logId, async (owner) => {
+      const resolved =
+        (await this.checkMakeRequest()) || !(await this.getActiveAccount())
+          ? await this.makeRequest<PermissionRequest, PermissionResponse>(
+              request,
+              undefined,
+              undefined,
+              owner
+            )
+          : await this.makeRequestBC<PermissionRequest, PermissionResponse>(request, owner)
+      owner.assertCurrent()
+      if (!resolved) {
+        throw new Error('Internal error: makeRequest returned no result')
+      }
+      const { message, connectionInfo } = resolved
+      const accountInfo = await this.onNewAccount(
+        message,
+        connectionInfo,
+        undefined,
+        () => owner.isCurrent(),
+        owner
+      )
+      owner.assertCurrent()
+      const output: PermissionResponseOutput = {
+        ...message,
+        walletKey: accountInfo.walletKey,
+        address: accountInfo.address,
+        accountInfo
+      }
+      const walletInfo = await this.getWalletInfo()
+      owner.complete()
+      await this.notifySuccess(request, {
+        account: accountInfo,
+        output,
+        blockExplorer: this.blockExplorer,
+        connectionContext: connectionInfo,
+        walletInfo
+      })
+      this.analytics.track('event', 'DAppClient', 'Permission received', {
+        address: accountInfo.address
+      })
 
-    let resolved
-    try {
-      resolved = await res
-    } catch (requestError) {
-      await this.runRequestErrorSideEffects(request, requestError, logId)
-      throw requestError
-    }
-    if (!resolved) {
-      throw new Error('Internal error: makeRequest returned no result')
-    }
-    const { message, connectionInfo } = resolved
-    logger.time(false, logId)
-
-    logger.log('requestPermissions', '######## MESSAGE #######')
-    logger.log('requestPermissions', message)
-
-    const accountInfo = await this.onNewAccount(message, connectionInfo)
-
-    logger.log('requestPermissions', '######## ACCOUNT INFO #######')
-    logger.log('requestPermissions', JSON.stringify(accountInfo))
-
-    const output: PermissionResponseOutput = {
-      ...message,
-      walletKey: accountInfo.walletKey,
-      address: accountInfo.address,
-      accountInfo
-    }
-
-    await this.notifySuccess(request, {
-      account: accountInfo,
-      output,
-      blockExplorer: this.blockExplorer,
-      connectionContext: connectionInfo,
-      walletInfo: await this.getWalletInfo()
+      return output
     })
-
-    this.analytics.track('event', 'DAppClient', 'Permission received', {
-      address: accountInfo.address
-    })
-
-    return output
   }
 
   private getPermissionRequestScopes(input?: RequestPermissionInput): PermissionScope[] {
@@ -3277,7 +3284,8 @@ export class DAppClient extends Client {
   private async runRequestErrorSideEffects(
     request: unknown,
     rawError: unknown,
-    logId: string
+    logId: string,
+    resetPermissionState = true
   ): Promise<void> {
     // V3 request shapes (PermissionRequestV3, BlockchainRequestV3) flow through
     // here too. They aren't part of BeaconRequestInputMessage, but
@@ -3286,7 +3294,9 @@ export class DAppClient extends Client {
     const typedRequest = request as BeaconRequestInputMessage
     const requestError = rawError as ErrorResponse
     logger.time(false, logId)
-    await this.handleRequestError(typedRequest, requestError).catch(() => undefined)
+    await this.handleRequestError(typedRequest, requestError, resetPermissionState).catch(
+      () => undefined
+    )
   }
 
   /**
@@ -3297,7 +3307,8 @@ export class DAppClient extends Client {
    */
   private async handleRequestError(
     request: BeaconRequestInputMessage,
-    beaconError: ErrorResponse
+    beaconError: ErrorResponse,
+    resetPermissionState = true
   ): Promise<void> {
     logger.error('handleRequestError', 'error response', beaconError)
     if (beaconError.errorType) {
@@ -3323,12 +3334,16 @@ export class DAppClient extends Client {
         buttons.push({ text: 'Remove account', actionCallback })
       }
 
-      const peer = await this.getPeer()
-      const activeAccount = await this.getActiveAccount()
+      const peer = this.destroyed ? this._activePeer.promiseResult : await this.getPeer()
+      const activeAccount = this.destroyed
+        ? this._activeAccount.promiseResult
+        : await this.getActiveAccount()
 
       // If we sent a permission request, received an error and there is no active account, we need to reset the DAppClient.
       // This most likely means that the user rejected the first permission request after pairing a wallet, so we "forget" the paired wallet to allow the user to pair again.
       if (
+        resetPermissionState &&
+        !this.destroyed &&
         request.type === BeaconMessageType.PermissionRequest &&
         (await this.getActiveAccount()) === undefined
       ) {
@@ -3345,7 +3360,9 @@ export class DAppClient extends Client {
           messageEvents[request.type].error,
           {
             errorResponse: beaconError,
-            walletInfo: await this.getWalletInfo(peer, activeAccount),
+            walletInfo: this.destroyed
+              ? { name: peer?.name ?? '' }
+              : await this.getWalletInfo(peer, activeAccount),
             errorMessages: this.errorMessages
           },
           buttons
@@ -3579,7 +3596,8 @@ export class DAppClient extends Client {
   private makeRequest<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
     requestInput: Optional<T, IgnoredRequestInputProperties>,
     skipResponse?: undefined | false,
-    otherTabMessageId?: string
+    otherTabMessageId?: string,
+    permissionOwner?: PermissionRequestOwner
   ): Promise<{
     message: U
     connectionInfo: ConnectionContext
@@ -3587,12 +3605,14 @@ export class DAppClient extends Client {
   private makeRequest<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
     requestInput: Optional<T, IgnoredRequestInputProperties>,
     skipResponse: true,
-    otherTabMessageId?: string
+    otherTabMessageId?: string,
+    permissionOwner?: PermissionRequestOwner
   ): Promise<undefined>
   private async makeRequest<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
     requestInput: Optional<T, IgnoredRequestInputProperties>,
     skipResponse?: boolean,
-    otherTabMessageId?: string
+    otherTabMessageId?: string,
+    permissionOwner?: PermissionRequestOwner
   ): Promise<{ message: U; connectionInfo: ConnectionContext } | undefined> {
     const delegated = otherTabMessageId ? this.getRequest(otherTabMessageId) : undefined
     if (otherTabMessageId && !delegated) {
@@ -3647,6 +3667,7 @@ export class DAppClient extends Client {
         throw this.createAbortedError(request.id)
       }
       if (owned) {
+        this.admitPermissionRequest(permissionOwner, owned.key)
         this.armRequestDeadline(owned.key)
       }
 
@@ -3752,7 +3773,8 @@ export class DAppClient extends Client {
     U extends BeaconMessageWrapper<BlockchainMessage>
   >(
     requestInput: T,
-    otherTabMessageId?: string
+    otherTabMessageId?: string,
+    permissionOwner?: PermissionRequestOwner
   ): Promise<{ message: U; connectionInfo: ConnectionContext }> {
     const delegated = otherTabMessageId ? this.getRequest(otherTabMessageId) : undefined
     if (otherTabMessageId && !delegated) {
@@ -3797,6 +3819,7 @@ export class DAppClient extends Client {
       if (!owned) {
         throw this.createAbortedError(request.id)
       }
+      this.admitPermissionRequest(permissionOwner, owned.key)
       this.armRequestDeadline(owned.key)
 
       const canDispatch = () =>
@@ -3889,7 +3912,8 @@ export class DAppClient extends Client {
   }
 
   private async makeRequestBC<T extends BeaconRequestInputMessage, U extends BeaconMessage>(
-    request: Optional<T, IgnoredRequestInputProperties>
+    request: Optional<T, IgnoredRequestInputProperties>,
+    permissionOwner?: PermissionRequestOwner
   ): Promise<{ message: U; connectionInfo: ConnectionContext } | undefined> {
     if (!this._transport.isResolved()) {
       return undefined
@@ -3909,6 +3933,7 @@ export class DAppClient extends Client {
     if (!owned) {
       throw this.createAbortedError(id)
     }
+    this.admitPermissionRequest(permissionOwner, owned.key)
     const canDispatch = () =>
       this.requestTracker.isCurrent(owned.key) &&
       this.requestTracker.get(owned.key.id)?.state !== 'ResponsePreparing'
@@ -4128,6 +4153,63 @@ export class DAppClient extends Client {
     return transport.connectionStatus !== TransportStatus.NOT_CONNECTED
   }
 
+  private async runPermissionRequest<T>(
+    request: PermissionRequestInput | PermissionRequestV3,
+    logId: string,
+    operation: (owner: PermissionRequestOwner) => Promise<T>
+  ): Promise<T> {
+    const owner = new PermissionRequestOwner((id) => this.createAbortedError(id))
+    this.permissionRequests.add(owner)
+    try {
+      try {
+        const result = await owner.run(() => operation(owner))
+        logger.time(false, logId)
+
+        return result
+      } finally {
+        this.permissionRequests.delete(owner)
+      }
+    } catch (error: unknown) {
+      // Local revocation leaves selection cleanup to the transition that replaced this owner.
+      await this.runRequestErrorSideEffects(request, error, logId, !owner.wasRevoked())
+      throw error
+    }
+  }
+
+  private admitPermissionRequest(owner: PermissionRequestOwner | undefined, key: RequestKey): void {
+    if (!owner) {
+      return
+    }
+    owner.admit(key.id, this.accountTransition.signal, () => {
+      this.requestTracker.abort(key, this.createAbortedError(key.id))
+    })
+    if (this.destroyed) {
+      owner.abort()
+    }
+    owner.assertCurrent()
+  }
+
+  private persistPermissionAccount(
+    account: AccountInfo,
+    owner: PermissionRequestOwner
+  ): Promise<void> {
+    return this.mutateAccounts(async () => {
+      owner.assertCurrent()
+      const previous = await this.accountManager.getAccount(account.accountIdentifier)
+      owner.assertCurrent()
+      await this.accountManager.addAccount(account)
+      if (!owner.isCurrent()) {
+        // Restore the prior value before a queued removal or replacement can run.
+        if (previous) {
+          await this.accountManager.addAccount(previous)
+        } else {
+          await this.accountManager.removeAccount(account.accountIdentifier)
+        }
+        owner.assertCurrent()
+      }
+    })
+  }
+
   private createRequest(id: string, route: RequestRoute = 'Direct'): RequestHandle | undefined {
     const key = this.requestTracker.admit(id, route, (result) => {
       try {
@@ -4180,7 +4262,14 @@ export class DAppClient extends Client {
     })
   }
 
+  private abortPermissionRequests(): void {
+    for (const owner of Array.from(this.permissionRequests)) {
+      owner.abort()
+    }
+  }
+
   private abortOpenRequests(): void {
+    this.abortPermissionRequests()
     this.requestTracker.abortAll((key) => this.createAbortedError(key.id))
   }
 
@@ -4251,9 +4340,12 @@ export class DAppClient extends Client {
   private async onNewAccount(
     message: PermissionResponse | ChangeAccountRequest,
     connectionInfo: ConnectionContext,
-    changeGeneration: number = ++this._accountChangeGeneration,
-    isCurrent: () => boolean = () => true
+    changeGeneration: number | undefined = undefined,
+    isCurrent: () => boolean = () => true,
+    owner?: PermissionRequestOwner
   ): Promise<AccountInfo> {
+    owner?.assertCurrent()
+    const generation = changeGeneration ?? ++this._accountChangeGeneration
     // TODO: Migration code. Remove sometime after 1.0.0 release.
     const tempPK: string | undefined =
       message.publicKey || (message as any).pubkey || (message as any).pubKey
@@ -4330,7 +4422,7 @@ export class DAppClient extends Client {
 
       return (
         isCurrent() &&
-        changeGeneration === this._accountChangeGeneration &&
+        generation === this._accountChangeGeneration &&
         !this._disconnectPromise &&
         !this.destroyed
       )
@@ -4355,9 +4447,17 @@ export class DAppClient extends Client {
       return true
     })
     if (!persisted || !(await isAuthorized())) {
+      owner?.abort()
+      owner?.assertCurrent()
+
       return accountInfo
     }
-    await this.setActiveAccount(accountInfo)
+    if (owner) {
+      owner.assertCurrent()
+      await this.selectActiveAccount(accountInfo, owner)
+    } else {
+      await this.setActiveAccount(accountInfo)
+    }
 
     return accountInfo
   }
