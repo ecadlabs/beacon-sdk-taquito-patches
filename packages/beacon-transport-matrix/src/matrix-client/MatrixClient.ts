@@ -35,6 +35,7 @@ export class MatrixClient {
   private isActive: boolean = true
   private session: number = 0
   private cancelStartup: (() => void) | undefined
+  private pollingRetry: { timer: ReturnType<typeof setTimeout>; complete: () => void } | undefined
   private _isReady: ExposedPromise<void> = new ExposedPromise()
   private txnIdLock: Promise<void> = Promise.resolve()
 
@@ -114,6 +115,7 @@ export class MatrixClient {
    */
   public start(user: MatrixLoginConfig): Promise<void> {
     this.cancelStartup?.()
+    this.clearPollingRetry()
     const session = ++this.session
     this.isActive = true
     if (this._isReady.isSettled()) {
@@ -212,6 +214,7 @@ export class MatrixClient {
     this.isActive = false
     this.cancelStartup?.()
     ++this.session
+    this.clearPollingRetry()
     this._isReady = new ExposedPromise()
 
     try {
@@ -359,6 +362,15 @@ export class MatrixClient {
     })
   }
 
+  private clearPollingRetry(): void {
+    const retry = this.pollingRetry
+    this.pollingRetry = undefined
+    if (retry) {
+      clearTimeout(retry.timer)
+      retry.complete()
+    }
+  }
+
   /**
    * Poll the server to get the latest data and get notified of changes
    *
@@ -420,12 +432,16 @@ export class MatrixClient {
         }
       } finally {
         if (this.isActive && session === this.session) {
-          setTimeout(
+          const timer = setTimeout(
             async () => {
+              if (this.pollingRetry?.timer === timer) {
+                this.pollingRetry = undefined
+              }
               await pollSync(resolve)
             },
             syncingRetries > IMMEDIATE_POLLING_RETRIES ? RETRY_INTERVAL + interval : interval
           )
+          this.pollingRetry = { timer, complete: resolve }
         } else {
           resolve()
         }

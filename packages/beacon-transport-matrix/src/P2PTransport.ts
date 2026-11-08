@@ -27,6 +27,7 @@ export class P2PTransport<
   public readonly type: TransportType = TransportType.P2P
 
   private connectionGeneration = Symbol('P2P connection')
+  private cancelConnection: (() => void) | undefined
 
   constructor(
     name: string,
@@ -68,6 +69,22 @@ export class P2PTransport<
     logger.log('connect')
     this._isConnected = TransportStatus.CONNECTING
 
+    let cancel = (): void => undefined
+    const cancelled = new Promise<void>((resolve) => {
+      cancel = resolve
+    })
+    this.cancelConnection = cancel
+    try {
+      // Stop settles the caller while late storage and registration results remain observed.
+      await Promise.race([this.connectSession(generation), cancelled])
+    } finally {
+      if (this.cancelConnection === cancel) {
+        this.cancelConnection = undefined
+      }
+    }
+  }
+
+  private async connectSession(generation: symbol): Promise<void> {
     try {
       await this.client.start()
       if (generation !== this.connectionGeneration) {
@@ -115,6 +132,8 @@ export class P2PTransport<
 
   public async disconnect(): Promise<void> {
     this.connectionGeneration = Symbol('P2P connection')
+    this.cancelConnection?.()
+    this.cancelConnection = undefined
     try {
       await this.client.stop()
     } finally {

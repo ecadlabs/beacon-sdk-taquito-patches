@@ -1,5 +1,6 @@
 import {
   ExposedPromise,
+  ExposedPromiseStatus,
   generateGUID,
   getHexHash,
   decryptCryptoboxPayload,
@@ -77,7 +78,8 @@ interface MatrixJoinSession extends MatrixSessionIdentity {
 
 type PeerRoomIds = StorageKeyReturnType[StorageKey.MATRIX_PEER_ROOM_IDS]
 
-const sleep = (time: number) => new Promise((resolve) => setTimeout(resolve, time))
+const isAbortError = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
 
 const isMatrixError = (error: unknown): error is { errcode: string } =>
   typeof error === 'object' &&
@@ -96,7 +98,20 @@ export class P2PCommunicationClient extends CommunicationClient {
   private startingClient: MatrixClient | undefined
   private startupGeneration = 0
 
-  private client: ExposedPromise<MatrixClient> = new ExposedPromise()
+  private client: ExposedPromise<MatrixClient> = this.createReadiness()
+  private startup: Promise<void> | undefined
+  private stopping: Promise<void> | undefined
+  private cancelStartup: (() => void) | undefined
+  private sessionActive = true
+  private readonly retryTimers = new Map<ReturnType<typeof setTimeout>, () => void>()
+  private relayAbort = new AbortController()
+  private readonly matrixStops = new Map<MatrixClient, Promise<void>>()
+  private readonly subscriptions = new Set<{
+    client: MatrixClient
+    event: MatrixClientEventType
+    listener: unknown
+    dispose: () => void
+  }>()
 
   private matrixClient: MatrixClient | undefined
 
@@ -126,8 +141,8 @@ export class P2PCommunicationClient extends CommunicationClient {
 
   private ignoredRooms: string[] = []
   private readonly knownRelayServers: Set<string> = new Set()
-  private readonly seenCiphertexts: Set<string> = new Set()
-  private readonly inFlightCiphertexts: Set<string> = new Set()
+  private seenCiphertexts: Set<string> = new Set()
+  private inFlightCiphertexts: Set<string> = new Set()
   private loginCounter: number = 0
 
   constructor(
@@ -202,8 +217,9 @@ export class P2PCommunicationClient extends CommunicationClient {
   public async findBestRegionAndGetServer(
     session = this.session
   ): Promise<{ server: string; timestamp: number } | undefined> {
-    if (this.selectedRegion) {
-      return this.relayServer?.promiseResult
+    this.assertRelaySession(session)
+    if (this.selectedRegion && this.relayServer?.promiseResult) {
+      return this.relayServer.promiseResult
     }
 
     // 1) Flatten out [region, server] pairs and shuffle for randomness
@@ -231,6 +247,7 @@ export class P2PCommunicationClient extends CommunicationClient {
         const start = Date.now()
         try {
           const info = await this.getBeaconInfo(server)
+          this.assertRelaySession(session)
           results.push({
             server,
             region,
@@ -247,7 +264,24 @@ export class P2PCommunicationClient extends CommunicationClient {
     // 3) Wait until either:
     //    • all probes settle (fast regions), or
     //    • we hit our global timeout
-    await Promise.race([Promise.all(probePromises), sleep(RESPONSE_WAIT_TIME_MS)])
+    const signal = this.relayAbort.signal
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let cancel = (): void => undefined
+    const deadline = new Promise<void>((resolve, reject) => {
+      timer = setTimeout(resolve, RESPONSE_WAIT_TIME_MS)
+      cancel = () => reject(new DOMException('Matrix discovery cancelled', 'AbortError'))
+      signal.addEventListener('abort', cancel, { once: true })
+      if (signal.aborted) {
+        cancel()
+      }
+    })
+    try {
+      await Promise.race([Promise.all(probePromises), deadline])
+      this.assertRelaySession(session)
+    } finally {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', cancel)
+    }
 
     // 4) If nobody replied, bail out
     if (results.length === 0) {
@@ -265,139 +299,158 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async getRelayServer(): Promise<{ server: string; timestamp: number }> {
-    const session = this.session
-    // Fast path: in-memory cached relay server that's still fresh
+    const owner = this.captureSession()
+    const session = owner.id
+    this.assertRelaySession(session)
     if (this.relayServer) {
       const currentPromise = this.relayServer
-      const relayServer = await this.relayServer.promise
-
+      const relayServer = await currentPromise.promise
+      this.assertRelaySession(session)
       if (Date.now() - relayServer.localTimestamp < 60 * 1000) {
         return { server: relayServer.server, timestamp: relayServer.timestamp }
       }
-
       try {
         const info = await this.getBeaconInfo(relayServer.server)
-        const refreshedPromise = ExposedPromise.resolve({
-          server: relayServer.server,
-          timestamp: info.timestamp,
-          localTimestamp: new Date().getTime()
-        })
-
+        this.assertRelaySession(session)
         if (this.relayServer === currentPromise) {
-          this.relayServer = refreshedPromise
+          this.relayServer = ExposedPromise.resolve({
+            server: relayServer.server,
+            timestamp: info.timestamp,
+            localTimestamp: Date.now()
+          })
         }
-
         return { server: relayServer.server, timestamp: info.timestamp }
       } catch (error) {
-        logger.log(
-          'getRelayServer',
-          `cached server ${relayServer.server} is unreachable, resetting`
-        )
-        if (session === this.session) {
-          await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
+        this.assertRelaySession(session)
+        const replacement = this.relayServer
+        if (replacement && replacement !== currentPromise) {
+          const latest = await replacement.promise
+          this.assertRelaySession(session)
+
+          return { server: latest.server, timestamp: latest.timestamp }
         }
-        const replacementRelayPromise = this.relayServer
-        if (session === this.session && replacementRelayPromise === currentPromise) {
+        logger.log('getRelayServer', `cached server ${relayServer.server} is unreachable`, error)
+        await this.writeSessionState(owner, () =>
+          this.storage
+            .delete(StorageKey.MATRIX_SELECTED_NODE)
+            .catch((failure) => logger.log(failure))
+        )
+        this.assertRelaySession(session)
+        if (this.relayServer === currentPromise) {
           this.relayServer = undefined
           this.selectedRegion = undefined
-        } else if (replacementRelayPromise) {
-          const latestRelayServer = await replacementRelayPromise.promise
-
-          return { server: latestRelayServer.server, timestamp: latestRelayServer.timestamp }
         }
-        // Fall through to discovery below
       }
     }
 
     if (this.relayServer) {
       const relayServer = await this.relayServer.promise
-
+      this.assertRelaySession(session)
       return { server: relayServer.server, timestamp: relayServer.timestamp }
     }
 
-    // First caller creates the promise; concurrent callers will await it at line above
-    const discoveryPromise = new ExposedPromise<{
+    const discovery = new ExposedPromise<{
       server: string
       timestamp: number
       localTimestamp: number
     }>()
-    if (session === this.session) {
-      this.relayServer = discoveryPromise
-    }
-
+    // The initiating caller observes its own rejection; there may be no other waiters.
+    discovery.promise.catch(() => undefined)
+    this.relayServer = discovery
     try {
-      // Try the localStorage-cached node first
       const node = await this.storage.get(StorageKey.MATRIX_SELECTED_NODE)
+      this.assertRelaySession(session)
       if (node && node.length > 0) {
         try {
           const info = await this.getBeaconInfo(node)
-          discoveryPromise.resolve({
-            server: node,
-            timestamp: info.timestamp,
-            localTimestamp: new Date().getTime()
-          })
-
+          this.assertRelaySession(session)
+          discovery.resolve({ server: node, timestamp: info.timestamp, localTimestamp: Date.now() })
           return { server: node, timestamp: info.timestamp }
         } catch (error) {
-          logger.log(
-            'getRelayServer',
-            `stored node ${node} is unreachable, falling through to discovery`
+          this.assertRelaySession(session)
+          logger.log('getRelayServer', `stored node ${node} is unreachable`, error)
+          await this.writeSessionState(owner, () =>
+            this.storage
+              .delete(StorageKey.MATRIX_SELECTED_NODE)
+              .catch((failure) => logger.log(failure))
           )
-          if (session === this.session) {
-            await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((e) => logger.log(e))
-          }
+          this.assertRelaySession(session)
         }
       }
-
-      // Full discovery: probe all servers, pick the fastest
       const server = await this.findBestRegionAndGetServer(session)
-
+      this.assertRelaySession(session)
       if (!server) {
         throw new Error('No servers found')
       }
-
-      if (session === this.session && this.relayServer === discoveryPromise) {
-        this.storage
-          .set(StorageKey.MATRIX_SELECTED_NODE, server.server)
-          .catch((error) => logger.log(error))
+      if (this.relayServer === discovery) {
+        await this.writeSessionState(owner, () =>
+          this.storage
+            .set(StorageKey.MATRIX_SELECTED_NODE, server.server)
+            .catch((error) => logger.log(error))
+        )
+        this.assertRelaySession(session)
       }
+      discovery.resolve({ ...server, localTimestamp: Date.now() })
 
-      discoveryPromise.resolve({
-        server: server.server,
-        timestamp: server.timestamp,
-        localTimestamp: new Date().getTime()
-      })
-
-      return { server: server.server, timestamp: server.timestamp }
+      return server
     } catch (error) {
-      // Always settle the ExposedPromise so concurrent callers don't hang forever
-      discoveryPromise.reject(error)
-      if (session === this.session && this.relayServer === discoveryPromise) {
+      discovery.reject(error)
+      if (session === this.session && this.relayServer === discovery) {
         this.relayServer = undefined
       }
       throw error
     }
   }
 
-  public async getBeaconInfo(server: string): Promise<BeaconInfoResponse> {
-    const response = await fetch(`https://${server}/_synapse/client/beacon/info`, {
-      signal: AbortSignal.timeout(10_000)
-    })
-    if (!response.ok) {
-      throw new Error(`getBeaconInfo ${server} failed: ${response.status} ${response.statusText}`)
+  private assertRelaySession(session: symbol): void {
+    if (session !== this.session || this.relayAbort.signal.aborted) {
+      throw new DOMException('Matrix discovery cancelled', 'AbortError')
     }
-    const data = (await response.json()) as BeaconInfoResponse
-    this.knownRelayServers.add(server)
-    for (const knownServer of data.known_servers ?? []) {
-      if (typeof knownServer === 'string' && knownServer.length > 0) {
-        this.knownRelayServers.add(knownServer)
-      }
-    }
+  }
 
-    return {
-      region: data.region,
-      known_servers: data.known_servers,
-      timestamp: Math.floor(data.timestamp)
+  public async getBeaconInfo(server: string): Promise<BeaconInfoResponse> {
+    const session = this.session
+    this.assertRelaySession(session)
+    const sessionSignal = this.relayAbort.signal
+    const request = new AbortController()
+    let cancel = (): void => undefined
+    const timer = setTimeout(() => {
+      request.abort(new DOMException('Relay request timed out', 'TimeoutError'))
+      sessionSignal.removeEventListener('abort', cancel)
+    }, 10_000)
+    const dispose = (): void => {
+      clearTimeout(timer)
+      sessionSignal.removeEventListener('abort', cancel)
+    }
+    cancel = (): void => {
+      request.abort(new DOMException('Matrix discovery cancelled', 'AbortError'))
+      dispose()
+    }
+    sessionSignal.addEventListener('abort', cancel, { once: true })
+    try {
+      const response = await fetch(`https://${server}/_synapse/client/beacon/info`, {
+        signal: request.signal
+      })
+      this.assertRelaySession(session)
+      if (!response.ok) {
+        throw new Error(`getBeaconInfo ${server} failed: ${response.status} ${response.statusText}`)
+      }
+      const data = (await response.json()) as BeaconInfoResponse
+      this.assertRelaySession(session)
+      this.knownRelayServers.add(server)
+      for (const knownServer of data.known_servers ?? []) {
+        if (typeof knownServer === 'string' && knownServer.length > 0) {
+          this.knownRelayServers.add(knownServer)
+        }
+      }
+
+      return {
+        region: data.region,
+        known_servers: data.known_servers,
+        timestamp: Math.floor(data.timestamp)
+      }
+    } finally {
+      dispose()
     }
   }
 
@@ -438,6 +491,104 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
 
     return false
+  }
+
+  private subscribe<T extends MatrixClientEventType>(
+    client: MatrixClient,
+    event: T,
+    listener: (event: MatrixClientEvent<T>) => void
+  ): void {
+    const subscription = {
+      client,
+      event,
+      listener,
+      dispose: (): void => {
+        this.subscriptions.delete(subscription)
+        client.unsubscribe(event, listener)
+      }
+    }
+    this.subscriptions.add(subscription)
+    client.subscribe(event, listener)
+  }
+
+  private unsubscribe<T extends MatrixClientEventType>(
+    client: MatrixClient,
+    event: T,
+    listener: (event: MatrixClientEvent<T>) => void
+  ): void {
+    const subscription = [...this.subscriptions].find(
+      (entry) => entry.client === client && entry.event === event && entry.listener === listener
+    )
+    if (subscription) {
+      subscription.dispose()
+    } else {
+      client.unsubscribe(event, listener)
+    }
+  }
+
+  private disposeSubscriptions(client?: MatrixClient): void {
+    for (const subscription of this.subscriptions) {
+      if (!client || subscription.client === client) {
+        try {
+          subscription.dispose()
+        } catch (error) {
+          logger.error('disposeSubscriptions', error)
+        }
+      }
+    }
+  }
+
+  private stopMatrixClient(client: MatrixClient): Promise<void> {
+    const pending = this.matrixStops.get(client)
+    if (pending) {
+      return pending
+    }
+    const stopping = client.stop()
+    this.matrixStops.set(client, stopping)
+    const finished = (): void => {
+      if (this.matrixStops.get(client) === stopping) {
+        this.matrixStops.delete(client)
+      }
+    }
+    stopping.then(finished, finished)
+
+    return stopping
+  }
+
+  private createReadiness(): ExposedPromise<MatrixClient> {
+    const ready = new ExposedPromise<MatrixClient>()
+    // A session can be stopped before anyone starts waiting for readiness.
+    ready.promise.catch(() => undefined)
+
+    return ready
+  }
+
+  private assertSession(session: MatrixSessionIdentity): void {
+    if (!this.sessionActive || !this.isCurrentSession(session)) {
+      throw new DOMException('Matrix session stopped', 'AbortError')
+    }
+  }
+
+  private async getSessionClient(session: MatrixSessionIdentity): Promise<MatrixClient> {
+    this.assertSession(session)
+    const client = await session.ready.promise
+    this.assertSession(session)
+
+    return client
+  }
+
+  private waitForRetry(session: MatrixSessionIdentity, delay: number): Promise<void> {
+    this.assertSession(session)
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.retryTimers.delete(timer)
+        resolve()
+      }, delay)
+      this.retryTimers.set(timer, () =>
+        reject(new DOMException('Matrix session stopped', 'AbortError'))
+      )
+    })
   }
 
   private captureSession(): MatrixSessionIdentity {
@@ -509,18 +660,70 @@ export class P2PCommunicationClient extends CommunicationClient {
       if (retry <= 10 && isMatrixError(error) && error.errcode === 'M_FORBIDDEN') {
         // Federated nodes can briefly reject a join immediately after an invite.
         logger.log('Retrying to join...', error)
-        setTimeout(() => {
-          this.joinRoomsForSession(roomId, retry + 1, session, isAuthorized).catch((retryError) => {
-            logger.error('tryJoinRooms', retryError)
+        this.waitForRetry(session, 200)
+          .then(() => this.joinRoomsForSession(roomId, retry + 1, session, isAuthorized))
+          .catch((retryError) => {
+            if (this.isCurrentSession(session)) {
+              logger.error('tryJoinRooms', retryError)
+            }
           })
-        }, 200)
       } else {
         logger.log(`Failed to join after ${retry} tries.`, error)
       }
     }
   }
 
-  public async start(): Promise<void> {
+  public start(): Promise<void> {
+    if (this.stopping) {
+      return this.stopping.then(
+        () => this.start(),
+        () => this.start()
+      )
+    }
+    if (this.startup) {
+      return this.startup
+    }
+    if (this.matrixClient && this.client.isResolved()) {
+      return Promise.resolve()
+    }
+
+    if (this.client.status === ExposedPromiseStatus.REJECTED) {
+      this.client = this.createReadiness()
+      this.session = Symbol('Matrix session')
+    }
+    if (this.relayAbort.signal.aborted) {
+      this.relayAbort = new AbortController()
+    }
+    this.sessionActive = true
+    const completion = new ExposedPromise<void>()
+    const pending = completion.promise
+    this.startup = pending
+    this.cancelStartup = () =>
+      completion.reject(new DOMException('Matrix startup cancelled', 'AbortError'))
+    this.startClient().then(
+      () => {
+        if (this.startup === pending) {
+          this.startup = undefined
+          this.cancelStartup = undefined
+        }
+        completion.resolve()
+      },
+      (error: unknown) => {
+        if (this.startup === pending) {
+          this.startup = undefined
+          this.cancelStartup = undefined
+          this.sessionActive = false
+          this.relayAbort.abort()
+          this.client.reject(error)
+        }
+        completion.reject(error)
+      }
+    )
+
+    return pending
+  }
+
+  private async startClient(): Promise<void> {
     const generation = ++this.startupGeneration
     const owner = this.captureSession()
     const session = owner.id
@@ -544,7 +747,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     this.initialListener = async (
       event: MatrixClientEvent<MatrixClientEventType.MESSAGE>
     ): Promise<void> => {
-      if (replay !== this.initialReplay) {
+      if (replay !== this.initialReplay || !this.isCurrentSession(owner)) {
         return
       }
       replay.buffered.add(event)
@@ -556,7 +759,7 @@ export class P2PCommunicationClient extends CommunicationClient {
         this.initialEvent = event
       }
     }
-    client.subscribe(MatrixClientEventType.MESSAGE, this.initialListener)
+    this.subscribe(client, MatrixClientEventType.MESSAGE, this.initialListener)
 
     const handleInvite = async (
       event: MatrixClientEvent<MatrixClientEventType.INVITE>
@@ -604,7 +807,7 @@ export class P2PCommunicationClient extends CommunicationClient {
         await this.tryJoinRooms(event.content.roomId, 1, isAuthorized)
       }
     }
-    client.subscribe(MatrixClientEventType.INVITE, handleInvite)
+    this.subscribe(client, MatrixClientEventType.INVITE, handleInvite)
 
     const keyPair = this.keyPair
     if (!keyPair) {
@@ -643,53 +846,7 @@ export class P2PCommunicationClient extends CommunicationClient {
         deviceId: toHex(keyPair.publicKey)
       })
     } catch (error: unknown) {
-      if (this.startingClient === client) {
-        this.startingClient = undefined
-      }
-      if (this.matrixClient === client) {
-        this.matrixClient = undefined
-      }
-      if (
-        (error instanceof Error && error.name === 'AbortError') ||
-        generation !== this.startupGeneration ||
-        session !== this.session
-      ) {
-        throw new DOMException('Matrix startup cancelled', 'AbortError')
-      }
-      await client.stop().catch((stopError) => logger.error(stopError))
-      logger.error('start', 'Could not log in, retrying', error)
-
-      if (isMatrixError(error) && error.errcode === 'M_USER_DEACTIVATED') {
-        await this.generateNewKeyPair(session)
-        if (generation !== this.startupGeneration || session !== this.session) {
-          throw new DOMException('Matrix startup cancelled', 'AbortError')
-        }
-        await this.resetSession(session)
-        if (generation !== this.startupGeneration || session !== this.session) {
-          throw new DOMException('Matrix startup cancelled', 'AbortError')
-        }
-        throw new Error('The account is deactivated.')
-      }
-
-      await this.resetSession(session)
-      if (generation !== this.startupGeneration || session !== this.session) {
-        throw new DOMException('Matrix startup cancelled', 'AbortError')
-      }
-      if (!this.selectedRegion) {
-        throw new Error('No region selected.')
-      }
-      if (this.loginCounter <= (this.ENABLED_RELAY_SERVERS[this.selectedRegion] ?? []).length) {
-        this.loginCounter++
-
-        return this.start()
-      } else {
-        logger.error(
-          'start',
-          'Tried to log in to every known beacon node, but no login was successful.'
-        )
-
-        throw new Error('Could not connect to any beacon nodes. Try again later.')
-      }
+      return this.handleStartupFailure(client, owner, generation, error)
     }
 
     if (this.startingClient === client) {
@@ -699,7 +856,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       if (this.matrixClient === client) {
         this.matrixClient = undefined
       }
-      await client.stop()
+      await this.stopMatrixClient(client)
       throw new DOMException('Matrix startup cancelled', 'AbortError')
     }
 
@@ -707,30 +864,130 @@ export class P2PCommunicationClient extends CommunicationClient {
     this.client.resolve(client)
   }
 
-  public async stop(): Promise<void> {
+  private async handleStartupFailure(
+    client: MatrixClient,
+    owner: MatrixSessionIdentity,
+    generation: number,
+    error: unknown
+  ): Promise<void> {
+    const session = owner.id
+    this.disposeSubscriptions(client)
+    if (generation !== this.startupGeneration || session !== this.session) {
+      throw new DOMException('Matrix startup cancelled', 'AbortError')
+    }
+    // Retain the resource until cleanup completes so stop joins this same disposal.
+    await this.stopMatrixClient(client).catch((stopError) => logger.error(stopError))
+    if (this.startingClient === client) {
+      this.startingClient = undefined
+    }
+    if (this.matrixClient === client) {
+      this.matrixClient = undefined
+    }
+    if (generation !== this.startupGeneration || session !== this.session) {
+      throw new DOMException('Matrix startup cancelled', 'AbortError')
+    }
+    if (isAbortError(error)) {
+      await this.resetSession(session)
+      throw new DOMException('Matrix startup cancelled', 'AbortError')
+    }
+    logger.error('start', 'Could not log in, retrying', error)
+
+    if (isMatrixError(error) && error.errcode === 'M_USER_DEACTIVATED') {
+      await this.generateNewKeyPair(session)
+      if (generation !== this.startupGeneration || session !== this.session) {
+        throw new DOMException('Matrix startup cancelled', 'AbortError')
+      }
+      await this.resetSession(session)
+      if (generation !== this.startupGeneration || session !== this.session) {
+        throw new DOMException('Matrix startup cancelled', 'AbortError')
+      }
+      throw new Error('The account is deactivated.')
+    }
+
+    await this.resetSession(session)
+    if (generation !== this.startupGeneration || session !== this.session) {
+      throw new DOMException('Matrix startup cancelled', 'AbortError')
+    }
+    if (!this.selectedRegion) {
+      throw new Error('No region selected.')
+    }
+    if (this.loginCounter <= (this.ENABLED_RELAY_SERVERS[this.selectedRegion] ?? []).length) {
+      this.loginCounter++
+
+      return this.startClient()
+    } else {
+      logger.error(
+        'start',
+        'Tried to log in to every known beacon node, but no login was successful.'
+      )
+
+      throw new Error('Could not connect to any beacon nodes. Try again later.')
+    }
+  }
+
+  public stop(): Promise<void> {
+    if (this.stopping) {
+      return this.stopping
+    }
     logger.log('stop', 'stopping client')
     ++this.startupGeneration
+    this.sessionActive = false
+    this.cancelStartup?.()
+    this.cancelStartup = undefined
+    this.startup = undefined
+    const ready = this.client
+    ready.reject(new DOMException('Matrix session stopped', 'AbortError'))
     const session = Symbol('Matrix session')
     this.session = session
+    this.relayAbort.abort()
+    this.relayServer?.reject(new DOMException('Matrix discovery cancelled', 'AbortError'))
+    this.disposeSubscriptions()
+    this.selectedRegion = undefined
+    this.loginCounter = 0
     const starting = this.startingClient
+    const active = this.matrixClient
     this.startingClient = undefined
-    const activeMatrixClient = this.matrixClient
     this.matrixClient = undefined
+    for (const [timer, cancel] of this.retryTimers) {
+      clearTimeout(timer)
+      cancel()
+    }
+    this.retryTimers.clear()
+
+    const stopping = this.stopClient(session, starting, active, ready)
+    this.stopping = stopping
+    const finished = (): void => {
+      if (this.stopping === stopping) {
+        this.stopping = undefined
+      }
+    }
+    stopping.then(finished, finished)
+
+    return stopping
+  }
+
+  private async stopClient(
+    session: symbol,
+    starting: MatrixClient | undefined,
+    active: MatrixClient | undefined,
+    ready: ExposedPromise<MatrixClient>
+  ): Promise<void> {
     try {
       await this.cancelPairingRequests()
     } finally {
       try {
-        await starting?.stop()
-      } finally {
-        const client =
-          activeMatrixClient !== starting
-            ? (activeMatrixClient ??
-              (this.client.isResolved() ? await this.client.promise : undefined))
-            : (this.client.isResolved() ? await this.client.promise : undefined)
-        if (client && client !== starting) {
-          await client.stop().catch((error) => logger.error(error))
+        if (starting) {
+          await this.stopMatrixClient(starting)
         }
-        await this.resetSession(session)
+      } finally {
+        try {
+          const client = active ?? (ready.isResolved() ? await ready.promise : undefined)
+          if (client && client !== starting) {
+            await this.stopMatrixClient(client).catch((error) => logger.error(error))
+          }
+        } finally {
+          await this.resetSession(session)
+        }
       }
     }
   }
@@ -763,15 +1020,16 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
     this.matrixClient = undefined
 
-    // Instead of resetting everything, maybe we should make sure a new instance is created?
     this.relayServer = undefined
-    this.client = new ExposedPromise()
+    this.client.reject(new DOMException('Matrix session stopped', 'AbortError'))
+    this.client = this.createReadiness()
     this.activeListeners.clear()
     this.ignoredRooms = []
     this.initialReplay = { pending: 0, buffered: new WeakSet(), claimed: new WeakSet() }
     this.initialEvent = undefined
     this.initialListener = undefined
-    this.seenCiphertexts.clear()
+    this.seenCiphertexts = new Set()
+    this.inFlightCiphertexts = new Set()
   }
 
   public async listenForEncryptedMessage(
@@ -786,6 +1044,8 @@ export class P2PCommunicationClient extends CommunicationClient {
       `start listening for encrypted messages from publicKey ${senderPublicKey}`
     )
     const replay = this.initialReplay
+    const seenCiphertexts = this.seenCiphertexts
+    const inFlightCiphertexts = this.inFlightCiphertexts
     const session = this.captureSession()
     replay.pending++
     let matrixClient: MatrixClient | undefined
@@ -865,10 +1125,10 @@ export class P2PCommunicationClient extends CommunicationClient {
             if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
               return
             }
-            if (this.seenCiphertexts.has(ciphertext) || this.inFlightCiphertexts.has(ciphertext)) {
+            if (seenCiphertexts.has(ciphertext) || inFlightCiphertexts.has(ciphertext)) {
               return
             }
-            this.inFlightCiphertexts.add(ciphertext)
+            inFlightCiphertexts.add(ciphertext)
             try {
               await this.updateRelayServer(event.content.message.sender)
               if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
@@ -887,13 +1147,13 @@ export class P2PCommunicationClient extends CommunicationClient {
                   this.initialEvent = undefined
                 }
               }
-              if (this.seenCiphertexts.size >= 1000) {
-                const oldest = this.seenCiphertexts.values().next().value
+              if (seenCiphertexts.size >= 1000) {
+                const oldest = seenCiphertexts.values().next().value
                 if (oldest !== undefined) {
-                  this.seenCiphertexts.delete(oldest)
+                  seenCiphertexts.delete(oldest)
                 }
               }
-              this.seenCiphertexts.add(ciphertext)
+              seenCiphertexts.add(ciphertext)
               logger.log(
                 'listenForEncryptedMessage',
                 `received a message from ${senderPublicKey}`,
@@ -903,13 +1163,13 @@ export class P2PCommunicationClient extends CommunicationClient {
                 await messageCallback(decryptedMessage)
               }
             } finally {
-              this.inFlightCiphertexts.delete(ciphertext)
+              inFlightCiphertexts.delete(ciphertext)
             }
           }
         }
       }
       this.activeListeners.set(senderPublicKey, callbackFunction)
-      matrixClient.subscribe(MatrixClientEventType.MESSAGE, callbackFunction)
+      this.subscribe(matrixClient, MatrixClientEventType.MESSAGE, callbackFunction)
 
       const lastEvent = this.initialEvent
       if (lastEvent && lastEvent.timestamp && Date.now() - lastEvent.timestamp < 5 * 60 * 1000) {
@@ -923,7 +1183,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       replay.pending--
       if (matrixClient && replay === this.initialReplay && replay.pending === 0) {
         if (this.initialListener) {
-          matrixClient.unsubscribe(MatrixClientEventType.MESSAGE, this.initialListener)
+          this.unsubscribe(matrixClient, MatrixClientEventType.MESSAGE, this.initialListener)
         }
         this.initialListener = undefined
         this.initialEvent = undefined
@@ -936,15 +1196,28 @@ export class P2PCommunicationClient extends CommunicationClient {
     if (!listener) {
       return
     }
-
-    ;(await this.client.promise).unsubscribe(MatrixClientEventType.MESSAGE, listener)
-
-    this.activeListeners.delete(senderPublicKey)
+    const session = this.captureSession()
+    const client = await session.ready.promise
+    if (!this.isCurrentSession(session)) {
+      return
+    }
+    this.unsubscribe(client, MatrixClientEventType.MESSAGE, listener)
+    if (this.activeListeners.get(senderPublicKey) === listener) {
+      this.activeListeners.delete(senderPublicKey)
+    }
   }
 
   public async unsubscribeFromEncryptedMessages(): Promise<void> {
-    ;(await this.client.promise).unsubscribeAll(MatrixClientEventType.MESSAGE)
-
+    const session = this.captureSession()
+    const client = await session.ready.promise
+    if (!this.isCurrentSession(session)) {
+      return
+    }
+    for (const subscription of this.subscriptions) {
+      if (subscription.client === client && subscription.event === MatrixClientEventType.MESSAGE) {
+        subscription.dispose()
+      }
+    }
     this.activeListeners.clear()
   }
 
@@ -952,37 +1225,31 @@ export class P2PCommunicationClient extends CommunicationClient {
     message: string,
     peer: P2PPairingRequest | ExtendedP2PPairingResponse
   ): Promise<void> {
+    const session = this.captureSession()
+    this.assertSession(session)
     const sharedKey = await this.createCryptoBoxClient(peer.publicKey, this.keyPair!)
-
-    const recipientHash: string = await getHexHash(Buffer.from(peer.publicKey, 'hex'))
+    this.assertSession(session)
+    const recipientHash = await getHexHash(Buffer.from(peer.publicKey, 'hex'))
+    this.assertSession(session)
     const recipient = recipientString(recipientHash, peer.relayServer)
-
-    const roomId = await this.getRelevantRoom(recipient)
-
-    // Before we send the message, we have to wait for the join to be accepted.
-    // await this.waitForJoin(roomId) // TODO: This can probably be removed because we are now waiting inside the get room method
-
+    const roomId = await this.getRelevantRoom(recipient, session)
+    this.assertSession(session)
     const encryptedMessage = await encryptCryptoboxPayload(message, sharedKey.send)
+    const client = await this.getSessionClient(session)
+    this.assertSession(session)
 
     logger.log('sendMessage', 'sending encrypted message', peer.publicKey, roomId, message)
     try {
-      await (await this.client.promise).sendTextMessage(roomId, encryptedMessage)
+      await client.sendTextMessage(roomId, encryptedMessage)
     } catch (error) {
-      const errcode = isMatrixError(error) ? error.errcode : undefined
-      if (errcode === 'M_FORBIDDEN') {
-        // Room doesn't exist
-        logger.log(`sendMessage`, `M_FORBIDDEN`, roomId, error)
+      this.assertSession(session)
+      if (isMatrixError(error) && error.errcode === 'M_FORBIDDEN') {
         await this.deleteRoomIdFromRooms(roomId)
-        const newRoomId = await this.getRelevantRoom(recipient)
-        logger.log(`sendMessage`, `Old room deleted, new room created`, newRoomId)
-        try {
-          await (await this.client.promise).sendTextMessage(newRoomId, encryptedMessage)
-        } catch (error2) {
-          logger.log(`sendMessage`, `inner error`, newRoomId, error2)
-          throw error2
-        }
+        this.assertSession(session)
+        const newRoomId = await this.getRelevantRoom(recipient, session)
+        this.assertSession(session)
+        await client.sendTextMessage(newRoomId, encryptedMessage)
       } else {
-        logger.log(`sendMessage`, `unexpected error`, error)
         throw error
       }
     }
@@ -1052,7 +1319,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     if (!this.isCurrentSession(session)) {
       return
     }
-    client.subscribe(MatrixClientEventType.MESSAGE, async (event) => {
+    this.subscribe(client, MatrixClientEventType.MESSAGE, async (event) => {
       if (!this.isCurrentSession(session) || !this.isTextMessage(event.content)) {
         return
       }
@@ -1124,73 +1391,65 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async waitForJoin(roomId: string, retry: number = 0): Promise<void> {
-    // Rooms are updated as new events come in. `client.getRoomById` only accesses memory, it does not do any network requests.
-    // TODO: Improve to listen to "JOIN" event
-    const room = await (await this.client.promise).getRoomById(roomId)
-    logger.log(`waitForJoin`, `Currently ${room.members.length} members, we need at least 2`)
+    const session = this.captureSession()
+    const client = await this.getSessionClient(session)
+    await this.waitForSessionJoin(roomId, retry, session, client)
+  }
+
+  private async waitForSessionJoin(
+    roomId: string,
+    retry: number,
+    session: MatrixSessionIdentity,
+    client: MatrixClient
+  ): Promise<void> {
+    this.assertSession(session)
+    const room = await client.getRoomById(roomId)
+    this.assertSession(session)
     if (room.members.length >= 2) {
       return
-    } else {
-      if (retry <= 200) {
-        // On mobile, due to app switching, we potentially have to wait for a long time
-        logger.log(`Waiting for join... Try: ${retry}`)
-
-        return new Promise((resolve) => {
-          setTimeout(
-            () => {
-              resolve(this.waitForJoin(roomId, retry + 1))
-            },
-            100 * (retry > 50 ? 10 : 1)
-          ) // After the initial 5 seconds, retry only once per second
-        })
-      } else {
-        throw new Error(`No one joined after ${retry} tries.`)
-      }
     }
+    if (retry > 200) {
+      throw new Error(`No one joined after ${retry} tries.`)
+    }
+    await this.waitForRetry(session, 100 * (retry > 50 ? 10 : 1))
+    await this.waitForSessionJoin(roomId, retry + 1, session, client)
   }
 
   public async sendPairingResponse(pairingRequest: P2PPairingRequest): Promise<void> {
-    logger.log(`sendPairingResponse`)
+    const session = this.captureSession()
+    this.assertSession(session)
     const recipientHash = await getHexHash(Buffer.from(pairingRequest.publicKey, 'hex'))
+    this.assertSession(session)
     const recipient = recipientString(recipientHash, pairingRequest.relayServer)
-
-    // We force room creation here because if we "re-pair", we need to make sure that we don't send it to an old room.
-    const roomId = await (await this.client.promise).createTrustedPrivateRoom(recipient)
-    logger.debug(`sendPairingResponse`, `Connecting to room "${roomId}"`)
-
+    const client = await this.getSessionClient(session)
+    this.assertSession(session)
+    const roomId = await client.createTrustedPrivateRoom(recipient)
+    this.assertSession(session)
     await this.updatePeerRoom(recipient, roomId)
+    this.assertSession(session)
+    await this.waitForJoin(roomId)
+    this.assertSession(session)
 
-    // Before we send the message, we have to wait for the join to be accepted.
-    await this.waitForJoin(roomId) // TODO: This can probably be removed because we are now waiting inside the get room method
-
-    logger.debug(`sendPairingResponse`, `Successfully joined room.`)
-
-    // TODO: remove v1 backwards-compatibility
-    const message: string =
+    const message =
       typeof pairingRequest.version === 'undefined'
-        ? await this.getPublicKey() // v1
-        : JSON.stringify(await this.getPairingResponseInfo(pairingRequest)) // v2
-
-    logger.debug(`sendPairingResponse`, `Sending pairing response`, message)
-
-    const encryptedMessage: string = await this.encryptMessageAsymmetric(
-      pairingRequest.publicKey,
-      message
-    )
-
+        ? await this.getPublicKey()
+        : JSON.stringify(await this.getPairingResponseInfo(pairingRequest))
+    this.assertSession(session)
+    const encryptedMessage = await this.encryptMessageAsymmetric(pairingRequest.publicKey, message)
+    this.assertSession(session)
     const msg = ['@channel-open', recipient, encryptedMessage].join(':')
-    await (await this.client.promise).sendTextMessage(roomId, msg).catch(async (error) => {
-      if (error.errcode === 'M_FORBIDDEN') {
-        // Room doesn't exist
-        logger.log(`sendPairingResponse`, `M_FORBIDDEN`, roomId, error)
+    await client.sendTextMessage(roomId, msg).catch(async (error: unknown) => {
+      this.assertSession(session)
+      if (isMatrixError(error) && error.errcode === 'M_FORBIDDEN') {
         await this.deleteRoomIdFromRooms(roomId)
-        const newRoomId = await this.getRelevantRoom(recipient)
-        logger.log(`sendPairingResponse`, `Old room deleted, new room created`, newRoomId)
-        await (await this.client.promise).sendTextMessage(newRoomId, msg).catch(async (error2) => {
-          logger.log(`sendPairingResponse`, `inner error`, newRoomId, error2)
+        this.assertSession(session)
+        const newRoomId = await this.getRelevantRoom(recipient, session)
+        this.assertSession(session)
+        await client.sendTextMessage(newRoomId, msg).catch((retryError: unknown) => {
+          logger.log('sendPairingResponse', 'inner error', newRoomId, retryError)
         })
       } else {
-        logger.log(`sendPairingResponse`, `unexpected error`, error)
+        logger.log('sendPairingResponse', 'unexpected error', error)
       }
     })
   }
@@ -1285,48 +1544,48 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
   }
 
-  private async getRelevantRoom(recipient: string): Promise<string> {
-    const session = this.captureSession()
+  private async getRelevantRoom(
+    recipient: string,
+    session = this.captureSession()
+  ): Promise<string> {
+    this.assertSession(session)
     const roomIds = await this.storage.get(StorageKey.MATRIX_PEER_ROOM_IDS)
+    this.assertSession(session)
     let roomId = roomIds[recipient]
-
     if (!roomId) {
-      logger.log(`getRelevantRoom`, `No room found for peer ${recipient}, checking joined ones.`)
-      const room = await this.getRelevantJoinedRoom(recipient)
+      const room = await this.getRelevantJoinedRoom(recipient, session)
+      this.assertSession(session)
       roomId = room.id
       await this.mutatePeerRooms(session, (current) => ({ ...current, [recipient]: room.id }))
+      this.assertSession(session)
     }
-
-    logger.log(`getRelevantRoom`, `Using room ${roomId}`)
-
     return roomId
   }
 
-  private async getRelevantJoinedRoom(recipient: string): Promise<MatrixRoom> {
-    const joinedRooms = await (await this.client.promise).joinedRooms
-    logger.log('checking joined rooms', joinedRooms, recipient)
+  private async getRelevantJoinedRoom(
+    recipient: string,
+    session = this.captureSession()
+  ): Promise<MatrixRoom> {
+    const client = await this.getSessionClient(session)
+    this.assertSession(session)
+    const joinedRooms = await client.joinedRooms
+    this.assertSession(session)
     const relevantRooms = joinedRooms
-      .filter((roomElement: MatrixRoom) => !this.ignoredRooms.some((id) => roomElement.id === id))
-      .filter((roomElement: MatrixRoom) =>
-        roomElement.members.some((member: string) => member === recipient)
-      )
+      .filter((room) => !this.ignoredRooms.includes(room.id))
+      .filter((room) => room.members.includes(recipient))
 
-    let room: MatrixRoom
-    // We always create a new room if one has been ignored. This is because if we ignore one, we know the server state changed.
-    // So we cannot trust the current sync state. This can be removed once we have a method to properly clear and refresh the sync state.
+    // An ignored room indicates that the stored sync state is no longer reusable.
     if (relevantRooms.length === 0 || this.ignoredRooms.length > 0) {
-      logger.log(`getRelevantJoinedRoom`, `no relevant rooms found, creating new one`)
-
-      const roomId = await (await this.client.promise).createTrustedPrivateRoom(recipient)
-      room = await (await this.client.promise).getRoomById(roomId)
-      logger.log(`getRelevantJoinedRoom`, `waiting for other party to join room: ${room.id}`)
+      const roomId = await client.createTrustedPrivateRoom(recipient)
+      this.assertSession(session)
+      const room = await client.getRoomById(roomId)
+      this.assertSession(session)
       await this.waitForJoin(roomId)
-      logger.log(`getRelevantJoinedRoom`, `new room created and peer invited: ${room.id}`)
-    } else {
-      room = relevantRooms[0]
-      logger.log(`getRelevantJoinedRoom`, `channel already open, reusing room ${room.id}`)
+      this.assertSession(session)
+
+      return room
     }
 
-    return room
+    return relevantRooms[0]
   }
 }
