@@ -36,7 +36,7 @@ export class MatrixClient {
   private session: number = 0
   private cancelStartup: (() => void) | undefined
   private pollingRetry: { timer: ReturnType<typeof setTimeout>; complete: () => void } | undefined
-  private _isReady: ExposedPromise<void> = new ExposedPromise()
+  private _isReady: ExposedPromise<void> = this.createReadiness()
   private txnIdLock: Promise<void> = Promise.resolve()
 
   constructor(
@@ -119,7 +119,7 @@ export class MatrixClient {
     const session = ++this.session
     this.isActive = true
     if (this._isReady.isSettled()) {
-      this._isReady = new ExposedPromise()
+      this._isReady = this.createReadiness()
     }
     const ready = this._isReady
     const isCurrent = (): boolean => this.isActive && session === this.session
@@ -132,6 +132,7 @@ export class MatrixClient {
           if (cancelRef && this.cancelStartup === cancelRef) {
             this.cancelStartup = undefined
           }
+          ready.reject(error)
           reject(error)
         }
       }
@@ -215,7 +216,8 @@ export class MatrixClient {
     this.cancelStartup?.()
     ++this.session
     this.clearPollingRetry()
-    this._isReady = new ExposedPromise()
+    this._isReady.reject(new DOMException('Matrix client stopped', 'AbortError'))
+    this._isReady = this.createReadiness()
 
     try {
       await this.httpClient.cancelAllRequests()
@@ -362,6 +364,14 @@ export class MatrixClient {
     })
   }
 
+  private createReadiness(): ExposedPromise<void> {
+    const ready = new ExposedPromise<void>()
+    // Startup can fail before a caller begins waiting for connection readiness.
+    ready.promise.catch(() => undefined)
+
+    return ready
+  }
+
   private clearPollingRetry(): void {
     const retry = this.pollingRetry
     this.pollingRetry = undefined
@@ -385,23 +395,13 @@ export class MatrixClient {
     onSyncSuccess: (response: MatrixSyncResponse) => void | Promise<void>,
     onSyncError: (error: unknown) => void | Promise<void>
   ): Promise<void> {
-    const store = this.store
-    const sync = this.sync.bind(this)
-
-    // Manual stop is normal shutdown: the polling promise only resolves.
-    const pollSync = async (
-      resolve: (value?: void | PromiseLike<void> | undefined) => void
-    ): Promise<void> => {
-      if (!this.isActive || session !== this.session) {
-        resolve()
-
-        return
-      }
-      let syncingRetries: number = 0
+    // Stop clears the owned retry and wakes this loop without reporting an error.
+    while (this.isActive && session === this.session) {
+      let syncingRetries = 0
       try {
         let response: MatrixSyncResponse
         try {
-          response = await sync()
+          response = await this.sync()
         } catch (error) {
           if (
             (error as { errcode?: string })?.errcode !== 'M_UNKNOWN_TOKEN' ||
@@ -414,7 +414,7 @@ export class MatrixClient {
           if (!this.isActive || session !== this.session) {
             return
           }
-          response = await sync()
+          response = await this.sync()
         }
         if (this.isActive && session === this.session) {
           await onSyncSuccess(response)
@@ -424,31 +424,27 @@ export class MatrixClient {
           return
         }
         await onSyncError(error)
-
-        syncingRetries = store.get('pollingRetries')
-        // console.warn('Could not sync:', error)
+        syncingRetries = this.store.get('pollingRetries')
         if (this.isActive && session === this.session) {
           logger.log(`Retry syncing... ${syncingRetries} retries so far`)
         }
-      } finally {
-        if (this.isActive && session === this.session) {
-          const timer = setTimeout(
-            async () => {
-              if (this.pollingRetry?.timer === timer) {
-                this.pollingRetry = undefined
-              }
-              await pollSync(resolve)
-            },
-            syncingRetries > IMMEDIATE_POLLING_RETRIES ? RETRY_INTERVAL + interval : interval
-          )
-          this.pollingRetry = { timer, complete: resolve }
-        } else {
-          resolve()
-        }
       }
+      if (!this.isActive || session !== this.session) {
+        return
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(
+          () => {
+            if (this.pollingRetry?.timer === timer) {
+              this.pollingRetry = undefined
+            }
+            resolve()
+          },
+          syncingRetries > IMMEDIATE_POLLING_RETRIES ? RETRY_INTERVAL + interval : interval
+        )
+        this.pollingRetry = { timer, complete: resolve }
+      })
     }
-
-    return new Promise(pollSync)
   }
 
   /**

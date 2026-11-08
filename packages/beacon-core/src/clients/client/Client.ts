@@ -27,6 +27,19 @@ interface TransportCleanupTarget {
   ): Promise<void>
 }
 
+interface TransportListenerTarget extends TransportCleanupTarget {
+  addListener(listener: Parameters<Transport['addListener']>[0]): Promise<void>
+}
+
+interface TransportSubscription {
+  readonly transport: TransportCleanupTarget
+  readonly listener: (message: unknown, connectionInfo: ConnectionContext) => Promise<void>
+  readonly registration: ExposedPromise<void>
+  active: boolean
+  registered: boolean
+  disposal?: Promise<void>
+}
+
 /**
  * @internalapi
  *
@@ -57,10 +70,7 @@ export abstract class Client extends BeaconClient {
 
   protected readonly matrixNodes: NodeDistributions
 
-  private readonly transportListeners: Map<
-    TransportType,
-    (message: any, connectionInfo: ConnectionContext) => Promise<void>
-  > = new Map()
+  private readonly transportListeners = new Set<TransportSubscription>()
 
   private readonly transportListenerRegistrations: Map<TransportType, Promise<void>> = new Map()
 
@@ -99,40 +109,44 @@ export abstract class Client extends BeaconClient {
     }
   }
   protected async cleanup(transports?: TransportCleanupTarget[]) {
-    await Promise.allSettled(this.transportListenerRegistrations.values())
-
-    if (!this.transportListeners.size) {
-      return
-    }
-
-    if (!transports) {
-      if (this._transport.isResolved()) {
-        const transport = await this.transport
-        await Promise.all(
-          Array.from(this.transportListeners.values()).map((listener) =>
-            transport.removeListener(listener)
-          )
-        )
-      }
-      this.transportListeners.clear()
-
-      return
-    }
-
-    // Explicit transport cleanup is scoped: callers tearing down secondary
-    // transports should not unregister listeners for transports left alive.
-    await Promise.all(
-      transports.map(async (transport) => {
-        const listener = this.transportListeners.get(transport.type)
-
-        if (!listener) {
-          return
-        }
-
-        await transport.removeListener(listener)
-        this.transportListeners.delete(transport.type)
-      })
+    const subscriptions = [...this.transportListeners].filter(
+      (subscription) => !transports || transports.includes(subscription.transport)
     )
+    // Retire delivery before awaiting registration or physical callback removal.
+    subscriptions.forEach((subscription) => {
+      subscription.active = false
+    })
+    const results = await Promise.allSettled(
+      subscriptions.map((subscription) => this.disposeTransportSubscription(subscription))
+    )
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        throw result.reason
+      }
+    }
+  }
+
+  private disposeTransportSubscription(subscription: TransportSubscription): Promise<void> {
+    subscription.active = false
+    if (subscription.disposal) {
+      return subscription.disposal
+    }
+    const dispose = async (): Promise<void> => {
+      await subscription.registration.promise.catch(() => undefined)
+      if (subscription.registered) {
+        await subscription.transport.removeListener(subscription.listener)
+      }
+      this.transportListeners.delete(subscription)
+    }
+    const disposal = dispose()
+    subscription.disposal = disposal
+    disposal.catch(() => {
+      if (subscription.disposal === disposal) {
+        subscription.disposal = undefined
+      }
+    })
+
+    return disposal
   }
 
   /**
@@ -253,45 +267,64 @@ export abstract class Client extends BeaconClient {
   }
 
   protected async registerTransportListener(
-    transport: Transport,
+    transport: TransportListenerTarget,
     listener: Parameters<Transport['addListener']>[0]
   ): Promise<void> {
     await transport.addListener(listener)
   }
 
-  protected async addListener(transport: Transport<any>): Promise<void> {
-    // in beacon we subscribe to the transport on client init only
-    // unsubscribing from the transport is only beneficial when running
-    // a single page dApp.
-    // However, while running a multiple tabs setup, if one of the dApps disconnects
-    // the others wont't recover until after a page refresh
-
+  protected async addListener(transport: TransportListenerTarget): Promise<void> {
+    const subscription: TransportSubscription = {
+      transport,
+      registration: new ExposedPromise<void>(),
+      active: true,
+      registered: false,
+      listener: async (message, connectionInfo) => {
+        if (!subscription.active || typeof message !== 'string') {
+          return
+        }
+        const deserializedMessage = (await new Serializer().deserialize(
+          message
+        )) as BeaconRequestMessage
+        if (subscription.active) {
+          await this.handleResponse(deserializedMessage, connectionInfo)
+        }
+      }
+    }
+    subscription.registration.promise.catch(() => undefined)
+    this.transportListeners.add(subscription)
     const previous = this.transportListenerRegistrations.get(transport.type) ?? Promise.resolve()
     const registration = previous
       .catch(() => undefined)
       .then(async () => {
-        const existingListener = this.transportListeners.get(transport.type)
-        if (existingListener) {
-          await transport.removeListener(existingListener)
-          this.transportListeners.delete(transport.type)
+        if (!subscription.active) {
+          return
         }
-
-        const subscription = async (message: unknown, connectionInfo: ConnectionContext) => {
-          if (typeof message === 'string') {
-            const deserializedMessage = (await new Serializer().deserialize(
-              message
-            )) as BeaconRequestMessage
-            await this.handleResponse(deserializedMessage, connectionInfo)
+        for (const current of this.transportListeners) {
+          if (
+            current !== subscription &&
+            current.transport.type === transport.type &&
+            current.registered
+          ) {
+            await this.disposeTransportSubscription(current)
           }
         }
-
-        await this.registerTransportListener(transport, subscription)
-        this.transportListeners.set(transport.type, subscription)
+        if (!subscription.active) {
+          return
+        }
+        await this.registerTransportListener(transport, subscription.listener)
+        subscription.registered = true
       })
     this.transportListenerRegistrations.set(transport.type, registration)
 
     try {
       await registration
+      subscription.registration.resolve()
+    } catch (error) {
+      subscription.active = false
+      this.transportListeners.delete(subscription)
+      subscription.registration.reject(error)
+      throw error
     } finally {
       if (this.transportListenerRegistrations.get(transport.type) === registration) {
         this.transportListenerRegistrations.delete(transport.type)

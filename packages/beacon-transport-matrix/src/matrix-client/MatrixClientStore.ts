@@ -63,14 +63,7 @@ export class MatrixClientStore {
   private persistence: Promise<void> = Promise.resolve()
 
   constructor(private readonly storage: Storage) {
-    this.waitReadyPromise = new Promise<void>(async (resolve, reject) => {
-      try {
-        await this.initFromStorage()
-        resolve()
-      } catch (error) {
-        reject(error)
-      }
-    })
+    this.waitReadyPromise = this.initFromStorage()
   }
 
   /**

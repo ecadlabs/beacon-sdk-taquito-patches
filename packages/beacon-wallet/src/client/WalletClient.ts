@@ -65,6 +65,9 @@ export class WalletClient extends Client {
 
   private readonly permissionManager: PermissionManager
   private readonly appMetadataManager: AppMetadataManager
+  private connectionAttempt: Promise<void> | undefined
+  private deliveryGeneration = Symbol('Wallet connection')
+  private destroyed = false
 
   /**
    * This array stores pending requests, meaning requests we received and have not yet handled / sent a response.
@@ -110,10 +113,23 @@ export class WalletClient extends Client {
       connectionContext: ConnectionContext
     ) => void
   ): Promise<void> {
+    const generation = this.deliveryGeneration
+    const deliver = (
+      message: BeaconRequestOutputMessage,
+      connectionContext: ConnectionContext
+    ): void => {
+      // Metadata enrichment can finish after this wallet's listener has been retired.
+      if (this.ownsDelivery(generation)) {
+        newMessageCallback(message, connectionContext)
+      }
+    }
     this.handleResponse = async (
       message: BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage> | DisconnectMessage,
       connectionContext: ConnectionContext
     ): Promise<void> => {
+      if (!this.ownsDelivery(generation)) {
+        return
+      }
       if (message.version === '3') {
         const typedMessage = message as BeaconMessageWrapper<BeaconBaseMessage>
         const disconnectSenderId = this.getDisconnectSenderId(message)
@@ -134,7 +150,7 @@ export class WalletClient extends Client {
             message: typedMessage,
             connectionInfo: connectionContext,
             appMetadataManager: this.appMetadataManager,
-            interceptorCallback: newMessageCallback
+            interceptorCallback: deliver
           })
         }
       } else {
@@ -157,13 +173,23 @@ export class WalletClient extends Client {
             message: typedMessage,
             connectionInfo: connectionContext,
             appMetadataManager: this.appMetadataManager,
-            interceptorCallback: newMessageCallback
+            interceptorCallback: deliver
           })
         }
       }
     }
 
     return this._connect()
+  }
+
+  public override async destroy(): Promise<void> {
+    this.destroyed = true
+    this.deliveryGeneration = Symbol('Wallet connection')
+    await super.destroy()
+  }
+
+  private ownsDelivery(generation: symbol): boolean {
+    return !this.destroyed && this.deliveryGeneration === generation
   }
 
   /**
@@ -274,23 +300,66 @@ export class WalletClient extends Client {
    * The method will attempt to initiate a connection using the active transport.
    */
   public async _connect(attempts: number = 3): Promise<void> {
-    const transport: WalletP2PTransport = (await this.transport) as WalletP2PTransport
-    if (attempts == 0 || transport.connectionStatus !== TransportStatus.NOT_CONNECTED) {
+    if (this.destroyed || attempts === 0) {
+      return
+    }
+    if (this.connectionAttempt) {
+      return this.connectionAttempt
+    }
+    const generation = this.deliveryGeneration
+    const attempt = this.connectTransport(attempts, generation)
+    this.connectionAttempt = attempt
+    try {
+      await attempt
+    } catch (error) {
+      if (this.ownsDelivery(generation)) {
+        this.deliveryGeneration = Symbol('Wallet connection')
+      }
+      throw error
+    } finally {
+      if (this.connectionAttempt === attempt) {
+        this.connectionAttempt = undefined
+      }
+    }
+  }
+
+  private async connectTransport(attempts: number, generation: symbol): Promise<void> {
+    const transport = await this.transport
+    if (!this.ownsDelivery(generation)) {
+      return
+    }
+    if (attempts === 0) {
+      this.deliveryGeneration = Symbol('Wallet connection')
+      await this.cleanup([transport])
+
+      return
+    }
+    if (transport.connectionStatus !== TransportStatus.NOT_CONNECTED) {
       return
     }
 
     try {
       await this.addListener(transport)
+      if (!this.ownsDelivery(generation)) {
+        return
+      }
       await transport.connect()
-    } catch (err: any) {
-      logger.warn('_connect', err.message)
+    } catch (error: unknown) {
+      if (!this.ownsDelivery(generation)) {
+        return
+      }
+      logger.warn('_connect', error instanceof Error ? error.message : error)
       await transport.disconnect()
-      await this._connect(--attempts)
+      if (this.ownsDelivery(generation)) {
+        await this.connectTransport(attempts - 1, generation)
+      }
 
       return
     }
 
-    this._isConnected.resolve(true)
+    if (this.ownsDelivery(generation)) {
+      this._isConnected.resolve(true)
+    }
   }
 
   /**
