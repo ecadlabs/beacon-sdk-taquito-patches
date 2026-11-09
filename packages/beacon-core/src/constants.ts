@@ -1,4 +1,4 @@
-export const SDK_VERSION: string = '4.8.4-ecad'
+export const SDK_VERSION: string = '4.8.5-ecad'
 export const BEACON_VERSION: string = '3'
 
 export const NOTIFICATION_ORACLE_URL: string =
