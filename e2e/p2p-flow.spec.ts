@@ -93,7 +93,7 @@ test('should send 1 mutez on both tabs', async () => {
     await dapp2.waitForSelector('div:has-text("Aborted")', { state: 'visible', timeout: 30_000 })
   }
 
-  await Promise.all([step1, step2])
+  await Promise.all([step1(), step2()])
 })
 
 test('should disconnect on both tabs', async () => {

@@ -27,7 +27,7 @@ export class DappWalletConnectTransport extends WalletConnectTransport<
     keyPair: KeyPair,
     storage: Storage,
     wcOptions: { network: NetworkType; opts: SignClientTypes.Options },
-    isLeader: () => Promise<boolean>
+    private readonly getIsLeader: () => Promise<boolean>
   ) {
     super(
       name,
@@ -35,34 +35,51 @@ export class DappWalletConnectTransport extends WalletConnectTransport<
       storage,
       StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP,
       wcOptions,
-      isLeader
+      getIsLeader
     )
-    this.client.listenForChannelOpening(async (peer: ExtendedWalletConnectPairingResponse) => {
-      await this.addPeer(peer)
-
-      this._isConnected =
-        isMobileOS(window) || (await isLeader())
-          ? TransportStatus.CONNECTED
-          : TransportStatus.SECONDARY_TAB_CONNECTED
-
-      this.isReady.isPending() && this.isReady.resolve(true)
-
-      if (this.newPeerListener) {
-        this.newPeerListener(peer)
-        this.newPeerListener = undefined // TODO: Remove this once we use the id
-      }
-    })
   }
 
   public async listenForNewPeer(
-    newPeerListener: (peer: ExtendedWalletConnectPairingResponse) => void
+    newPeerListener: (peer: ExtendedWalletConnectPairingResponse) => boolean | Promise<boolean>
   ): Promise<void> {
-    // logger.log('listenForNewPeer')
+    this.client.cancelPendingPairing()
     this.newPeerListener = newPeerListener
+    await this.client.listenForChannelOpening(async (peer, isCurrent) => {
+      const listener = this.newPeerListener
+      const ownsPairing = () => isCurrent() && this.newPeerListener === listener
+      if (!listener || !ownsPairing()) {
+        return false
+      }
+
+      const status =
+        isMobileOS(window) || (await this.getIsLeader())
+          ? TransportStatus.CONNECTED
+          : TransportStatus.SECONDARY_TAB_CONNECTED
+      if (!ownsPairing()) {
+        return false
+      }
+
+      const accepted = await this.addPairingPeer(peer, ownsPairing, async () => {
+        // Consume delivery before the winner retires sibling responses.
+        this.newPeerListener = undefined
+        this._isConnected = status
+
+        return listener(peer)
+      })
+      if (accepted && isCurrent() && this.isReady.isPending()) {
+        this.isReady.resolve(true)
+      }
+
+      return accepted
+    })
   }
 
   public async stopListeningForNewPeers(): Promise<void> {
     logger.log('stopListeningForNewPeers')
+    // Successful delivery has already consumed the listener; it still owns session cleanup.
+    if (this.newPeerListener) {
+      this.client.cancelPendingPairing()
+    }
     this.newPeerListener = undefined
   }
 }

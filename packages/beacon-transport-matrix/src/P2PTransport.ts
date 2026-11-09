@@ -1,4 +1,4 @@
-import { Logger, Transport, PeerManager } from '@ecadlabs/beacon-core'
+import { PendingPairingRequests, Logger, Transport, PeerManager } from '@ecadlabs/beacon-core'
 import {
   ConnectionContext,
   ExtendedP2PPairingResponse,
@@ -25,6 +25,8 @@ export class P2PTransport<
   K extends StorageKey.TRANSPORT_P2P_PEERS_DAPP | StorageKey.TRANSPORT_P2P_PEERS_WALLET
 > extends Transport<T, K, P2PCommunicationClient> {
   public readonly type: TransportType = TransportType.P2P
+  private connectionGeneration?: symbol
+  private disconnecting?: Promise<void>
 
   constructor(
     name: string,
@@ -33,11 +35,21 @@ export class P2PTransport<
     matrixNodes: NodeDistributions,
     storageKey: K,
     iconUrl?: string,
-    appUrl?: string
+    appUrl?: string,
+    pendingPairings?: PendingPairingRequests
   ) {
     super(
       name,
-      new P2PCommunicationClient(name, keyPair, 1, storage, matrixNodes, iconUrl, appUrl),
+      new P2PCommunicationClient(
+        name,
+        keyPair,
+        1,
+        storage,
+        matrixNodes,
+        iconUrl,
+        appUrl,
+        pendingPairings
+      ),
       new PeerManager<K>(storage, storageKey)
     )
   }
@@ -47,32 +59,75 @@ export class P2PTransport<
   }
 
   public async connect(): Promise<void> {
-    if (this._isConnected !== TransportStatus.NOT_CONNECTED) {
+    if (this.disconnecting || this._isConnected !== TransportStatus.NOT_CONNECTED) {
       return
     }
 
+    const generation = Symbol('P2P connection')
+    this.connectionGeneration = generation
     logger.log('connect')
     this._isConnected = TransportStatus.CONNECTING
 
-    await this.client.start()
+    try {
+      await this.client.start()
+      if (generation !== this.connectionGeneration) {
+        return
+      }
 
-    const knownPeers = await this.getPeers()
+      const knownPeers = await this.getPeers()
+      if (generation !== this.connectionGeneration) {
+        return
+      }
 
-    if (knownPeers.length > 0) {
-      logger.log('connect', `connecting to ${knownPeers.length} peers`)
-      const connectionPromises = knownPeers.map(async (peer) => this.listen(peer.publicKey))
-      Promise.all(connectionPromises).catch((error) => logger.error('connect', error))
+      if (knownPeers.length > 0) {
+        logger.log('connect', `connecting to ${knownPeers.length} peers`)
+        const registrations = await Promise.allSettled(
+          knownPeers.map((peer) => this.listen(peer.publicKey))
+        )
+        if (generation !== this.connectionGeneration) {
+          return
+        }
+        for (const registration of registrations) {
+          if (registration.status === 'rejected') {
+            logger.error('connect', 'failed to listen to saved peer', registration.reason)
+          }
+        }
+      }
+
+      await this.startOpenChannelListener()
+      if (generation !== this.connectionGeneration) {
+        return
+      }
+      await super.connect()
+    } catch (error) {
+      if (generation !== this.connectionGeneration) {
+        return
+      }
+      await this.disconnect().catch((cleanupError) => {
+        logger.error('connect', 'failed to stop matrix client', cleanupError)
+      })
+      throw error
     }
-
-    await this.startOpenChannelListener()
-
-    return super.connect()
   }
 
   public async disconnect(): Promise<void> {
-    await this.client.stop()
+    if (this.disconnecting) {
+      return this.disconnecting
+    }
+    this.connectionGeneration = Symbol('P2P connection')
+    this.disconnecting = this.stopConnection().finally(() => {
+      this.disconnecting = undefined
+    })
 
-    return super.disconnect()
+    return this.disconnecting
+  }
+
+  private async stopConnection(): Promise<void> {
+    try {
+      await this.client.stop()
+    } finally {
+      await super.disconnect()
+    }
   }
 
   public async startOpenChannelListener(): Promise<void> {

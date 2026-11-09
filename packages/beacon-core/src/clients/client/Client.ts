@@ -42,7 +42,7 @@ export abstract class Client extends BeaconClient {
   protected handleResponse: (
     _event: BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage>,
     connectionInfo: ConnectionContext
-  ) => void
+  ) => void | Promise<void>
 
   /**
    * How many requests can be sent after another
@@ -267,7 +267,7 @@ export abstract class Client extends BeaconClient {
         const deserializedMessage = (await new Serializer().deserialize(
           message
         )) as BeaconRequestMessage
-        this.handleResponse(deserializedMessage, connectionInfo)
+        await this.handleResponse(deserializedMessage, connectionInfo)
       }
     }
 

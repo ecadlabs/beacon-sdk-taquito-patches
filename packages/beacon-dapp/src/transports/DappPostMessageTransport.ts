@@ -4,7 +4,7 @@ import {
   Storage,
   ExtendedPostMessagePairingResponse
 } from '@ecadlabs/beacon-types'
-import { Logger } from '@ecadlabs/beacon-core'
+import { PendingPairingRequests, Logger } from '@ecadlabs/beacon-core'
 import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
 import { KeyPair } from '@ecadlabs/beacon-utils'
 
@@ -19,27 +19,36 @@ export class DappPostMessageTransport extends PostMessageTransport<
   ExtendedPostMessagePairingResponse,
   StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
 > {
-  constructor(name: string, keyPair: KeyPair, storage: Storage) {
-    super(name, keyPair, storage, StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
+  constructor(
+    name: string,
+    keyPair: KeyPair,
+    storage: Storage,
+    pendingPairings?: PendingPairingRequests
+  ) {
+    super(name, keyPair, storage, StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP, pendingPairings)
   }
 
   public async startOpenChannelListener(): Promise<void> {
-    return this.client.listenForChannelOpening(async (peer: ExtendedPostMessagePairingResponse) => {
-      logger.log('connect', `received PostMessagePairingResponse`, peer)
+    return this.client.listenForChannelOpening(
+      async (peer: ExtendedPostMessagePairingResponse, isActive) => {
+        logger.log('connect', `received PostMessagePairingResponse`, peer)
 
-      await this.addPeer(peer)
+        await this.addPairingPeer(peer, isActive, async () => {
+          this._isConnected = TransportStatus.CONNECTED
+          const listener = this.newPeerListener
+          this.newPeerListener = undefined
+          if (listener) {
+            return listener(peer)
+          }
 
-      this._isConnected = TransportStatus.CONNECTED
-
-      if (this.newPeerListener) {
-        this.newPeerListener(peer)
-        this.newPeerListener = undefined // TODO: Remove this once we use the id
+          return false
+        })
       }
-    })
+    )
   }
 
   public async listenForNewPeer(
-    newPeerListener: (peer: ExtendedPostMessagePairingResponse) => void
+    newPeerListener: (peer: ExtendedPostMessagePairingResponse) => boolean | Promise<boolean>
   ): Promise<void> {
     logger.log('listenForNewPeer')
     this.newPeerListener = newPeerListener
@@ -47,6 +56,8 @@ export class DappPostMessageTransport extends PostMessageTransport<
 
   public async stopListeningForNewPeers(): Promise<void> {
     logger.log('stopListeningForNewPeers')
+    const cancelled = this.client.cancelPairingRequests()
     this.newPeerListener = undefined
+    await cancelled
   }
 }

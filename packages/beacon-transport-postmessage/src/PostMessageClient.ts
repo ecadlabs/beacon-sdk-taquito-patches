@@ -1,6 +1,18 @@
-import { windowRef, Serializer, getSenderId, MessageBasedClient } from '@ecadlabs/beacon-core'
+import {
+  Logger,
+  PendingPairingRequests,
+  windowRef,
+  Serializer,
+  getSenderId,
+  MessageBasedClient
+} from '@ecadlabs/beacon-core'
 
-import { openCryptobox, secretbox_NONCEBYTES, secretbox_MACBYTES } from '@ecadlabs/beacon-utils'
+import {
+  openCryptobox,
+  secretbox_NONCEBYTES,
+  secretbox_MACBYTES,
+  KeyPair
+} from '@ecadlabs/beacon-utils'
 import {
   ExtensionMessage,
   ExtensionMessageTarget,
@@ -12,12 +24,34 @@ import {
   PostMessagePairingRequest
 } from '@ecadlabs/beacon-types'
 
+const logger = new Logger('PostMessageClient')
+
 /**
  * @internalapi
  *
  *
  */
 export class PostMessageClient extends MessageBasedClient {
+  constructor(
+    name: string,
+    keyPair: KeyPair,
+    private readonly pendingPairings = new PendingPairingRequests()
+  ) {
+    super(name, keyPair)
+  }
+
+  public cancelPairingRequests(): Promise<void> {
+    return this.pendingPairings.cancel()
+  }
+
+  public async getPairingRequestInfo(): Promise<PostMessagePairingRequest> {
+    const generation = this.pendingPairings.generation
+    const request = await super.getPairingRequestInfo()
+    this.pendingPairings.add(request.id, generation)
+
+    return request
+  }
+
   protected readonly activeListeners: Map<
     string,
     (message: EncryptedExtensionMessage, context: ConnectionContext) => void
@@ -46,6 +80,14 @@ export class PostMessageClient extends MessageBasedClient {
         )
         // console.log('calculated sender ID', await getSenderId(senderPublicKey))
         // TODO: Add check for correct decryption key / sender ID
+        const beaconMessage = (
+          decryptedMessage.startsWith('{')
+            ? JSON.parse(decryptedMessage)
+            : await new Serializer().deserialize(decryptedMessage)
+        ) as { senderId?: string }
+        if (beaconMessage.senderId !== (await getSenderId(senderPublicKey))) {
+          return
+        }
         messageCallback(decryptedMessage, context)
       } catch (decryptionError) {
         /* NO-OP. We try to decode every message, but some might not be addressed to us. */
@@ -75,7 +117,10 @@ export class PostMessageClient extends MessageBasedClient {
   }
 
   public async listenForChannelOpening(
-    messageCallback: (pairingResponse: ExtendedPostMessagePairingResponse) => void
+    messageCallback: (
+      pairingResponse: ExtendedPostMessagePairingResponse,
+      isActive: () => boolean
+    ) => void | Promise<void>
   ): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const fn = async (event: any): Promise<void> => {
@@ -91,6 +136,14 @@ export class PostMessageClient extends MessageBasedClient {
         data.target === ExtensionMessageTarget.PAGE &&
         (await this.isChannelOpenMessage(data))
       ) {
+        if (
+          typeof data.payload !== 'string' ||
+          data.payload.length === 0 ||
+          data.payload.length % 2 !== 0 ||
+          !/^[0-9a-f]+$/i.test(data.payload)
+        ) {
+          return
+        }
         const payload = Buffer.from(data.payload, 'hex')
 
         if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
@@ -99,16 +152,34 @@ export class PostMessageClient extends MessageBasedClient {
               await openCryptobox(payload, this.keyPair!.publicKey, this.keyPair!.secretKey)
             )
 
-            messageCallback(
-              new ExtendedPostMessagePairingResponse(
-                pairingResponse.id,
-                pairingResponse.name,
-                pairingResponse.publicKey,
-                pairingResponse.version,
-                await getSenderId(pairingResponse.publicKey),
-                event?.data?.sender.id
+            if (
+              !pairingResponse ||
+              typeof pairingResponse.publicKey !== 'string' ||
+              !/^[a-f0-9]{64}$/i.test(pairingResponse.publicKey) ||
+              typeof pairingResponse.name !== 'string' ||
+              typeof pairingResponse.version !== 'string' ||
+              typeof event?.data?.sender?.id !== 'string'
+            ) {
+              return
+            }
+            const senderId = await getSenderId(pairingResponse.publicKey)
+            await this.pendingPairings
+              .accept(pairingResponse.id, async (isActive) => {
+                await messageCallback(
+                  new ExtendedPostMessagePairingResponse(
+                    pairingResponse.id,
+                    pairingResponse.name,
+                    pairingResponse.publicKey,
+                    pairingResponse.version,
+                    senderId,
+                    event?.data?.sender.id
+                  ),
+                  isActive
+                )
+              })
+              .catch((error) =>
+                logger.error('listenForChannelOpening', 'pairing acceptance failed', error)
               )
-            )
           } catch (decryptionError) {
             /* NO-OP. We try to decode every message, but some might not be addressed to us. */
           }

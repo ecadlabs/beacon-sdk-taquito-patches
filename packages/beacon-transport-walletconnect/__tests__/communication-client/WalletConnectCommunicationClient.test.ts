@@ -445,9 +445,9 @@ describe('WalletConnectCommunicationClient basics', () => {
     jest.useRealTimers()
   })
 
-  it('unsubscribeFromEncryptedMessages clears all listeners', async () => {
+  it('unsubscribeFromEncryptedMessages clears listeners and cancels pending pairing', async () => {
     await client.listenForEncryptedMessage('k', () => {})
-    await client.listenForChannelOpening(() => {})
+    await client.listenForChannelOpening(() => true)
     await client.unsubscribeFromEncryptedMessages()
     expect((client as any).activeListeners.size).toBe(0)
     expect((client as any).channelOpeningListeners.size).toBe(0)
@@ -463,6 +463,256 @@ describe('WalletConnectCommunicationClient basics', () => {
     } as any
     expect((client as any).getTopicFromSession(dummy)).toBe('t1')
   })
+
+  it('ignores session_update events for non-active session topics', () => {
+    const resolvedClient = createResolvedSignClient()
+    const activeSession = {
+      topic: 'active-topic',
+      namespaces: {
+        tezos: {
+          accounts: ['tezos:mainnet:tz1active'],
+          methods: ['tezos_getAccounts', 'tezos_send', 'tezos_sign'],
+          events: []
+        }
+      },
+      pairingTopic: 'active-pairing',
+      peer: { metadata: { name: 'Active Wallet', icons: [], redirect: {} } },
+      sessionProperties: {}
+    } as unknown as SessionTypes.Struct
+    const inactiveSession = {
+      topic: 'inactive-topic',
+      namespaces: {
+        tezos: {
+          accounts: ['tezos:mainnet:tz1inactive'],
+          methods: ['tezos_getAccounts', 'tezos_send', 'tezos_sign'],
+          events: []
+        }
+      },
+      pairingTopic: 'inactive-pairing',
+      peer: { metadata: { name: 'Inactive Wallet', icons: [], redirect: {} } },
+      sessionProperties: {}
+    } as unknown as SessionTypes.Struct
+
+    resolvedClient.session.get.mockImplementation((topic: string) => {
+      if (topic === 'active-topic') return activeSession
+      if (topic === 'inactive-topic') return inactiveSession
+      return undefined
+    })
+    ;(client as any).session = activeSession
+    const updateActiveAccountSpy = jest
+      .spyOn(client as any, 'updateActiveAccount')
+      .mockImplementation(() => {})
+
+    ;(client as any).subscribeToSessionEvents(resolvedClient)
+    const sessionUpdateHandler = resolvedClient.on.mock.calls.find(
+      ([eventName]: [string]) => eventName === 'session_update'
+    )?.[1]
+    expect(sessionUpdateHandler).toBeDefined()
+
+    sessionUpdateHandler({
+      topic: 'inactive-topic',
+      params: {
+        namespaces: inactiveSession.namespaces
+      }
+    })
+
+    expect((client as any).session).toBe(activeSession)
+    expect(updateActiveAccountSpy).not.toHaveBeenCalled()
+    updateActiveAccountSpy.mockRestore()
+  })
+
+  it('updates currentSession before invoking channelOpeningListeners when a new session is approved', async () => {
+    const resolvedClient = createPairingSignClient()
+    let resolveApproval: ((session: SessionTypes.Struct) => void) | undefined
+    resolvedClient.connect.mockResolvedValue({
+      uri: 'wc:new-pairing-topic@2?relay-protocol=irn&symKey=abc',
+      approval: () =>
+        new Promise<SessionTypes.Struct>((resolve) => {
+          resolveApproval = resolve
+        })
+    })
+    ;(SignClient.init as jest.Mock).mockResolvedValue(resolvedClient)
+
+    let observedSessionTopicInListener: string | undefined
+    await client.listenForChannelOpening(() => {
+      observedSessionTopicInListener = client.currentSession()?.topic
+      return true
+    })
+
+    const newSession = {
+      topic: 'reconnected-session-topic',
+      controller: 'new-controller-pubkey',
+      namespaces: {
+        tezos: {
+          accounts: ['tezos:mainnet:tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb'],
+          methods: ['tezos_getAccounts', 'tezos_send', 'tezos_sign'],
+          events: []
+        }
+      },
+      pairingTopic: 'new-pairing-topic',
+      peer: {
+        publicKey: 'reconnected-peer-pubkey',
+        metadata: { name: 'Reconnected Wallet', icons: [], redirect: {} }
+      },
+      sessionProperties: {}
+    } as unknown as SessionTypes.Struct
+
+    await client.init(true)
+    expect(resolveApproval).toBeDefined()
+    resolveApproval!(newSession)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(observedSessionTopicInListener).toBe('reconnected-session-topic')
+    expect((client as any).activeAccountOrPbk).toBeUndefined()
+  })
+
+  it.each(['invalid-topic', 'active-topic'])(
+    'rejects an invalid approval and preserves the active session (%s)',
+    async (topic) => {
+      const signClient = {
+        ...createPairingSignClient(),
+        disconnect: jest.fn().mockResolvedValue(undefined)
+      }
+      let approve!: (session: SessionTypes.Struct) => void
+      signClient.connect.mockResolvedValue({
+        uri: 'wc:new-pairing-topic@2?relay-protocol=irn&symKey=abc',
+        approval: () => new Promise<SessionTypes.Struct>((resolve) => { approve = resolve })
+      })
+      ;(SignClient.init as jest.Mock).mockResolvedValue(signClient)
+      const listener = jest.fn(() => true)
+      await client.listenForChannelOpening(listener)
+      await client.init(true)
+
+      const active = { topic: 'active-topic' } as SessionTypes.Struct
+      ;(client as any).session = active
+      ;(client as any).activeAccountOrPbk = 'active-account'
+      ;(client as any).activeNetwork = 'mainnet'
+      ;(client as any).messageIds = ['existing-request']
+      approve({ topic, namespaces: {} } as SessionTypes.Struct)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(client.currentSession()).toBe(active)
+      expect((client as any).activeAccountOrPbk).toBe('active-account')
+      expect((client as any).activeNetwork).toBe('mainnet')
+      expect((client as any).messageIds).toEqual(['existing-request'])
+      expect(listener).not.toHaveBeenCalled()
+      if (topic === active.topic) {
+        expect(signClient.disconnect).not.toHaveBeenCalled()
+      } else {
+        expect(signClient.disconnect).toHaveBeenCalledTimes(1)
+        expect(signClient.disconnect).toHaveBeenCalledWith(
+          expect.objectContaining({ topic })
+        )
+      }
+    }
+  )
+
+  it('keeps currentSession defined until async notifyListeners finishes during disconnect', async () => {
+    const resolvedClient = {
+      ...createResolvedSignClient(),
+      core: {
+        pairing: {
+          disconnect: jest.fn().mockResolvedValue(undefined)
+        }
+      }
+    } as unknown as SignClient
+    const session = {
+      topic: 'closing-session-topic',
+      pairingTopic: 'closing-pairing-topic',
+      namespaces: {},
+      peer: {
+        publicKey: 'closing-peer-pk',
+        metadata: { name: 'Closing Wallet', icons: [], redirect: {} }
+      },
+      sessionProperties: {}
+    } as unknown as SessionTypes.Struct
+    ;(client as any).session = session
+
+    let sessionDuringDisconnectListener: SessionTypes.Struct | undefined
+    let sessionAfterAsyncAwaitInListener: SessionTypes.Struct | undefined
+    await client.listenForEncryptedMessage('closing-peer-pk', async () => {
+      sessionDuringDisconnectListener = client.currentSession()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      sessionAfterAsyncAwaitInListener = client.currentSession()
+    })
+
+    await (client as any).disconnect(resolvedClient, {
+      type: 'session',
+      topic: session.topic
+    })
+
+    expect(sessionDuringDisconnectListener).toBe(session)
+    expect(sessionAfterAsyncAwaitInListener).toBe(session)
+    expect(client.currentSession()).toBeUndefined()
+  })
+
+  it('ignores out-of-order stale fetchAccounts completion in updateActiveAccount', async () => {
+    const { isPublicKeySC } = require('@ecadlabs/beacon-utils')
+    ;(isPublicKeySC as jest.Mock).mockReturnValue(false)
+
+    const session = {
+      topic: 'active-topic',
+      namespaces: {},
+      pairingTopic: 'active-pairing',
+      peer: {
+        publicKey: 'peer-pk',
+        metadata: { name: 'Wallet', icons: [], redirect: {} }
+      },
+      sessionProperties: {}
+    } as unknown as SessionTypes.Struct
+    ;(client as any).session = session
+
+    let resolveFirstFetch!: (res: { address: string; pubkey: string }[]) => void
+    let resolveSecondFetch!: (res: { address: string; pubkey: string }[]) => void
+    const fetchAccountsSpy = jest
+      .spyOn(client as any, 'fetchAccounts')
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstFetch = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecondFetch = resolve
+          })
+      )
+    const notifyListenersSpy = jest.spyOn(client as any, 'notifyListeners')
+
+    try {
+      const firstUpdate = (client as any).updateActiveAccount(
+        ['tezos:mainnet:tz1FirstAccount'],
+        session
+      )
+      const secondUpdate = (client as any).updateActiveAccount(
+        ['tezos:mainnet:tz1SecondAccount'],
+        session
+      )
+
+      // Second update resolves first
+      resolveSecondFetch([{ address: 'tz1SecondAccount', pubkey: 'pk-second' }])
+      await secondUpdate
+
+      // Stale first update resolves afterwards
+      resolveFirstFetch([{ address: 'tz1FirstAccount', pubkey: 'pk-first' }])
+      await firstUpdate
+
+      expect((client as any).activeAccountOrPbk).toBe('tz1SecondAccount')
+      expect(notifyListenersSpy).toHaveBeenCalledTimes(1)
+      expect(notifyListenersSpy).toHaveBeenCalledWith(
+        'active-topic',
+        expect.objectContaining({
+          type: BeaconMessageType.ChangeAccountRequest,
+          publicKey: 'pk-second'
+        })
+      )
+    } finally {
+      fetchAccountsSpy.mockRestore()
+      notifyListenersSpy.mockRestore()
+      ;(isPublicKeySC as jest.Mock).mockReturnValue(true)
+    }
+  })
 })
 
 describe('String message dispatching', () => {
@@ -475,10 +725,15 @@ describe('String message dispatching', () => {
     client = new WalletConnectCommunicationClient(wcOptions, isLeader)
   })
 
-  it('sendMessage no-op on unknown type', async () => {
-    const raw = JSON.stringify({ id: '1', type: 'Foo' })
-    await client.sendMessage(raw)
-    // no errors
+  it('sendMessage no-op on unknown type and does not enqueue messageId', async () => {
+    const disconnectRaw = JSON.stringify({
+      id: 'disconnect-id',
+      type: BeaconMessageType.Disconnect,
+      version: '3',
+      senderId: 'sender-1'
+    })
+    await client.sendMessage(disconnectRaw)
+    expect((client as any).messageIds).toEqual([])
   })
 
   it('sendMessage dispatches PermissionRequest', async () => {

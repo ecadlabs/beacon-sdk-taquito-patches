@@ -169,7 +169,7 @@ jest.mock('@walletconnect/sign-client', () => ({}))
 jest.mock('@walletconnect/types', () => ({}))
 jest.mock('@walletconnect/utils', () => ({ getSdkError: jest.fn() }))
 
-describe('DAppClient — basic unit tests', () => {
+describe('DAppClient: basic unit tests', () => {
   let client: DAppClient
 
   beforeEach(() => {
@@ -233,7 +233,7 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('addQueryParam returns "key=value"', () => {
-    // addQueryParam is private — cast to any to reach it
+    // addQueryParam is private; cast to any to reach it
     const result = (client as any).addQueryParam('foo', 'bar')
     expect(result).toBe('foo=bar')
   })
@@ -264,6 +264,13 @@ describe('DAppClient — basic unit tests', () => {
   })
 
   it('handles raw v3 disconnect messages without a nested message wrapper', async () => {
+    const publicKey = '11'.repeat(32)
+    const senderId = await require('@ecadlabs/beacon-core').getSenderId(publicKey)
+    ;(client as any)._activePeer = ExposedPromise.resolve({
+      type: 'p2p-pairing-response',
+      publicKey,
+      senderId
+    })
     const channelClosedHandler = jest.fn()
     const removeAccountsForPeerIds = jest
       .spyOn(client as any, 'removeAccountsForPeerIds')
@@ -281,20 +288,52 @@ describe('DAppClient — basic unit tests', () => {
         {
           id: 'disconnect-id',
           version: '3',
-          senderId: 'wallet-sender-id',
+          senderId,
           type: BeaconMessageType.Disconnect
         },
         {
           origin: Origin.P2P,
-          id: 'wallet-public-key'
+          id: publicKey
         }
       )
     ).resolves.toBeUndefined()
 
-    expect(removeAccountsForPeerIds).toHaveBeenCalledWith(['wallet-sender-id'])
+    expect(removeAccountsForPeerIds).toHaveBeenCalledWith([senderId])
     expect(channelClosedHandler).toHaveBeenCalled()
 
     removeAccountsForPeerIds.mockRestore()
+  })
+
+  it('ignores disconnects that do not match the active wallet identity', async () => {
+    const publicKey = '11'.repeat(32)
+    const senderId = await require('@ecadlabs/beacon-core').getSenderId(publicKey)
+    ;(client as any)._activePeer = ExposedPromise.resolve({
+      type: 'p2p-pairing-response',
+      publicKey,
+      senderId
+    })
+    const removeAccounts = jest
+      .spyOn(client as any, 'removeAccountsForPeerIds')
+      .mockResolvedValue(undefined)
+    const closed = jest.fn()
+    client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, closed)
+    for (const [claimedSender, connectionId] of [
+      ['mismatched-sender', publicKey],
+      [senderId, '22'.repeat(32)]
+    ]) {
+      await (client as any).handleResponse(
+        {
+          id: 'mismatched-disconnect',
+          version: '3',
+          senderId: claimedSender,
+          type: BeaconMessageType.Disconnect
+        },
+        { origin: Origin.P2P, id: connectionId }
+      )
+    }
+    expect(removeAccounts).not.toHaveBeenCalled()
+    expect(closed).not.toHaveBeenCalled()
+    removeAccounts.mockRestore()
   })
 
   it('emits one acknowledge event for duplicate acknowledge messages on an open request', async () => {
@@ -2093,6 +2132,9 @@ describe('DAppClient — basic unit tests', () => {
       }
     })
 
+    jest.spyOn(storedStateClient, 'initInternalTransports').mockResolvedValue(undefined)
+    jest.spyOn(storedStateClient, 'getPeer').mockResolvedValue(undefined)
+
     await (storedStateClient as any).storageValidated
     await storedStateClient.clearActiveAccount()
 
@@ -2414,6 +2456,880 @@ describe('DAppClient — basic unit tests', () => {
     } finally {
       ;(timeoutClient as any).clearOpenRequest('session_update')
       jest.useRealTimers()
+    }
+  })
+
+  it('processes buffered Disconnect delivered during transport.connect() when restoring active account on startup', async () => {
+    const publicKey = '11'.repeat(32)
+    const senderId = await require('@ecadlabs/beacon-core').getSenderId(publicKey)
+    const storedAccount = {
+      ...createStoredAccount(),
+      senderId,
+      origin: {
+        type: Origin.P2P,
+        id: publicKey
+      }
+    }
+    const p2pPeer = {
+      ...createV480P2PPeer(),
+      id: publicKey,
+      publicKey,
+      senderId
+    }
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
+      [StorageKey.ACCOUNTS]: [storedAccount],
+      [StorageKey.TRANSPORT_P2P_PEERS_DAPP]: [p2pPeer]
+    })
+
+    let storedStateClient!: DAppClient
+    const p2pTransport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.NOT_CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([p2pPeer]),
+      removePeer: jest.fn().mockResolvedValue(undefined),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      connect: jest.fn().mockImplementation(async () => {
+        p2pTransport.connectionStatus = TransportStatus.CONNECTED
+        await (storedStateClient as any).handleResponse(
+          {
+            id: 'buffered-disconnect-id',
+            version: '3',
+            senderId,
+            type: BeaconMessageType.Disconnect
+          },
+          {
+            origin: Origin.P2P,
+            id: publicKey
+          }
+        )
+      })
+    }
+
+    const initInternalTransports = jest
+      .spyOn(DAppClient.prototype as any, 'initInternalTransports')
+      .mockImplementation(async function (this: any) {
+        this.p2pTransport = p2pTransport
+      })
+
+    try {
+      ;(window as any).beaconCreatedClientInstance = false
+      storedStateClient = new DAppClient({
+        name: 'BufferedDisconnectOnReloadApp',
+        storage,
+        preferredNetwork: NetworkType.MAINNET,
+        disableDefaultEvents: true
+      })
+
+      await (storedStateClient as any).storageValidated
+
+      expect(p2pTransport.connect).toHaveBeenCalledTimes(1)
+      expect(p2pTransport.removePeer).toHaveBeenCalledWith(p2pPeer)
+      await expect(storedStateClient.getActiveAccount()).resolves.toBeUndefined()
+      await expect(storage.get(StorageKey.ACTIVE_ACCOUNT)).resolves.toBeUndefined()
+      await expect(storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([])
+    } finally {
+      initInternalTransports.mockRestore()
+    }
+  })
+
+  it('removes an inactive saved peer and its accounts on a matching Disconnect without deactivating the active peer', async () => {
+    const { getSenderId: mockGetSenderId } = require('@ecadlabs/beacon-core')
+    const pubKeyA = 'aa'.repeat(32)
+    const pubKeyB = 'bb'.repeat(32)
+    const senderIdA = 'sender-wallet-a'
+    const senderIdB = 'sender-wallet-b'
+    ;(mockGetSenderId as jest.Mock).mockImplementation(async (pk: string) => {
+      if (pk === pubKeyA) return senderIdA
+      if (pk === pubKeyB) return senderIdB
+      return 'senderId'
+    })
+
+    const peerA = {
+      ...createV480P2PPeer(),
+      id: pubKeyA,
+      publicKey: pubKeyA,
+      senderId: senderIdA,
+      name: 'Wallet A'
+    }
+    const peerB = {
+      ...createV480P2PPeer(),
+      id: pubKeyB,
+      publicKey: pubKeyB,
+      senderId: senderIdB,
+      name: 'Wallet B'
+    }
+    const accountA = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-a-id',
+      senderId: senderIdA,
+      address: 'tz1AccountAAddress111111111111111111',
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyA
+      }
+    }
+    const accountB = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-b-id',
+      senderId: senderIdB,
+      address: 'tz1AccountBAddress222222222222222222',
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyB
+      }
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [accountA, accountB])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, accountB.accountIdentifier)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(accountB)
+    ;(client as any)._activePeer = ExposedPromise.resolve(peerB)
+    ;(client as any).p2pTransport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([peerA, peerB]),
+      removePeer: jest.fn().mockResolvedValue(undefined)
+    }
+
+    try {
+      await (client as any).handleResponse(
+        {
+          id: 'inactive-wallet-a-disconnect',
+          version: '3',
+          senderId: senderIdA,
+          type: BeaconMessageType.Disconnect
+        },
+        {
+          origin: Origin.P2P,
+          id: pubKeyA
+        }
+      )
+
+      expect((client as any).p2pTransport.removePeer).toHaveBeenCalledWith(peerA)
+      await expect(client.getActiveAccount()).resolves.toEqual(accountB)
+      await expect((client as any).storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([accountB])
+    } finally {
+      ;(mockGetSenderId as jest.Mock).mockResolvedValue('senderId')
+    }
+  })
+
+  it('ignores ChangeAccountRequest with Origin.WALLETCONNECT when another peer or session is active', async () => {
+    const activeAccount = createStoredAccount()
+    const activePeer = createV480P2PPeer()
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [activeAccount])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, activeAccount.accountIdentifier)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(activeAccount)
+    ;(client as any)._activePeer = ExposedPromise.resolve(activePeer)
+    ;(client as any).postMessageTransport = {
+      type: TransportType.POST_MESSAGE,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([])
+    }
+    ;(client as any).p2pTransport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([activePeer])
+    }
+    ;(client as any).walletConnectTransport = {
+      type: TransportType.WALLETCONNECT,
+      connectionStatus: TransportStatus.CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([]),
+      forceUpdate: jest.fn()
+    }
+
+    const setActiveAccountSpy = jest.spyOn(client, 'setActiveAccount')
+
+    await (client as any).handleResponse(
+      {
+        id: 'wc-inactive-change-account',
+        version: '3',
+        senderId: 'inactive-wc-topic',
+        type: BeaconMessageType.ChangeAccountRequest,
+        address: 'tz1Ke2h7sDdakHJQh8WX4Z372du1KChsksyU',
+        publicKey: 'cc'.repeat(32),
+        walletType: 'implicit',
+        network: {
+          type: NetworkType.MAINNET
+        },
+        scopes: [PermissionScope.SIGN]
+      },
+      {
+        origin: Origin.WALLETCONNECT,
+        id: 'cc'.repeat(32)
+      }
+    )
+
+    expect(setActiveAccountSpy).not.toHaveBeenCalled()
+    await expect(client.getActiveAccount()).resolves.toEqual(activeAccount)
+    setActiveAccountSpy.mockRestore()
+  })
+
+  it('rejects an implicit account in onNewAccount when address does not match publicKey', async () => {
+    const publicKey = '11'.repeat(32)
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [])
+    const setActiveAccountSpy = jest
+      .spyOn(client, 'setActiveAccount')
+      .mockResolvedValue(undefined)
+
+    try {
+      await expect(
+        (client as any).onNewAccount(
+          {
+            address: 'tz1Ke2h7sDdakHJQh8WX4Z372du1KChsksyU',
+            publicKey,
+            walletType: 'implicit',
+            network: {
+              type: NetworkType.MAINNET
+            },
+            scopes: [PermissionScope.SIGN]
+          },
+          {
+            origin: Origin.P2P,
+            id: publicKey
+          },
+          'senderId'
+        )
+      ).rejects.toThrow(/address/i)
+      expect(setActiveAccountSpy).not.toHaveBeenCalled()
+    } finally {
+      setActiveAccountSpy.mockRestore()
+    }
+  })
+
+  it('processes buffered ChangeAccountRequest delivered during transport.connect() when restoring active account on startup', async () => {
+    const publicKey = '11'.repeat(32)
+    const newPublicKey = '22'.repeat(32)
+    const senderId = await require('@ecadlabs/beacon-core').getSenderId(publicKey)
+    const storedAccount = {
+      ...createStoredAccount(),
+      senderId,
+      origin: {
+        type: Origin.P2P,
+        id: publicKey
+      }
+    }
+    const p2pPeer = {
+      ...createV480P2PPeer(),
+      id: publicKey,
+      publicKey,
+      senderId
+    }
+    const storage = new LocalStorage({
+      [StorageKey.ACTIVE_ACCOUNT]: storedAccount.accountIdentifier,
+      [StorageKey.ACCOUNTS]: [storedAccount],
+      [StorageKey.TRANSPORT_P2P_PEERS_DAPP]: [p2pPeer]
+    })
+
+    let storedStateClient!: DAppClient
+    const p2pTransport = {
+      type: TransportType.P2P,
+      connectionStatus: TransportStatus.NOT_CONNECTED,
+      getPeers: jest.fn().mockResolvedValue([p2pPeer]),
+      removePeer: jest.fn().mockResolvedValue(undefined),
+      removeAllPeers: jest.fn().mockResolvedValue(undefined),
+      addListener: jest.fn().mockResolvedValue(undefined),
+      removeListener: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      connect: jest.fn().mockImplementation(async () => {
+        p2pTransport.connectionStatus = TransportStatus.CONNECTED
+        await (storedStateClient as any).handleResponse(
+          {
+            id: 'buffered-change-account-id',
+            version: '3',
+            senderId,
+            type: BeaconMessageType.ChangeAccountRequest,
+            publicKey: newPublicKey,
+            walletType: 'implicit',
+            network: {
+              type: NetworkType.MAINNET
+            },
+            scopes: [PermissionScope.SIGN]
+          },
+          {
+            origin: Origin.P2P,
+            id: publicKey
+          }
+        )
+      })
+    }
+
+    const initInternalTransports = jest
+      .spyOn(DAppClient.prototype as any, 'initInternalTransports')
+      .mockImplementation(async function (this: any) {
+        this.p2pTransport = p2pTransport
+      })
+
+    try {
+      ;(window as any).beaconCreatedClientInstance = false
+      storedStateClient = new DAppClient({
+        name: 'BufferedChangeAccountOnReloadApp',
+        storage,
+        preferredNetwork: NetworkType.MAINNET,
+        disableDefaultEvents: true
+      })
+
+      await (storedStateClient as any).storageValidated
+
+      expect(p2pTransport.connect).toHaveBeenCalledTimes(1)
+      const activeAccount = await storedStateClient.getActiveAccount()
+      expect(activeAccount?.publicKey).not.toBe(storedAccount.publicKey)
+      expect(activeAccount?.accountIdentifier).not.toBe(storedAccount.accountIdentifier)
+    } finally {
+      initInternalTransports.mockRestore()
+    }
+  })
+
+  it('removes an inactive saved WalletConnect account on Disconnect when another transport is active and WC session was already cleared', async () => {
+    const wcTopicA = 'wc-session-topic-a'
+    const wcPubKeyA = 'aa'.repeat(32)
+    const p2pPubKeyB = 'bb'.repeat(32)
+    const senderIdB = 'sender-wallet-b'
+
+    const wcPeerA = {
+      id: wcTopicA,
+      type: 'walletconnect-pairing-response' as const,
+      name: 'WC Wallet A',
+      publicKey: wcPubKeyA,
+      version: '2',
+      senderId: wcTopicA
+    }
+    const p2pPeerB = {
+      ...createV480P2PPeer(),
+      id: p2pPubKeyB,
+      publicKey: p2pPubKeyB,
+      senderId: senderIdB,
+      name: 'P2P Wallet B'
+    }
+    const accountA = {
+      ...createStoredAccount(),
+      accountIdentifier: 'wc-account-a-id',
+      senderId: wcTopicA,
+      address: 'tz1WcAccountAAddress1111111111111111',
+      origin: {
+        type: Origin.WALLETCONNECT,
+        id: wcPubKeyA
+      }
+    }
+    const accountB = {
+      ...createStoredAccount(),
+      accountIdentifier: 'p2p-account-b-id',
+      senderId: senderIdB,
+      address: 'tz1P2pAccountBAddress222222222222222',
+      origin: {
+        type: Origin.P2P,
+        id: p2pPubKeyB
+      }
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [accountA, accountB])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, accountB.accountIdentifier)
+    await (client as any).storage.set(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP, [wcPeerA])
+    ;(client as any)._activeAccount = ExposedPromise.resolve(accountB)
+    ;(client as any)._activePeer = ExposedPromise.resolve(p2pPeerB)
+    ;(client as any).walletConnectTransport = {
+      type: TransportType.WALLETCONNECT,
+      connectionStatus: TransportStatus.CONNECTED,
+      // Simulates currentSession() already cleared before Disconnect handler queries getPeers()
+      getPeers: jest.fn().mockResolvedValue([]),
+      removePeer: jest.fn().mockResolvedValue(undefined)
+    }
+
+    await (client as any).handleResponse(
+      {
+        id: 'inactive-wc-disconnect',
+        version: '2',
+        senderId: wcTopicA,
+        type: BeaconMessageType.Disconnect
+      },
+      {
+        origin: Origin.WALLETCONNECT,
+        id: wcPubKeyA
+      }
+    )
+
+    await expect(client.getActiveAccount()).resolves.toEqual(accountB)
+    await expect((client as any).storage.get(StorageKey.ACCOUNTS)).resolves.toEqual([accountB])
+  })
+
+  it.each(['account', 'peer'])('does not activate an account removed during startup by %s', async (removal) => {
+    const account = createStoredAccount()
+    const storage = new LocalStorage({
+      [StorageKey.ACCOUNTS]: [account],
+      [StorageKey.ACTIVE_ACCOUNT]: account.accountIdentifier
+    })
+    const entered = new ExposedPromise<void>()
+    const release = new ExposedPromise<void>()
+    const get = storage.get.bind(storage)
+    let first = true
+    jest.spyOn(storage, 'get').mockImplementation(async (key) => {
+      const value = await get(key)
+      if (key === StorageKey.ACCOUNTS && first) {
+        first = false
+        entered.resolve()
+        await release.promise
+      }
+      return value
+    })
+    Reflect.set(window, 'beaconCreatedClientInstance', false)
+    const restoring = new DAppClient({ name: 'Removing during restore', storage, disableDefaultEvents: true })
+    jest.spyOn(restoring, 'initInternalTransports').mockResolvedValue(undefined)
+    jest.spyOn(restoring, 'getPeer').mockResolvedValue(undefined)
+    await entered.promise
+    const removed = removal === 'account'
+      ? restoring.removeAccount(account.accountIdentifier)
+      : Reflect.get(restoring, 'removeAccountsForPeerIds').call(restoring, [account.senderId])
+    for (let i = 0; i < 30; i++) await Promise.resolve()
+    release.resolve()
+    await Promise.all([removed, Reflect.get(restoring, 'activeAccountLoaded')])
+    expect(await storage.get(StorageKey.ACCOUNTS)).toEqual([])
+    expect(await storage.get(StorageKey.ACTIVE_ACCOUNT)).toBeUndefined()
+    expect(await restoring.getActiveAccount()).toBeUndefined()
+  })
+
+  it('does not restore durable active pointer after a held write is cleared', async () => {
+    await client.getActiveAccount()
+    const account = createStoredAccount()
+    const storage: LocalStorage = Reflect.get(client, 'storage')
+    await storage.set(StorageKey.ACCOUNTS, [account])
+    jest.spyOn(client, 'initInternalTransports').mockResolvedValue(undefined)
+    jest.spyOn(client, 'getPeer').mockResolvedValue(createV480P2PPeer())
+    const entered = new ExposedPromise<void>()
+    const release = new ExposedPromise<void>()
+    const set = storage.set.bind(storage)
+    jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+      if (key === StorageKey.ACTIVE_ACCOUNT && value === account.accountIdentifier) {
+        entered.resolve()
+        await release.promise
+      }
+      return set(key, value)
+    })
+    const selection = client.setActiveAccount(account)
+    await entered.promise
+    const cleared = client.clearActiveAccount()
+    for (let i = 0; i < 30; i++) await Promise.resolve()
+    release.resolve()
+    await Promise.all([selection, cleared])
+    expect(await storage.get(StorageKey.ACTIVE_ACCOUNT)).toBeUndefined()
+    expect(await client.getActiveAccount()).toBeUndefined()
+  })
+
+  it.each([
+    ['lookup', 'remove'], ['write', 'remove'],
+    ['lookup', 'disconnect'], ['write', 'disconnect'],
+    ['lookup', 'destroy'], ['write', 'destroy']
+  ])('does not restore durable accounts held at %s after %s', async (stage, teardown) => {
+    const storage: LocalStorage = Reflect.get(client, 'storage')
+    const entered = new ExposedPromise<void>()
+    const release = new ExposedPromise<void>()
+    await client.getActiveAccount()
+    const get = storage.get.bind(storage)
+    const set = storage.set.bind(storage)
+    jest.spyOn(storage, 'get').mockImplementation(async (key) => {
+      if (stage === 'lookup' && key === StorageKey.LAST_SELECTED_WALLET) { entered.resolve(); await release.promise }
+      const result = await get(key)
+      return key === StorageKey.ACCOUNTS ? result ?? [] : result
+    })
+    if (stage === 'write') {
+      jest.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+        if (key === StorageKey.ACCOUNTS && Array.isArray(value) && value.length > 0) {
+          entered.resolve(); await release.promise
+        }
+        return set(key, value)
+      })
+    }
+    const change = Reflect.get(client, 'onNewAccount').call(client, {
+      id: 'permission', version: '2', senderId: 'wallet-sender-id',
+      type: BeaconMessageType.PermissionResponse,
+      address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
+      network: { type: NetworkType.MAINNET }, scopes: [PermissionScope.SIGN]
+    }, { origin: Origin.P2P, id: 'wallet-public-key' })
+    await entered.promise
+    const removed = teardown === 'destroy'
+      ? client.destroy()
+      : teardown === 'disconnect'
+        ? client.disconnect({ notifyPeers: false })
+        : client.removeAllAccounts()
+    // Let cleanup reach storage while the earlier operation remains held.
+    for (let i = 0; i < 30; i++) await Promise.resolve()
+    release.resolve()
+    await Promise.all([change, removed])
+    expect((await storage.get(StorageKey.ACCOUNTS)) ?? []).toEqual([])
+    expect(await storage.get(StorageKey.ACTIVE_ACCOUNT)).toBeUndefined()
+    if (teardown === 'destroy') {
+      await expect(client.getActiveAccount()).rejects.toThrow('destroyed')
+    } else {
+      expect(await client.getActiveAccount()).toBeUndefined()
+    }
+  })
+
+  it('does not overwrite active account when a peer switch occurs while ChangeAccountRequest is awaiting storage in onNewAccount', async () => {
+    const { getSenderId: mockGetSenderId } = require('@ecadlabs/beacon-core')
+    const pubKeyA = 'aa'.repeat(32)
+    const pubKeyB = 'bb'.repeat(32)
+    const senderIdA = 'sender-wallet-a'
+    const senderIdB = 'sender-wallet-b'
+    ;(mockGetSenderId as jest.Mock).mockImplementation(async (pk: string) => {
+      if (pk === pubKeyA) return senderIdA
+      if (pk === pubKeyB) return senderIdB
+      return 'senderId'
+    })
+
+    const peerA = {
+      ...createV480P2PPeer(),
+      id: pubKeyA,
+      publicKey: pubKeyA,
+      senderId: senderIdA,
+      name: 'Wallet A'
+    }
+    const peerB = {
+      ...createV480P2PPeer(),
+      id: pubKeyB,
+      publicKey: pubKeyB,
+      senderId: senderIdB,
+      name: 'Wallet B'
+    }
+    const accountA = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-a-id',
+      senderId: senderIdA,
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyA
+      }
+    }
+    const accountB = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-b-id',
+      senderId: senderIdB,
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyB
+      }
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [accountA, accountB])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, accountA.accountIdentifier)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(accountA)
+    ;(client as any)._activePeer = ExposedPromise.resolve(peerA)
+
+    let releaseAddAccount!: () => void
+    const entered = new ExposedPromise<void>()
+    const originalAddAccount = (client as any).accountManager.addAccount.bind(
+      (client as any).accountManager
+    )
+    const addAccountSpy = jest
+      .spyOn((client as any).accountManager, 'addAccount')
+      .mockImplementationOnce(async (account: any) => {
+        await new Promise<void>((resolve) => {
+          releaseAddAccount = resolve
+          entered.resolve()
+        })
+        return originalAddAccount(account)
+      })
+    const initTransportsSpy = jest
+      .spyOn(client as any, 'initInternalTransports')
+      .mockResolvedValue(undefined)
+
+    try {
+      const changePromise = (client as any).handleResponse(
+        {
+          id: 'overlapping-change-account',
+          version: '3',
+          senderId: senderIdA,
+          type: BeaconMessageType.ChangeAccountRequest,
+          publicKey: pubKeyA,
+          walletType: 'implicit',
+          network: {
+            type: NetworkType.MAINNET
+          },
+          scopes: [PermissionScope.SIGN]
+        },
+        {
+          origin: Origin.P2P,
+          id: pubKeyA
+        }
+      )
+
+      await entered.promise
+
+      // User switches to Wallet B while Wallet A's ChangeAccountRequest is paused in addAccount
+      ;(client as any)._activePeer = ExposedPromise.resolve(peerB)
+      ;(client as any)._activeAccount = ExposedPromise.resolve(accountB)
+      await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, accountB.accountIdentifier)
+
+      releaseAddAccount()
+      await changePromise
+
+      await expect(client.getActiveAccount()).resolves.toEqual(accountB)
+      expect(await client.getAccounts()).toEqual([accountA, accountB])
+      expect(await Reflect.get(client, 'storage').get(StorageKey.ACTIVE_ACCOUNT)).toBe(accountB.accountIdentifier)
+    } finally {
+      addAccountSpy.mockRestore()
+      initTransportsSpy.mockRestore()
+      ;(mockGetSenderId as jest.Mock).mockImplementation(async (pk: string) =>
+        pk === 'wallet-public-key' ? 'wallet-sender-id' : 'senderId'
+      )
+    }
+  })
+
+  it('does not let an earlier ChangeAccountRequest from the same peer overwrite a newer one when addAccount completes out of order', async () => {
+    const wcPubKey = 'cc'.repeat(32)
+    const wcTopic = 'wc-active-topic'
+    const wcPeer = {
+      id: wcPubKey,
+      type: 'walletconnect-pairing-response' as const,
+      name: 'WC Wallet',
+      publicKey: wcPubKey,
+      version: 'first',
+      senderId: wcTopic,
+      extensionId: 'WC Wallet'
+    }
+    const initialAccount = {
+      ...createStoredAccount(),
+      accountIdentifier: 'wc-initial-id',
+      senderId: wcTopic,
+      address: 'tz1InitialWcAddress11111111111111111',
+      origin: {
+        type: Origin.WALLETCONNECT,
+        id: wcPubKey
+      }
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [initialAccount])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, initialAccount.accountIdentifier)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(initialAccount)
+    ;(client as any)._activePeer = ExposedPromise.resolve(wcPeer)
+
+    let releaseFirstAdd!: () => void
+    const entered = new ExposedPromise<void>()
+    const originalAddAccount = (client as any).accountManager.addAccount.bind(
+      (client as any).accountManager
+    )
+    const addAccountSpy = jest
+      .spyOn((client as any).accountManager, 'addAccount')
+      .mockImplementationOnce(async (account: any) => {
+        await new Promise<void>((resolve) => {
+          releaseFirstAdd = resolve
+          entered.resolve()
+        })
+        return originalAddAccount(account)
+      })
+    const initTransportsSpy = jest
+      .spyOn(client as any, 'initInternalTransports')
+      .mockResolvedValue(undefined)
+    const getPeerSpy = jest.spyOn(client as any, 'getPeer').mockResolvedValue(wcPeer)
+
+    try {
+      const firstChange = (client as any).handleResponse(
+        {
+          id: 'wc-change-1',
+          version: '2',
+          senderId: wcTopic,
+          type: BeaconMessageType.ChangeAccountRequest,
+          address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
+          walletType: 'implicit',
+          network: {
+            type: NetworkType.MAINNET
+          },
+          scopes: [PermissionScope.SIGN]
+        },
+        {
+          origin: Origin.WALLETCONNECT,
+          id: wcPubKey
+        }
+      )
+
+      await entered.promise
+
+      const secondChange = (client as any).handleResponse(
+        {
+          id: 'wc-change-2',
+          version: '2',
+          senderId: wcTopic,
+          type: BeaconMessageType.ChangeAccountRequest,
+          address: 'tz1aSkwEot3L2kmUvcoxzjMomb9mvBNuzFK6',
+          walletType: 'implicit',
+          network: {
+            type: NetworkType.MAINNET
+          },
+          scopes: [PermissionScope.SIGN]
+        },
+        {
+          origin: Origin.WALLETCONNECT,
+          id: wcPubKey
+        }
+      )
+
+      // Release the older write before awaiting its serialized successor.
+      releaseFirstAdd()
+      await Promise.all([firstChange, secondChange])
+
+      await expect(client.getActiveAccount()).resolves.toEqual(
+        expect.objectContaining({
+          address: 'tz1aSkwEot3L2kmUvcoxzjMomb9mvBNuzFK6'
+        })
+      )
+    } finally {
+      addAccountSpy.mockRestore()
+      initTransportsSpy.mockRestore()
+      getPeerSpy.mockRestore()
+    }
+  })
+
+  it('does not overwrite active account if user switches account during setActiveAccount pre-commit awaits', async () => {
+    const { getSenderId: mockGetSenderId } = require('@ecadlabs/beacon-core')
+    const pubKeyA = 'aa'.repeat(32)
+    const pubKeyB = 'bb'.repeat(32)
+    const senderIdA = 'sender-wallet-a'
+    const senderIdB = 'sender-wallet-b'
+    ;(mockGetSenderId as jest.Mock).mockImplementation(async (pk: string) => {
+      if (pk === pubKeyA) return senderIdA
+      if (pk === pubKeyB) return senderIdB
+      return 'senderId'
+    })
+
+    const peerA = {
+      ...createV480P2PPeer(),
+      id: pubKeyA,
+      publicKey: pubKeyA,
+      senderId: senderIdA,
+      name: 'Wallet A'
+    }
+    const peerB = {
+      ...createV480P2PPeer(),
+      id: pubKeyB,
+      publicKey: pubKeyB,
+      senderId: senderIdB,
+      name: 'Wallet B'
+    }
+    const accountA = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-a-id',
+      senderId: senderIdA,
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyA
+      }
+    }
+    const accountB = {
+      ...createStoredAccount(),
+      accountIdentifier: 'account-b-id',
+      senderId: senderIdB,
+      address: 'tz1aSkwEot3L2kmUvcoxzjMomb9mvBNuzFK6',
+      origin: {
+        type: Origin.P2P,
+        id: pubKeyB
+      }
+    }
+
+    await (client as any).storage.set(StorageKey.ACCOUNTS, [accountA, accountB])
+    await (client as any).storage.set(StorageKey.ACTIVE_ACCOUNT, accountA.accountIdentifier)
+    ;(client as any)._activeAccount = ExposedPromise.resolve(accountA)
+    ;(client as any)._activePeer = ExposedPromise.resolve(peerA)
+
+    let releaseInvalidStateCheck!: () => void
+    const entered = new ExposedPromise<void>()
+    const invalidStateSpy = jest
+      .spyOn(client as any, 'isInvalidState')
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          releaseInvalidStateCheck = resolve
+          entered.resolve()
+        })
+        return false
+      })
+    const initTransportsSpy = jest
+      .spyOn(client as any, 'initInternalTransports')
+      .mockResolvedValue(undefined)
+
+    try {
+      const changePromise = (client as any).handleResponse(
+        {
+          id: 'change-during-invalid-state-await',
+          version: '3',
+          senderId: senderIdA,
+          type: BeaconMessageType.ChangeAccountRequest,
+          address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
+          walletType: 'implicit',
+          network: {
+            type: NetworkType.MAINNET
+          },
+          scopes: [PermissionScope.SIGN]
+        },
+        {
+          origin: Origin.P2P,
+          id: pubKeyA
+        }
+      )
+
+      await entered.promise
+
+      // User explicitly selects accountB while ChangeAccountRequest is inside setActiveAccount before _activeAccount mutation
+      await client.setActiveAccount(accountB)
+      ;(client as any)._activePeer = ExposedPromise.resolve(peerB)
+
+      releaseInvalidStateCheck()
+      await changePromise
+
+      await expect(client.getActiveAccount()).resolves.toEqual(accountB)
+    } finally {
+      invalidStateSpy.mockRestore()
+      initTransportsSpy.mockRestore()
+      ;(mockGetSenderId as jest.Mock).mockResolvedValue('senderId')
+    }
+  })
+
+  it('does not overwrite a newer active peer or transport when setActivePeer awaits initInternalTransports', async () => {
+    const peerA = {
+      ...createV480P2PPeer(),
+      type: 'p2p-pairing-response' as const,
+      id: 'peer-a',
+      publicKey: 'aa'.repeat(32),
+      senderId: 'sender-a',
+      name: 'Wallet A'
+    }
+    const peerB = {
+      ...createV480P2PPeer(),
+      type: 'p2p-pairing-response' as const,
+      id: 'peer-b',
+      publicKey: 'bb'.repeat(32),
+      senderId: 'sender-b',
+      name: 'Wallet B'
+    }
+
+    let releaseInit!: () => void
+    const initTransportsSpy = jest
+      .spyOn(client as any, 'initInternalTransports')
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          releaseInit = resolve
+        })
+      })
+      .mockResolvedValue(undefined)
+    const setTransportSpy = jest.spyOn(client as any, 'setTransport').mockResolvedValue(undefined)
+
+    try {
+      const firstSetPeer = (client as any).setActivePeer(peerA)
+      for (let i = 0; i < 10 && !releaseInit; i++) {
+        await Promise.resolve()
+      }
+      expect(releaseInit).toBeDefined()
+
+      await (client as any).setActivePeer(peerB)
+      expect(setTransportSpy).toHaveBeenCalledTimes(1)
+
+      releaseInit()
+      await firstSetPeer
+
+      expect(setTransportSpy).toHaveBeenCalledTimes(1)
+      const resolvedPeer = await (client as any)._activePeer.promise
+      expect(resolvedPeer).toEqual(peerB)
+    } finally {
+      initTransportsSpy.mockRestore()
+      setTransportSpy.mockRestore()
     }
   })
 })
