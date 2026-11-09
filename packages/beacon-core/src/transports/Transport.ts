@@ -14,6 +14,16 @@ import { ClientEvents } from './clients/ClientEvents'
 
 const logger = new Logger('Transport')
 
+const pairingPeerOwnership = new WeakMap<object, WeakMap<PeerInfo, () => boolean>>()
+
+/** @internal Captures the current acceptance transaction without changing callback signatures. */
+export function getPairingPeerOwnership(
+  transport: object,
+  peer: PeerInfo
+): (() => boolean) | undefined {
+  return pairingPeerOwnership.get(transport)?.get(peer)
+}
+
 /**
  * @internalapi
  *
@@ -55,6 +65,8 @@ export abstract class Transport<
   private peerWrite: Promise<void> = Promise.resolve()
 
   private readonly pairingPeers = new Map<string, symbol>()
+
+  private pairingAdmissions?: Map<string, Set<symbol>>
 
   private mutatePeers<R>(operation: () => Promise<R>): Promise<R> {
     const result = this.peerWrite.then(operation, operation)
@@ -182,8 +194,9 @@ export abstract class Transport<
   }
 
   public async addPeer(newPeer: T, _sendPairingResponse: boolean = true): Promise<void> {
+    this.pairingAdmissions?.delete(newPeer.publicKey)
+    this.pairingPeers.delete(newPeer.publicKey)
     await this.mutatePeers(async () => {
-      this.pairingPeers.delete(newPeer.publicKey)
       logger.log('addPeer', 'adding peer', newPeer)
       await this.peerManager.addPeer(newPeer as ArrayElem<StorageKeyReturnType[K]>) // TODO: Fix type
     })
@@ -201,10 +214,14 @@ export abstract class Transport<
     let snapshot: ArrayElem<StorageKeyReturnType[K]> | undefined
     let written = false
     let committed = false
+    const pending = (this.pairingAdmissions ??= new Map<string, Set<symbol>>())
+    const admissions = pending.get(peer.publicKey) ?? new Set<symbol>()
+    admissions.add(owner)
+    pending.set(peer.publicKey, admissions)
     try {
       await this.mutatePeers(async () => {
         const previous = await this.peerManager.getPeer(peer.publicKey)
-        if (!isActive()) {
+        if (!pending.get(peer.publicKey)?.has(owner) || !isActive()) {
           return
         }
         snapshot = previous ? JSON.parse(JSON.stringify(previous)) : undefined
@@ -217,14 +234,30 @@ export abstract class Transport<
       }
       // Matrix registration can replay a Disconnect that removes this peer.
       await this.listen(peer.publicKey)
+      // Confirm admitted writes without retaining the queue during application callbacks.
+      await this.peerWrite
       if (!ownsPeer() || !isActive()) {
         return false
       }
+      let ownership = pairingPeerOwnership.get(this)
+      if (!ownership) {
+        ownership = new WeakMap()
+        pairingPeerOwnership.set(this, ownership)
+      }
+      ownership.set(peer, ownsPeer)
       // The winner may retire pairing requests while retaining this peer's ownership.
       committed = (await accepted()) && ownsPeer()
 
       return committed
     } finally {
+      const ownership = pairingPeerOwnership.get(this)
+      if (ownership?.get(peer) === ownsPeer) {
+        ownership.delete(peer)
+      }
+      admissions.delete(owner)
+      if (admissions.size === 0 && pending.get(peer.publicKey) === admissions) {
+        pending.delete(peer.publicKey)
+      }
       if (written) {
         await this.mutatePeers(async () => {
           if (ownsPeer()) {
@@ -256,8 +289,11 @@ export abstract class Transport<
   }
 
   public async removePeer(peerToBeRemoved: T): Promise<void> {
+    // Publication stops at removal intent, even while an earlier storage write is pending.
+    this.pairingAdmissions?.delete(peerToBeRemoved.publicKey)
+    this.pairingPeers.delete(peerToBeRemoved.publicKey)
+
     return this.mutatePeers(async () => {
-      this.pairingPeers.delete(peerToBeRemoved.publicKey)
       logger.log('removePeer', 'removing peer', peerToBeRemoved)
       await this.peerManager.removePeer(peerToBeRemoved.publicKey)
       if (this.client) {
@@ -267,8 +303,10 @@ export abstract class Transport<
   }
 
   public async removeAllPeers(): Promise<void> {
+    this.pairingAdmissions?.clear()
+    this.pairingPeers.clear()
+
     return this.mutatePeers(async () => {
-      this.pairingPeers.clear()
       logger.log('removeAllPeers')
       await this.peerManager.removeAllPeers()
       if (this.client) {

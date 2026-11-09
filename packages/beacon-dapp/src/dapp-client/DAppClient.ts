@@ -90,7 +90,8 @@ import {
   ClientEvents,
   StorageValidator,
   MultiTabChannel,
-  getError
+  getError,
+  getPairingPeerOwnership
 } from '@ecadlabs/beacon-core'
 import {
   getAddressFromPublicKey,
@@ -139,6 +140,7 @@ import {
 } from '../events'
 import { InitializationAttempt } from './InitializationAttempt'
 import { InitializationLifecycle } from './InitializationLifecycle'
+import { PairingAttempt } from './PairingAttempt'
 import { DAppClientOptions } from './DAppClientOptions'
 import { RequestTracker, RequestKey, RequestRoute } from './RequestTracker'
 import { PermissionRequestOwner } from './PermissionRequestOwner'
@@ -778,6 +780,8 @@ export class DAppClient extends Client {
             ? this.walletConnectTransport
             : (this.postMessageTransport ?? (await this.transport))
 
+      await this.retirePendingPeer(connectionInfo, message.senderId)
+
       if (relevantTransport) {
         const peers: ExtendedPeerInfo[] = [
           ...(await relevantTransport.getPeers()),
@@ -825,6 +829,30 @@ export class DAppClient extends Client {
       }
       const changeGeneration = ++this._accountChangeGeneration
       await this.onNewAccount(message, connectionInfo, changeGeneration, isCurrent)
+    }
+  }
+
+  private async retirePendingPeer(
+    connectionInfo: ConnectionContext,
+    senderId: string
+  ): Promise<void> {
+    const selected = this._activePeer.promiseResult
+    const selectedRoute =
+      selected &&
+      'senderId' in selected &&
+      selected.senderId === senderId &&
+      ((connectionInfo.origin === Origin.P2P &&
+        (selected.type === 'p2p-pairing-response' || selected.type === 'p2p-pairing-request') &&
+        selected.publicKey === connectionInfo.id) ||
+        (connectionInfo.origin === Origin.EXTENSION &&
+          selected.type === 'postmessage-pairing-response' &&
+          'extensionId' in selected &&
+          selected.extensionId === connectionInfo.id))
+    if (selectedRoute && this._activeAccount.isResolved() && !this._activeAccount.promiseResult) {
+      // Before an account exists, permission owners follow this selected route's transition.
+      this.beginAccountTransition()
+      this.resolveActivePeer(undefined)
+      await this.setTransport(undefined)
     }
   }
 
@@ -1390,144 +1418,105 @@ export class DAppClient extends Client {
           resolve(await super.init(walletConnectTransport))
         }
       } else {
-        let pairingCancelled = false
-        let pairingFinished = false
+        const pairing = new PairingAttempt()
+        const accept = async (
+          peer:
+            | ExtendedP2PPairingResponse
+            | ExtendedPostMessagePairingResponse
+            | ExtendedWalletConnectPairingResponse,
+          selectedTransport: DAppInternalTransport,
+          transportType: TransportType,
+          analyticsEvent: string,
+          declineOnError: boolean = false
+        ): Promise<boolean> => {
+          // Custom callback adapters retain their existing ownership contract.
+          const ownsPeer = getPairingPeerOwnership(selectedTransport, peer) ?? (() => true)
+          if (!attempt.isCurrent() || !ownsPeer()) {
+            return false
+          }
+          const winner = pairing.reserve()
+          if (!winner) {
+            return false
+          }
+          stopListening()
+          const isCurrent = () => attempt.isCurrent() && pairing.owns(winner) && ownsPeer()
+          const rollback = async (error: unknown): Promise<void> => {
+            pairing.cancel()
+            if (!attempt.isCurrent()) {
+              return
+            }
+            await this.initialization.cleanup(async () => {
+              reject(error)
+              await this.setActivePeer(undefined, transition).catch((err: unknown) =>
+                logger.error('init', err)
+              )
+              if (this.isCurrentAccountTransition(transition)) {
+                await this.setTransport(undefined).catch((err: unknown) =>
+                  logger.error('init', err)
+                )
+              }
+            })
+          }
+          logger.log('init', 'transport peer connected', peer)
+          this.analytics.track('event', 'DAppClient', analyticsEvent, { peerName: peer.name })
+          try {
+            await this.setActivePeer(peer, transition)
+            if (!isCurrent()) {
+              await rollback(this.createAbortedError())
+
+              return false
+            }
+            await this.setTransport(selectedTransport)
+            if (!isCurrent()) {
+              await rollback(this.createAbortedError())
+
+              return false
+            }
+            this.events
+              .emit(BeaconEvent.PAIR_SUCCESS, peer)
+              .catch((err: unknown) => logger.error('init', err))
+            // Event listeners run synchronously before the public init result settles.
+            if (!isCurrent()) {
+              await rollback(this.createAbortedError())
+
+              return false
+            }
+            pairing.complete(winner)
+            resolve(transportType)
+
+            return true
+          } catch (error: unknown) {
+            const current = attempt.isCurrent()
+            await rollback(error)
+            if (current && !declineOnError) {
+              throw error
+            }
+
+            return false
+          }
+        }
 
         postMessageTransport
-          .listenForNewPeer(async (peer) => {
-            if (pairingCancelled || pairingFinished || !attempt.isCurrent()) {
-              return false
-            }
-            pairingFinished = true
-            stopListening()
-            logger.log('init', 'postmessage transport peer connected', peer)
-            this.analytics.track('event', 'DAppClient', 'Extension connected', {
-              peerName: peer.name
-            })
-
-            try {
-              await this.setActivePeer(peer, transition)
-              if (!attempt.isCurrent()) {
-                return false
-              }
-              await this.setTransport(postMessageTransport)
-            } catch (error) {
-              if (!attempt.isCurrent()) {
-                return false
-              }
-              pairingCancelled = true
-              await this.setActivePeer(undefined, transition).catch((err) =>
-                logger.error('init', err)
-              )
-              if (!attempt.isCurrent()) {
-                return false
-              }
-              await this.setTransport(undefined).catch((err) => logger.error('init', err))
-              reject(error)
-              throw error
-            }
-            if (pairingCancelled || !attempt.isCurrent()) {
-              return false
-            }
-            this.events
-              .emit(BeaconEvent.PAIR_SUCCESS, peer)
-              .catch((err) => logger.error('init', err))
-            resolve(TransportType.POST_MESSAGE)
-
-            return true
-          })
-          .catch((err) => logger.error('init', err))
-
+          .listenForNewPeer((peer) =>
+            accept(peer, postMessageTransport, TransportType.POST_MESSAGE, 'Extension connected')
+          )
+          .catch((err: unknown) => logger.error('init', err))
         p2pTransport
-          .listenForNewPeer(async (peer) => {
-            if (pairingCancelled || pairingFinished || !attempt.isCurrent()) {
-              return false
-            }
-            pairingFinished = true
-            stopListening()
-            logger.log('init', 'p2p transport peer connected', peer)
-            this.analytics.track('event', 'DAppClient', 'Beacon Wallet connected', {
-              peerName: peer.name
-            })
-
-            try {
-              await this.setActivePeer(peer, transition)
-              if (!attempt.isCurrent()) {
-                return false
-              }
-              await this.setTransport(p2pTransport)
-            } catch (error) {
-              if (!attempt.isCurrent()) {
-                return false
-              }
-              pairingCancelled = true
-              await this.setActivePeer(undefined, transition).catch((err) =>
-                logger.error('init', err)
-              )
-              if (!attempt.isCurrent()) {
-                return false
-              }
-              await this.setTransport(undefined).catch((err) => logger.error('init', err))
-              reject(error)
-              throw error
-            }
-            if (pairingCancelled || !attempt.isCurrent()) {
-              return false
-            }
-            this.events
-              .emit(BeaconEvent.PAIR_SUCCESS, peer)
-              .catch((err) => logger.error('init', err))
-            resolve(TransportType.P2P)
-
-            return true
-          })
-          .catch((err) => logger.error('init', err))
-
+          .listenForNewPeer((peer) =>
+            accept(peer, p2pTransport, TransportType.P2P, 'Beacon Wallet connected')
+          )
+          .catch((err: unknown) => logger.error('init', err))
         walletConnectTransport
-          .listenForNewPeer(async (peer) => {
-            if (pairingCancelled || pairingFinished || !attempt.isCurrent()) {
-              return false
-            }
-            pairingFinished = true
-            stopListening()
-            logger.log('init', 'walletconnect transport peer connected', peer)
-            this.analytics.track('event', 'DAppClient', 'WalletConnect Wallet connected', {
-              peerName: peer.name
-            })
-
-            try {
-              await this.setActivePeer(peer, transition)
-              if (!attempt.isCurrent()) {
-                return false
-              }
-              await this.setTransport(walletConnectTransport)
-            } catch (error) {
-              if (!attempt.isCurrent()) {
-                return false
-              }
-              pairingCancelled = true
-              await this.setActivePeer(undefined, transition).catch((err) =>
-                logger.error('init', err)
-              )
-              if (!attempt.isCurrent()) {
-                return false
-              }
-              await this.setTransport(undefined).catch((err) => logger.error('init', err))
-              reject(error)
-
-              return false
-            }
-            if (pairingCancelled || !attempt.isCurrent()) {
-              return false
-            }
-            this.events
-              .emit(BeaconEvent.PAIR_SUCCESS, peer)
-              .catch((err) => logger.error('init', err))
-            resolve(TransportType.WALLETCONNECT)
-
-            return true
-          })
-          .catch((err) => logger.error('init', err))
+          .listenForNewPeer((peer) =>
+            accept(
+              peer,
+              walletConnectTransport,
+              TransportType.WALLETCONNECT,
+              'WalletConnect Wallet connected',
+              true
+            )
+          )
+          .catch((err: unknown) => logger.error('init', err))
 
         PostMessageTransport.getAvailableExtensions()
           .then(async (extensions) => {
@@ -1541,10 +1530,9 @@ export class DAppClient extends Client {
           })
 
         const abortHandler = async (): Promise<AbortSignal | undefined> => {
-          if (pairingCancelled || pairingFinished || !attempt.isCurrent()) {
+          if (!attempt.isCurrent() || !pairing.cancel()) {
             return undefined
           }
-          pairingCancelled = true
 
           return this.initialization.cleanup(async () => {
             reject(this.createAbortedError())
@@ -1602,20 +1590,29 @@ export class DAppClient extends Client {
           })
         }
 
+        // Empty pairing information closes the UI, so defer it until commit or cancellation settles.
+        const retiredInformation = () =>
+          attempt.promise.then(
+            () => '',
+            () => ''
+          )
         const serializer = new Serializer()
         const p2pPeerInfo = attempt.information(async () => {
           try {
             await p2pTransport.connect()
-            if (pairingCancelled || pairingFinished || !attempt.isCurrent()) {
-              return ''
+            if (!pairing.collecting || !attempt.isCurrent()) {
+              return retiredInformation()
             }
           } catch (err: unknown) {
-            if (pairingCancelled || pairingFinished || !attempt.isCurrent()) {
-              return ''
+            if (!pairing.collecting || !attempt.isCurrent()) {
+              return retiredInformation()
             }
             const message = err instanceof Error ? err.message : String(err)
             logger.error('init', err)
             await this.hideUI(['alert'])
+            if (!pairing.collecting || !attempt.isCurrent()) {
+              return retiredInformation()
+            }
             const errorTransition = await abortHandler().catch((abortErr) => {
               logger.warn('init', 'abortHandler', abortErr)
 
@@ -1631,13 +1628,13 @@ export class DAppClient extends Client {
               }, 1000)
             }
 
-            return ''
+            return retiredInformation()
           }
           try {
             return serializer.serialize(await p2pTransport.getPairingRequestInfo())
           } catch (error) {
-            if (pairingCancelled || pairingFinished) {
-              return ''
+            if (!pairing.collecting) {
+              return retiredInformation()
             } else {
               throw error
             }
@@ -1652,20 +1649,20 @@ export class DAppClient extends Client {
               .catch((error) => {
                 logger.warn('init', 'walletconnect pairing request failed', error)
 
-                return ''
+                return pairing.collecting ? '' : retiredInformation()
               })
           )
         )
 
         const postmessagePeerInfo = attempt.information(async (): Promise<string> => {
-          if (pairingCancelled || pairingFinished) {
-            return ''
+          if (!pairing.collecting) {
+            return retiredInformation()
           }
           try {
             return await serializer.serialize(await postMessageTransport.getPairingRequestInfo())
           } catch (error) {
-            if (pairingCancelled || pairingFinished) {
-              return ''
+            if (!pairing.collecting) {
+              return retiredInformation()
             }
             throw error
           }
@@ -3162,8 +3159,15 @@ export class DAppClient extends Client {
       return
     }
     if (peer) {
+      const selectedTransport =
+        peer.type === 'postmessage-pairing-response'
+          ? this.postMessageTransport
+          : peer.type === 'p2p-pairing-response' || peer.type === 'p2p-pairing-request'
+            ? this.p2pTransport
+            : this.walletConnectTransport
+      const ownsPeer = selectedTransport && getPairingPeerOwnership(selectedTransport, peer)
       await this.initInternalTransports()
-      if (!this.isCurrentAccountTransition(transition)) {
+      if (!this.isCurrentAccountTransition(transition) || (ownsPeer && !ownsPeer())) {
         return
       }
     }

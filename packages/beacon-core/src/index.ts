@@ -14,7 +14,7 @@ import { TooManyOperationsBeaconError } from './errors/TooManyOperationsBeaconEr
 import { TransactionInvalidBeaconError } from './errors/TransactionInvalidBeaconError'
 import { UnknownBeaconError } from './errors/UnknownBeaconError'
 import { PeerUnreachableBeaconError } from './errors/PeerUnreachableBeaconError'
-import { Transport } from './transports/Transport'
+import { Transport, getPairingPeerOwnership } from './transports/Transport'
 import { ChromeStorage } from './storage/ChromeStorage'
 import { LocalStorage } from './storage/LocalStorage'
 import { getStorage } from './storage/getStorage'
@@ -72,7 +72,7 @@ export {
 }
 
 // Transport
-export { Transport, MessageBasedClient, CommunicationClient }
+export { Transport, getPairingPeerOwnership, MessageBasedClient, CommunicationClient }
 
 // Storage
 export { ChromeStorage, LocalStorage, WCStorage, IndexedDBStorage, StorageValidator, getStorage }

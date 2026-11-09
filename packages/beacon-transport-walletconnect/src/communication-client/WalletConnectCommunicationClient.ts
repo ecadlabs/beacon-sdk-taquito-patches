@@ -1251,7 +1251,9 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
               if (this.session?.topic === session.topic) {
                 this.setSession(previousSession)
               }
-              await this.discardApproval(signClient, session)
+              if (this.session?.topic !== session.topic) {
+                await this.discardApproval(signClient, session)
+              }
             }
           }
           if (accepted && this.session?.topic === session.topic) {
