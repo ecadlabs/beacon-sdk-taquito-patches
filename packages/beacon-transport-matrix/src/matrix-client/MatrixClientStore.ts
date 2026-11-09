@@ -195,7 +195,7 @@ export class MatrixClientStore {
    */
   private setState(partialState: Partial<MatrixState>): void {
     this.state = {
-      isRunning: partialState.isRunning || this.state.isRunning,
+      isRunning: partialState.isRunning ?? this.state.isRunning,
       userId: partialState.userId || this.state.userId,
       deviceId: partialState.deviceId || this.state.deviceId,
       txnNo: partialState.txnNo || this.state.txnNo,

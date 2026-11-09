@@ -50,7 +50,13 @@ export class MatrixRoom {
     return typeof roomOrId === 'string'
       ? new MatrixRoom(roomOrId, status || MatrixRoomStatus.UNKNOWN)
       : status !== undefined
-        ? new MatrixRoom(roomOrId.id, status, roomOrId.members, roomOrId.messages)
+        ? new MatrixRoom(
+            roomOrId.id,
+            status,
+            roomOrId.members,
+            roomOrId.messages,
+            roomOrId.invitations
+          )
         : roomOrId
   }
 
@@ -62,7 +68,13 @@ export class MatrixRoom {
    */
   public static merge(newState: MatrixRoom, previousState?: MatrixRoom): MatrixRoom {
     if (!previousState || previousState.id !== newState.id) {
-      return MatrixRoom.from(newState)
+      return new MatrixRoom(
+        newState.id,
+        newState.status,
+        newState.members,
+        newState.messages,
+        newState.invitations
+      )
     }
 
     return new MatrixRoom(
@@ -71,7 +83,8 @@ export class MatrixRoom {
       [...previousState.members, ...newState.members].filter(
         (member, index, array) => array.indexOf(member) === index
       ),
-      [...previousState.messages, ...newState.messages]
+      [...previousState.messages, ...newState.messages],
+      newState.invitations
     )
   }
 
@@ -98,7 +111,45 @@ export class MatrixRoom {
   private static fromInvited(id: string, invited: MatrixSyncInvitedRoom): MatrixRoom {
     const members = MatrixRoom.getMembersFromEvents(invited.invite_state.events)
 
-    return new MatrixRoom(id, MatrixRoomStatus.INVITED, members)
+    const memberEventsByTarget = new Map<
+      string,
+      { sender: string; membership: string | undefined }[]
+    >()
+    for (const event of invited.invite_state.events) {
+      if (event.type === 'm.room.member' && typeof event.state_key === 'string') {
+        const existing = memberEventsByTarget.get(event.state_key) ?? []
+        existing.push({
+          sender: event.sender,
+          membership: (event.content as { membership?: string })?.membership
+        })
+        memberEventsByTarget.set(event.state_key, existing)
+      }
+    }
+
+    const rejectedTargets: string[] = []
+    const invitations = Array.from(memberEventsByTarget.entries()).flatMap(([target, events]) => {
+      if (events.length === 0) {
+        return []
+      }
+      const firstSender = events[0].sender
+      const allValidInviteFromSameSender =
+        typeof firstSender === 'string' &&
+        firstSender.length > 0 &&
+        events.every((entry) => entry.membership === 'invite' && entry.sender === firstSender)
+      if (!allValidInviteFromSameSender) {
+        rejectedTargets.push(target)
+
+        return []
+      }
+
+      return [{ sender: firstSender, target }]
+    })
+    Object.defineProperty(invitations, 'rejectedTargets', {
+      value: rejectedTargets,
+      enumerable: false
+    })
+
+    return new MatrixRoom(id, MatrixRoomStatus.INVITED, members, [], invitations)
   }
 
   /**
@@ -166,6 +217,7 @@ export class MatrixRoom {
     public readonly id: string,
     public readonly status: MatrixRoomStatus = MatrixRoomStatus.UNKNOWN,
     public readonly members: string[] = [],
-    public messages: MatrixMessage<any>[] = []
+    public messages: MatrixMessage<unknown>[] = [],
+    public readonly invitations: { sender: string; target: string }[] = []
   ) {}
 }

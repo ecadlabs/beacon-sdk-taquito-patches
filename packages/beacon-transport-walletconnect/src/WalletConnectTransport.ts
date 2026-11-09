@@ -154,15 +154,13 @@ export class WalletConnectTransport<
 
   public async listen(publicKey: string): Promise<void> {
     await this.client
-      .listenForEncryptedMessage(publicKey, (message) => {
+      .listenForEncryptedMessage(publicKey, async (message) => {
         const connectionContext: ConnectionContext = {
           origin: Origin.WALLETCONNECT,
           id: publicKey
         }
 
-        this.notifyListeners(message, connectionContext).catch((error) => {
-          throw error
-        })
+        await this.notifyListeners(message, connectionContext)
       })
       .catch((error) => {
         throw error

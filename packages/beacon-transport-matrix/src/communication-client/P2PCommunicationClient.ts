@@ -23,6 +23,8 @@ import {
   Regions
 } from '@ecadlabs/beacon-types'
 import {
+  PendingPairingRequests,
+  Serializer,
   PeerManager,
   BEACON_VERSION,
   getSenderId,
@@ -75,6 +77,14 @@ const isMatrixError = (error: unknown): error is { errcode: string } =>
  * @internalapi
  */
 export class P2PCommunicationClient extends CommunicationClient {
+  public cancelPairingRequests(): Promise<void> {
+    return this.pendingPairings.cancel()
+  }
+
+  private startingClient: MatrixClient | undefined
+  private startupGeneration = 0
+  private resetting?: Promise<void>
+
   private client: ExposedPromise<MatrixClient> = new ExposedPromise()
 
   private initialEvent: MatrixClientEvent<MatrixClientEventType.MESSAGE> | undefined
@@ -91,6 +101,9 @@ export class P2PCommunicationClient extends CommunicationClient {
   private readonly activeListeners: Map<string, (event: MatrixClientEvent<any>) => void> = new Map()
 
   private readonly ignoredRooms: string[] = []
+  private readonly knownRelayServers: Set<string> = new Set()
+  private readonly seenCiphertexts: Set<string> = new Set()
+  private readonly inFlightCiphertexts: Set<string> = new Set()
   private loginCounter: number = 0
 
   constructor(
@@ -100,7 +113,8 @@ export class P2PCommunicationClient extends CommunicationClient {
     private readonly storage: Storage,
     matrixNodes?: NodeDistributions,
     private readonly iconUrl?: string,
-    private readonly appUrl?: string
+    private readonly appUrl?: string,
+    private readonly pendingPairings = new PendingPairingRequests()
   ) {
     super(keyPair)
 
@@ -117,6 +131,7 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async getPairingRequestInfo(): Promise<P2PPairingRequest> {
+    const generation = this.pendingPairings.generation
     const info: P2PPairingRequest = new P2PPairingRequest(
       await generateGUID(),
       this.name,
@@ -132,6 +147,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       info.appUrl = this.appUrl
     }
 
+    this.pendingPairings.add(info.id, generation)
     return info
   }
 
@@ -162,10 +178,6 @@ export class P2PCommunicationClient extends CommunicationClient {
   public async findBestRegionAndGetServer(): Promise<
     { server: string; timestamp: number } | undefined
   > {
-    if (this.selectedRegion) {
-      return this.relayServer?.promiseResult
-    }
-
     // 1) Flatten out [region, server] pairs and shuffle for randomness
     interface Probe {
       server: string
@@ -276,6 +288,8 @@ export class P2PCommunicationClient extends CommunicationClient {
       timestamp: number
       localTimestamp: number
     }>()
+    // The first caller receives the thrown error directly. Only concurrent callers await this promise.
+    discoveryPromise.promise.catch(() => undefined)
     this.relayServer = discoveryPromise
 
     try {
@@ -336,6 +350,12 @@ export class P2PCommunicationClient extends CommunicationClient {
       throw new Error(`getBeaconInfo ${server} failed: ${response.status} ${response.statusText}`)
     }
     const data = (await response.json()) as BeaconInfoResponse
+    this.knownRelayServers.add(server)
+    for (const knownServer of data.known_servers ?? []) {
+      if (typeof knownServer === 'string' && knownServer.length > 0) {
+        this.knownRelayServers.add(knownServer)
+      }
+    }
 
     return {
       region: data.region,
@@ -344,37 +364,103 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
   }
 
-  public async tryJoinRooms(roomId: string, retry: number = 1): Promise<void> {
-    try {
-      await (await this.client.promise).joinRooms(roomId)
-    } catch (error) {
-      if (retry <= 10 && (error as any).errcode === 'M_FORBIDDEN') {
-        // If we join the room too fast after receiving the invite, the server can accidentally reject our join. This seems to be a problem only when using a federated multi-node setup. Usually waiting for a couple milliseconds solves the issue, but to handle lag, we will keep retrying for 2 seconds.
-        logger.log(`Retrying to join...`, error)
-        setTimeout(async () => {
-          await this.tryJoinRooms(roomId, retry + 1)
-        }, 200)
-      } else {
-        logger.log(`Failed to join after ${retry} tries.`, error)
+  private async isTrustedRelayServer(relay: string): Promise<boolean> {
+    if (
+      Object.values(this.ENABLED_RELAY_SERVERS).some((servers) => servers.includes(relay)) ||
+      this.knownRelayServers.has(relay)
+    ) {
+      return true
+    }
+    if (this.relayServer?.isResolved()) {
+      const current = await this.relayServer.promise.catch(() => undefined)
+      if (current?.server === relay) {
+        return true
       }
     }
+
+    return false
+  }
+
+  private async isAuthorizedPeerInviter(
+    inviter: string,
+    peers: { publicKey: string; relayServer: string }[]
+  ): Promise<boolean> {
+    const [inviterHash, ...inviterRelayParts] = inviter.split(':')
+    const inviterRelay = inviterRelayParts.join(':')
+    if (!inviterHash.startsWith('@') || !inviterRelay) {
+      return false
+    }
+    for (const peer of peers) {
+      const peerHash = `@${await getHexHash(Buffer.from(peer.publicKey, 'hex'))}`
+      if (
+        peerHash === inviterHash &&
+        (peer.relayServer === inviterRelay || (await this.isTrustedRelayServer(inviterRelay)))
+      ) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  public async tryJoinRooms(
+    roomId: string,
+    retry: number = 1,
+    isAuthorized: () => Promise<boolean> = async () => true
+  ): Promise<void> {
+    const ready = this.client
+    const generation = this.startupGeneration
+    const isCurrent = () => ready === this.client && generation === this.startupGeneration
+    const client = await ready.promise
+    const join = async (attempt: number): Promise<void> => {
+      if (!isCurrent() || !(await isAuthorized()) || !isCurrent()) {
+        return
+      }
+      try {
+        await client.joinRooms(roomId)
+      } catch (error) {
+        if (attempt <= 10 && (error as { errcode?: string }).errcode === 'M_FORBIDDEN') {
+          setTimeout(() => {
+            join(attempt + 1).catch((retryError) => logger.error('tryJoinRooms', retryError))
+          }, 200)
+        } else {
+          logger.log(`Failed to join after ${attempt} tries.`, error)
+        }
+      }
+    }
+    await join(retry)
   }
 
   public async start(): Promise<void> {
+    const generation = ++this.startupGeneration
+    if (this.resetting) {
+      await this.resetting
+      if (generation !== this.startupGeneration) {
+        throw new DOMException('Matrix startup cancelled', 'AbortError')
+      }
+    }
     logger.log('start', 'starting client')
 
     logger.log('start', `connecting to server`)
 
     const relayServer: { server: string; timestamp: number } = await this.getRelayServer()
+    if (generation !== this.startupGeneration)
+      {throw new DOMException('Matrix startup cancelled', 'AbortError')}
 
     const client = MatrixClient.create({
       baseUrl: `https://${relayServer.server}`,
       storage: this.storage
     })
+    this.startingClient = client
 
+    const ready = this.client
+    const isCurrent = () => generation === this.startupGeneration && ready === this.client
     this.initialListener = async (
       event: MatrixClientEvent<MatrixClientEventType.MESSAGE>
     ): Promise<void> => {
+      if (!isCurrent()) {
+        return
+      }
       if (this.initialEvent && this.initialEvent.timestamp && event && event.timestamp) {
         if (this.initialEvent.timestamp < event.timestamp) {
           this.initialEvent = event
@@ -385,21 +471,53 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
     client.subscribe(MatrixClientEventType.MESSAGE, this.initialListener)
 
-    client.subscribe(MatrixClientEventType.INVITE, async (event) => {
-      let member
-      if (event.content.members.length === 1) {
-        // If there is only one member we know it's a new room
-        // TODO: Use the "sender" of the event instead
-        member = event.content.members[0]
+    const handleInvite = async (
+      event: MatrixClientEvent<MatrixClientEventType.INVITE>
+    ): Promise<void> => {
+      if (!isCurrent()) {
+        return
       }
-
-      await this.tryJoinRooms(event.content.roomId)
-
-      if (member) {
-        await this.updateRelayServer(member)
-        await this.updatePeerRoom(member, event.content.roomId)
+      const pairingGeneration = this.pendingPairings.hasPending()
+        ? this.pendingPairings.generation
+        : undefined
+      const ownId = recipientString(await this.getPublicKeyHash(), relayServer.server)
+      if (!isCurrent()) {
+        return
       }
-    })
+      const rejectedTargets =
+        (event.content.invitations as { rejectedTargets?: string[] } | undefined)
+          ?.rejectedTargets ?? []
+      if (rejectedTargets.includes(ownId)) {
+        return
+      }
+      const targetInvitations = (event.content.invitations ?? []).filter(
+        ({ target }) => target === ownId
+      )
+      const uniqueInviters = Array.from(new Set(targetInvitations.map(({ sender }) => sender)))
+      if (uniqueInviters.length !== 1) {
+        return
+      }
+      const isAuthorized = async (): Promise<boolean> => {
+        if (
+          pairingGeneration !== undefined &&
+          pairingGeneration === this.pendingPairings.generation &&
+          this.pendingPairings.hasPending()
+        ) {
+          return true
+        }
+        const dappPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
+        const walletPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_WALLET)
+
+        return this.isAuthorizedPeerInviter(uniqueInviters[0], [
+          ...(Array.isArray(dappPeers) ? dappPeers : []),
+          ...(Array.isArray(walletPeers) ? walletPeers : [])
+        ])
+      }
+      if ((await isAuthorized()) && isCurrent()) {
+        await this.tryJoinRooms(event.content.roomId, 1, isAuthorized)
+      }
+    }
+    client.subscribe(MatrixClientEventType.INVITE, handleInvite)
 
     if (!relayServer.timestamp) {
       throw new Error('No timestamp received from relay server')
@@ -421,29 +539,45 @@ export class P2PCommunicationClient extends CommunicationClient {
     const rawSignature = sign(secretKey, loginRawDigest)
 
     try {
+      const id = await this.getPublicKeyHash()
+      const password = `ed:${toHex(rawSignature)}:${await this.getPublicKey()}`
+      if (!isCurrent()) {
+        throw new DOMException('Matrix startup cancelled', 'AbortError')
+      }
       await client.start({
-        id: await this.getPublicKeyHash(),
-        password: `ed:${toHex(rawSignature)}:${await this.getPublicKey()}`,
+        id,
+        password,
         deviceId: toHex(this.keyPair!.publicKey)
       })
     } catch (error: any) {
+      if (this.startingClient === client) {
+        this.startingClient = undefined
+      }
+      await client.stop().catch((stopError) => logger.error(stopError))
+      if (error?.name === 'AbortError' || generation !== this.startupGeneration) {
+        throw new DOMException('Matrix startup cancelled', 'AbortError')
+      }
       logger.error('start', 'Could not log in, retrying', error)
 
       if (error.errcode === 'M_USER_DEACTIVATED') {
         await this.generateNewKeyPair()
-        await this.reset()
+        if (generation === this.startupGeneration) {
+          await this.reset()
+        }
         throw new Error('The account is deactivated.')
       }
 
-      await this.reset() // If we can't log in, let's reset
+      await this.reset()
+      if (generation !== this.startupGeneration) {
+        throw new DOMException('Matrix startup cancelled', 'AbortError')
+      }
       if (!this.selectedRegion) {
         throw new Error('No region selected.')
       }
       if (this.loginCounter <= (this.ENABLED_RELAY_SERVERS[this.selectedRegion] ?? []).length) {
         this.loginCounter++
-        this.start()
 
-        return
+        return this.start()
       } else {
         logger.error(
           'start',
@@ -454,31 +588,63 @@ export class P2PCommunicationClient extends CommunicationClient {
       }
     }
 
+    if (this.startingClient === client) {
+      this.startingClient = undefined
+    }
+    if (generation !== this.startupGeneration) {
+      await client.stop()
+      throw new DOMException('Matrix startup cancelled', 'AbortError')
+    }
+
+    this.loginCounter = 0
     logger.log('start', 'login successful, client is ready')
     this.client.resolve(client)
   }
 
   public async stop(): Promise<void> {
-    logger.log('stop', 'stopping client')
+    ++this.startupGeneration
+    this.loginCounter = 0
+    const starting = this.startingClient
+    this.startingClient = undefined
+    try {
+      await this.cancelPairingRequests()
+    } finally {
+      try {
+        await starting?.stop()
+      } finally {
+        logger.log('stop', 'stopping client')
 
-    if (this.client.isResolved()) {
-      await (await this.client.promise).stop().catch((error) => logger.error(error))
+        if (this.client.isResolved()) {
+          await (await this.client.promise).stop().catch((error) => logger.error(error))
+        }
+        await this.reset()
+      }
     }
-    await this.reset()
   }
 
   public async reset(): Promise<void> {
     logger.log('reset', 'resetting connection')
 
+    if (this.resetting) {
+      return this.resetting
+    }
+    this.relayServer = undefined
+    this.client = new ExposedPromise()
+    this.activeListeners.clear()
+    this.initialEvent = undefined
+    this.initialListener = undefined
+    this.seenCiphertexts.clear()
+    this.resetting = this.clearStoredSession().finally(() => {
+      this.resetting = undefined
+    })
+
+    return this.resetting
+  }
+
+  private async clearStoredSession(): Promise<void> {
     await this.storage.delete(StorageKey.MATRIX_PEER_ROOM_IDS).catch((error) => logger.log(error))
     await this.storage.delete(StorageKey.MATRIX_PRESERVED_STATE).catch((error) => logger.log(error))
     await this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((error) => logger.log(error))
-
-    // Instead of resetting everything, maybe we should make sure a new instance is created?
-    this.relayServer = undefined
-    this.client = new ExposedPromise()
-    this.initialEvent = undefined
-    this.initialListener = undefined
   }
 
   public async listenForEncryptedMessage(
@@ -493,24 +659,56 @@ export class P2PCommunicationClient extends CommunicationClient {
       `start listening for encrypted messages from publicKey ${senderPublicKey}`
     )
 
+    const ready = this.client
+    const generation = this.startupGeneration
+    const isCurrent = () => ready === this.client && generation === this.startupGeneration
     const sharedKey = await this.createCryptoBoxServer(senderPublicKey, this.keyPair!)
+    if (!isCurrent()) {
+      return
+    }
+    const client = await ready.promise
+    if (!isCurrent() || this.activeListeners.has(senderPublicKey)) {
+      return
+    }
 
     const callbackFunction = async (
       event: MatrixClientEvent<MatrixClientEventType.MESSAGE>
     ): Promise<void> => {
-      if (this.isTextMessage(event.content) && (await this.isSender(event, senderPublicKey))) {
-        let payload
-
-        await this.updateRelayServer(event.content.message.sender)
-        await this.updatePeerRoom(event.content.message.sender, event.content.roomId)
-
-        try {
-          payload = Buffer.from(event.content.message.content, 'hex')
-          // content can be non-hex if it's a connection open request
-        } catch {
-          /* */
+      if (
+        isCurrent() &&
+        this.isTextMessage(event.content) &&
+        (await this.isSender(event, senderPublicKey)) &&
+        isCurrent()
+      ) {
+        const [, ...senderRelayParts] = event.content.message.sender.split(':')
+        const senderRelay = senderRelayParts.join(':')
+        const dappPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
+        const walletPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_WALLET)
+        const peers = [
+          ...(Array.isArray(dappPeers) ? dappPeers : []),
+          ...(Array.isArray(walletPeers) ? walletPeers : [])
+        ]
+        const matchingPeers = peers.filter((peer) => peer.publicKey === senderPublicKey)
+        const trustedSenderRelay =
+          matchingPeers.length === 0 ||
+          matchingPeers.some((peer) => peer.relayServer === senderRelay) ||
+          (await this.isTrustedRelayServer(senderRelay))
+        if (!trustedSenderRelay) {
+          return
         }
-        if (payload && payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
+
+        const rawContent = event.content.message.content
+        if (
+          typeof rawContent !== 'string' ||
+          rawContent.length === 0 ||
+          rawContent.length % 2 !== 0 ||
+          !/^[0-9a-f]+$/i.test(rawContent)
+        ) {
+          return
+        }
+        const ciphertext = rawContent.toLowerCase()
+        const payload = Buffer.from(ciphertext, 'hex')
+        if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
           try {
             const decryptedMessage = await decryptCryptoboxPayload(payload, sharedKey.receive)
 
@@ -529,7 +727,38 @@ export class P2PCommunicationClient extends CommunicationClient {
             // console.log('calculated sender ID', await getSenderId(senderPublicKey))
             // TODO: Add check for correct decryption key / sender ID
 
-            messageCallback(decryptedMessage)
+            const message = (
+              decryptedMessage.startsWith('{')
+                ? JSON.parse(decryptedMessage)
+                : await new Serializer().deserialize(decryptedMessage)
+            ) as { senderId?: string }
+            if (message.senderId !== (await getSenderId(senderPublicKey)) || !isCurrent()) {
+              return
+            }
+            if (this.seenCiphertexts.has(ciphertext) || this.inFlightCiphertexts.has(ciphertext)) {
+              return
+            }
+            this.inFlightCiphertexts.add(ciphertext)
+            try {
+              await this.updateRelayServer(event.content.message.sender)
+              if (!isCurrent()) {
+                return
+              }
+              await this.updatePeerRoom(event.content.message.sender, event.content.roomId)
+              if (!isCurrent()) {
+                return
+              }
+              if (this.seenCiphertexts.size >= 1000) {
+                const oldest = this.seenCiphertexts.values().next().value
+                if (oldest !== undefined) {
+                  this.seenCiphertexts.delete(oldest)
+                }
+              }
+              this.seenCiphertexts.add(ciphertext)
+              messageCallback(decryptedMessage)
+            } finally {
+              this.inFlightCiphertexts.delete(ciphertext)
+            }
           } catch (decryptionError) {
             /* NO-OP. We try to decode every message, but some might not be addressed to us. */
           }
@@ -538,7 +767,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
 
     this.activeListeners.set(senderPublicKey, callbackFunction)
-    ;(await this.client.promise).subscribe(MatrixClientEventType.MESSAGE, callbackFunction)
+    client.subscribe(MatrixClientEventType.MESSAGE, callbackFunction)
 
     const lastEvent = this.initialEvent
     if (
@@ -552,9 +781,12 @@ export class P2PCommunicationClient extends CommunicationClient {
       logger.log('listenForEncryptedMessage', 'No previous event found')
     }
 
+    if (!isCurrent()) {
+      return
+    }
     const initialListener = this.initialListener
     if (initialListener) {
-      ;(await this.client.promise).unsubscribe(MatrixClientEventType.MESSAGE, initialListener)
+      client.unsubscribe(MatrixClientEventType.MESSAGE, initialListener)
     }
     this.initialListener = undefined
     this.initialEvent = undefined
@@ -670,7 +902,10 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async listenForChannelOpening(
-    messageCallback: (pairingResponse: ExtendedP2PPairingResponse) => void
+    messageCallback: (
+      pairingResponse: ExtendedP2PPairingResponse,
+      isActive: () => boolean
+    ) => void | Promise<void>
   ): Promise<void> {
     logger.debug(`listenForChannelOpening`)
     ;(await this.client.promise).subscribe(MatrixClientEventType.MESSAGE, async (event) => {
@@ -681,11 +916,12 @@ export class P2PCommunicationClient extends CommunicationClient {
           JSON.stringify(event)
         )
 
-        await this.updateRelayServer(event.content.message.sender)
-        await this.updatePeerRoom(event.content.message.sender, event.content.roomId)
-
         const splits = event.content.message.content.split(':')
-        const payload = Buffer.from(splits[splits.length - 1], 'hex')
+        const hexPayload = splits[splits.length - 1]
+        if (!hexPayload || hexPayload.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(hexPayload)) {
+          return
+        }
+        const payload = Buffer.from(hexPayload, 'hex')
 
         if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
           try {
@@ -699,10 +935,32 @@ export class P2PCommunicationClient extends CommunicationClient {
               JSON.stringify(pairingResponse)
             )
 
-            messageCallback({
-              ...pairingResponse,
-              senderId: await getSenderId(pairingResponse.publicKey)
-            })
+            if (
+              !pairingResponse ||
+              typeof pairingResponse.id !== 'string' ||
+              typeof pairingResponse.publicKey !== 'string' ||
+              !/^[a-f0-9]{64}$/i.test(pairingResponse.publicKey) ||
+              typeof pairingResponse.name !== 'string' ||
+              typeof pairingResponse.version !== 'string' ||
+              !(await this.isSender(event, pairingResponse.publicKey))
+            ) {
+              return
+            }
+            const senderId = await getSenderId(pairingResponse.publicKey)
+            await this.pendingPairings
+              .accept(pairingResponse.id, async (isActive) => {
+                await messageCallback(
+                  {
+                    ...pairingResponse,
+                    relayServer: event.content.message.sender.split(':').slice(1).join(':'),
+                    senderId
+                  },
+                  isActive
+                )
+              })
+              .catch((error) =>
+                logger.error('listenForChannelOpening', 'pairing acceptance failed', error)
+              )
           } catch (decryptionError) {
             /* NO-OP. We try to decode every message, but some might not be addressed to us. */
           }
@@ -799,20 +1057,23 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
     const senderHash = split.shift()
     const relayServer = split.join(':')
-    const manager = localStorage.getItem('beacon:communication-peers-dapp')
-      ? new PeerManager(this.storage, StorageKey.TRANSPORT_P2P_PEERS_DAPP)
-      : new PeerManager(this.storage, StorageKey.TRANSPORT_P2P_PEERS_WALLET)
-    const peers = await manager.getPeers()
-    const promiseArray = peers.map(async (peer) => {
-      const hash = `@${await getHexHash(Buffer.from(peer.publicKey, 'hex'))}`
-      if (hash === senderHash) {
-        if (peer.relayServer !== relayServer) {
-          peer.relayServer = relayServer
-          await manager.addPeer(peer as ExtendedP2PPairingResponse)
-        }
-      }
-    })
-    await Promise.all(promiseArray)
+    const managers = [
+      new PeerManager(this.storage, StorageKey.TRANSPORT_P2P_PEERS_DAPP),
+      new PeerManager(this.storage, StorageKey.TRANSPORT_P2P_PEERS_WALLET)
+    ]
+    for (const manager of managers) {
+      const rawPeers = await manager.getPeers()
+      const peers = Array.isArray(rawPeers) ? rawPeers : []
+      await Promise.all(
+        peers.map(async (peer) => {
+          const peerHash = `@${await getHexHash(Buffer.from(peer.publicKey, 'hex'))}`
+          if (peerHash === senderHash && peer.relayServer !== relayServer) {
+            peer.relayServer = relayServer
+            await manager.addPeer(peer as ExtendedP2PPairingResponse)
+          }
+        })
+      )
+    }
   }
 
   public async isChannelOpenMessage(
@@ -828,7 +1089,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     senderPublicKey: string
   ): Promise<boolean> {
     return event.content.message.sender.startsWith(
-      `@${await getHexHash(Buffer.from(senderPublicKey, 'hex'))}`
+      `@${await getHexHash(Buffer.from(senderPublicKey, 'hex'))}:`
     )
   }
 

@@ -32,6 +32,8 @@ const RETRY_INTERVAL = 5000
  */
 export class MatrixClient {
   private isActive: boolean = true
+  private session: number = 0
+  private cancelStartup: (() => void) | undefined
   private _isReady: ExposedPromise<void> = new ExposedPromise()
   private txnIdLock: Promise<void> = Promise.resolve()
 
@@ -123,47 +125,92 @@ export class MatrixClient {
    *
    * @param user
    */
-  public async start(user: MatrixLoginConfig): Promise<void> {
-    const response = await this.userService.login(user.id, user.password, user.deviceId)
+  public start(user: MatrixLoginConfig): Promise<void> {
+    this.cancelStartup?.()
+    const session = ++this.session
+    this.isActive = true
+    if (this._isReady.isSettled()) {
+      this._isReady = new ExposedPromise()
+    }
+    const ready = this._isReady
+    const isCurrent = (): boolean => this.isActive && session === this.session
 
-    await this.store.update({
-      accessToken: response.access_token
-    })
-
-    const initialPollingResult = new Promise<void>(async (resolve, reject) => {
-      await this.poll(
-        0,
-        async (pollingResponse: MatrixSyncResponse) => {
-          if (!this.store.get('isRunning')) {
-            resolve()
+    return new Promise<void>((resolve, reject) => {
+      let settled = false
+      const rejectStartup = (error: unknown): void => {
+        if (!settled) {
+          settled = true
+          // Both callbacks are initialized before startup or cancellation can run.
+          // eslint-disable-next-line @typescript-eslint/no-use-before-define
+          if (this.cancelStartup === cancel) {
+            this.cancelStartup = undefined
           }
-          await this.store.update({
-            isRunning: true,
-            syncToken: pollingResponse.next_batch,
-            pollingTimeout: 30000,
-            pollingRetries: 0,
-            rooms: MatrixRoom.fromSync(pollingResponse.rooms)
-          })
-        },
-        async (error) => {
-          if (!this.store.get('isRunning')) {
-            reject(error)
-          }
-          await this.store.update({
-            isRunning: false,
-            pollingRetries: this.store.get('pollingRetries') + 1
-          })
+          reject(error)
         }
-      )
+      }
+      const cancel = (): void =>
+        rejectStartup(new DOMException('Matrix startup cancelled', 'AbortError'))
+      this.cancelStartup = cancel
+      const login = async (): Promise<void> => {
+        if (!isCurrent()) {
+          return
+        }
+        const password = user.password
+        if (!isCurrent()) {
+          return
+        }
+        const response = await this.userService.login(user.id, password, user.deviceId)
+        if (!isCurrent()) {
+          return
+        }
+        await this.store.update({ accessToken: response.access_token })
+      }
+
+      const initialize = async (): Promise<void> => {
+        await login()
+        if (!isCurrent()) {
+          return
+        }
+        this.poll(
+          0,
+          session,
+          async (pollingResponse: MatrixSyncResponse) => {
+            if (!isCurrent()) {
+              return
+            }
+            await this.store.update({
+              isRunning: true,
+              syncToken: pollingResponse.next_batch,
+              pollingTimeout: 30000,
+              pollingRetries: 0,
+              rooms: MatrixRoom.fromSync(pollingResponse.rooms)
+            })
+            if (!isCurrent()) {
+              return
+            }
+            if (!settled) {
+              settled = true
+              if (this.cancelStartup === cancel) {
+                this.cancelStartup = undefined
+              }
+              ready.resolve()
+              resolve()
+            }
+          },
+          async (error) => {
+            if (!isCurrent()) {
+              return
+            }
+            rejectStartup(error)
+            await this.store.update({
+              isRunning: false,
+              pollingRetries: this.store.get('pollingRetries') + 1
+            })
+          }
+        ).catch(rejectStartup)
+      }
+      initialize().catch(rejectStartup)
     })
-
-    initialPollingResult
-      .then(() => {
-        this._isReady.resolve()
-      })
-      .catch(console.error)
-
-    return initialPollingResult
   }
 
   public async isConnected(): Promise<void> {
@@ -176,9 +223,15 @@ export class MatrixClient {
   public async stop(): Promise<void> {
     logger.log(`MATRIX CLIENT STOPPED`)
     this.isActive = false
+    this.cancelStartup?.()
+    ++this.session
     this._isReady = new ExposedPromise()
 
-    return this.httpClient.cancelAllRequests()
+    try {
+      await this.httpClient.cancelAllRequests()
+    } finally {
+      await this.store.update({ isRunning: false })
+    }
   }
 
   /**
@@ -318,8 +371,9 @@ export class MatrixClient {
    */
   private async poll(
     interval: number,
-    onSyncSuccess: (response: MatrixSyncResponse) => void,
-    onSyncError: (error: unknown) => void
+    session: number,
+    onSyncSuccess: (response: MatrixSyncResponse) => void | Promise<void>,
+    onSyncError: (error: unknown) => void | Promise<void>
   ): Promise<void> {
     const store = this.store
     const sync = this.sync.bind(this)
@@ -328,12 +382,22 @@ export class MatrixClient {
     const pollSync = async (
       resolve: (value?: void | PromiseLike<void> | undefined) => void
     ): Promise<void> => {
+      if (!this.isActive || session !== this.session) {
+        resolve()
+
+        return
+      }
       let syncingRetries: number = 0
       try {
         const response = await sync()
-        onSyncSuccess(response)
+        if (this.isActive && session === this.session) {
+          await onSyncSuccess(response)
+        }
       } catch (error) {
-        onSyncError(error)
+        if (!this.isActive || session !== this.session) {
+          return
+        }
+        await onSyncError(error)
 
         syncingRetries = store.get('pollingRetries')
         // console.warn('Could not sync:', error)
@@ -341,7 +405,7 @@ export class MatrixClient {
           logger.log(`Retry syncing... ${syncingRetries} retries so far`)
         }
       } finally {
-        if (this.isActive) {
+        if (this.isActive && session === this.session) {
           setTimeout(
             async () => {
               await pollSync(resolve)

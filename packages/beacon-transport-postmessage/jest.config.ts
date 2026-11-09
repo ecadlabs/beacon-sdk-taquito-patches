@@ -91,6 +91,7 @@ const config: Config = {
 
   // A map from regular expressions to module names or to arrays of module names that allow to stub out resources with a single module
   moduleNameMapper: {
+    '^@ecadlabs/(.*)$': '<rootDir>/../$1/src',
     '\\.(css|less)$': '<rootDir>/__mocks__/styleMock.js'
   },
 

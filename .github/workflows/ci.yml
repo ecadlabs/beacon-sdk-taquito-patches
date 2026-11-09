@@ -13,7 +13,7 @@ concurrency:
 jobs:
   build-and-unit:
     name: build-and-unit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
 
     steps:
@@ -32,6 +32,13 @@ jobs:
       - name: Install dependencies
         run: ./scripts/npm11.sh ci --include=optional
 
+      - name: Check workspace versions
+        run: ./scripts/npm11.sh run check:versions
+
+      - name: Build packages
+        run: ./scripts/npm11.sh run build
+
+      # Type-aware lint needs the workspace declarations produced by the build.
       - name: Gate new lint findings
         env:
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -41,18 +48,12 @@ jobs:
           fi
           ./scripts/npm11.sh run lint:new
 
-      - name: Check workspace versions
-        run: ./scripts/npm11.sh run check:versions
-
-      - name: Build packages
-        run: ./scripts/npm11.sh run build
-
       - name: Run unit tests
         run: ./scripts/npm11.sh run test
 
   end-to-end:
     name: end-to-end
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:

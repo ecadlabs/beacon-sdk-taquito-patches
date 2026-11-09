@@ -21,6 +21,7 @@ export interface MatrixStateEventMessage extends MatrixStateEvent {
 
 export interface MatrixStateEvent {
   type: string
+  state_key?: string
   sender: string
   content: unknown
   event_id?: string
