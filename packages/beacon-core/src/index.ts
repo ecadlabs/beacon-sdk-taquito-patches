@@ -44,7 +44,7 @@ import { ClientEvents } from './transports/clients/ClientEvents'
 import { WCStorage } from './storage/WCStorage'
 import { IndexedDBStorage } from './storage/IndexedDBStorage'
 import { StorageValidator } from './storage/StorageValidator'
-import { MultiTabChannel } from './utils/multi-tab-channel'
+import { MultiTabChannel, observeMultiTabChannel } from './utils/multi-tab-channel'
 import getError from './errors/get-error'
 // import { EncryptionType } from './types/EncryptionType'
 // import { EncryptionOperation } from './types/EncryptionOperation'
@@ -84,7 +84,7 @@ export { PeerManager, AccountManager, AppMetadataManager, PermissionManager }
 export { SDK_VERSION, BEACON_VERSION }
 
 // Utils
-export { getSenderId, getAccountIdentifier, windowRef, MultiTabChannel }
+export { getSenderId, getAccountIdentifier, windowRef, MultiTabChannel, observeMultiTabChannel }
 
 // Others
 export { Serializer, Logger, setLogger, getLogger }

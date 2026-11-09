@@ -90,6 +90,7 @@ import {
   ClientEvents,
   StorageValidator,
   MultiTabChannel,
+  observeMultiTabChannel,
   getError,
   getPairingPeerOwnership
 } from '@ecadlabs/beacon-core'
@@ -144,6 +145,7 @@ import { PairingAttempt } from './PairingAttempt'
 import { DAppClientOptions } from './DAppClientOptions'
 import { RequestTracker, RequestKey, RequestRoute } from './RequestTracker'
 import { PermissionRequestOwner } from './PermissionRequestOwner'
+import { TabLifecycle } from './TabLifecycle'
 
 interface RequestResponse {
   message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage | BlockchainMessage>
@@ -269,6 +271,8 @@ export class DAppClient extends Client {
   protected wcRelayUrl?: string
 
   private isGetActiveAccountHandled: boolean = false
+
+  private readonly proxyAccountPreparations = new Map<RequestKey, () => void>()
 
   private readonly requestTracker = new RequestTracker<RequestResponse, unknown>({
     onError: (error) => logger.error('requestTracker', error)
@@ -401,6 +405,20 @@ export class DAppClient extends Client {
     this.onBCMessageHandler.bind(this),
     this.onElectedLeaderhandler.bind(this)
   )
+
+  private readonly tabLifecycle = new TabLifecycle(
+    () => this.multiTabChannel.isLeader(),
+    () => this.createAbortedError()
+  )
+
+  private readonly stopTabObservation = observeMultiTabChannel(this.multiTabChannel, () => {
+    this.tabLifecycle.leaderDeparted()
+  })
+
+  private startTabChannel(): void {
+    // Listener installation is synchronous; a losing tab need not await election.
+    this.multiTabChannel.init?.().catch((error: unknown) => logger.warn('multiTabChannel', error))
+  }
 
   constructor(config: DAppClientOptions) {
     super({
@@ -555,7 +573,7 @@ export class DAppClient extends Client {
         }
       }
 
-      if (!request || !this.requestTracker.isCurrent(request.key)) {
+      if (!request || !this.isRequestCurrent(request.key)) {
         logger.warn('handleResponse', 'received response for unknown or closed request', {
           id: message.id,
           type: typedMessage.type,
@@ -587,7 +605,7 @@ export class DAppClient extends Client {
         }
         this.analytics.track('event', 'DAppClient', 'Acknowledge received from Wallet')
         const walletInfo = await this.getWalletInfo()
-        if (!this.requestTracker.isCurrent(request.key)) {
+        if (!this.isRequestCurrent(request.key)) {
           return
         }
         this.events
@@ -690,22 +708,71 @@ export class DAppClient extends Client {
     return this.multiTabChannel.isLeader()
   }
 
-  private async onElectedLeaderhandler() {
-    if (!this._transport.isResolved()) {
+  private async onElectedLeaderhandler(): Promise<void> {
+    if (this.destroyed || this.initialization.tearingDown) {
       return
     }
-
-    const tranport = await this.transport
-
-    if (tranport.type !== TransportType.WALLETCONNECT) {
-      return
+    try {
+      await this.tabLifecycle.promote(async (isCurrent) => {
+        // Selection can still be persisting the route that promotion must restore.
+        let transition: AbortSignal
+        do {
+          transition = this.accountTransition.signal
+          await this.initialization.waitForSelection(transition)
+          if (!isCurrent() || this.destroyed || this.initialization.tearingDown) {
+            return
+          }
+        } while (!this.isCurrentAccountTransition(transition))
+        if (!this._transport.isResolved()) {
+          return
+        }
+        const transport = await this.transport
+        if (
+          !isCurrent() ||
+          !this.isCurrentAccountTransition(transition) ||
+          transport.type !== TransportType.WALLETCONNECT ||
+          transport.connectionStatus === TransportStatus.CONNECTED
+        ) {
+          return
+        }
+        await transport.connect()
+        if (
+          !isCurrent() &&
+          !this.multiTabChannel.isLeader() &&
+          !this.destroyed &&
+          !this.initialization.tearingDown
+        ) {
+          await this.retireTabTransport(transport)
+        }
+      })
+    } catch (error: unknown) {
+      logger.warn('onElectedLeaderhandler', error)
     }
+  }
 
-    if (tranport.connectionStatus === TransportStatus.CONNECTED) {
-      return
+  private async retireTabTransport(transport: Transport): Promise<void> {
+    await this.initialization.cleanup(async () => {
+      await this.cleanup([transport])
+      if (transport instanceof DappWalletConnectTransport) {
+        // The departed role relinquishes its local adapter, not the shared remote session.
+        await transport.release(false)
+      }
+      if (this.walletConnectTransport === transport) {
+        this.walletConnectTransport = undefined
+      }
+      if (this._transport.promiseResult === transport) {
+        await this.setTransport(undefined)
+      }
+    })
+  }
+
+  private async waitForTabConnection(): Promise<void> {
+    await this.initialization.waitForTeardown()
+    if (this.tabLifecycle.promotionFailed && this.tabLifecycle.confirmLeader()) {
+      // A new caller may retry connection setup, never the previous request itself.
+      await this.onElectedLeaderhandler()
     }
-
-    await tranport.connect()
+    await this.tabLifecycle.waitForPromotion()
   }
 
   private async onBCMessageHandler(message: any) {
@@ -942,7 +1009,7 @@ export class DAppClient extends Client {
     message: { id: string; data: BeaconRequestInputMessage | BlockchainMessage },
     isV3 = false
   ): Promise<void> {
-    if (!this.multiTabChannel.isLeader()) {
+    if (this.destroyed || !this.tabLifecycle.confirmLeader()) {
       return
     }
     const request = this.createRequest(message.id, 'LeaderProxy')
@@ -952,14 +1019,21 @@ export class DAppClient extends Client {
     // Admission owns early revocation; the deadline starts at dispatch readiness.
     request.promise.catch(() => undefined)
     try {
+      await this.waitForTabConnection()
+      if (!this._transport.isResolved() && this._activeAccount.promiseResult) {
+        await this.init()
+      }
+      if (!this.isRequestCurrent(request.key)) {
+        return
+      }
       const transport = await this._transport.promise
-      if (!this.requestTracker.isCurrent(request.key)) {
+      if (!this.isRequestCurrent(request.key)) {
         return
       }
       if (transport instanceof WalletConnectTransport) {
         await transport.waitForResolution()
       }
-      if (!this.requestTracker.isCurrent(request.key)) {
+      if (!this.isRequestCurrent(request.key)) {
         return
       }
       if (isV3) {
@@ -1049,32 +1123,35 @@ export class DAppClient extends Client {
     const seed = await this.getOrCreateSDKSecretSeed()
     const keyPair = await getKeypairFromSeed(seed)
 
-    if (
-      !this.isCurrentAccountTransition(transition) ||
-      this.postMessageTransport ||
-      this.p2pTransport ||
-      this.walletConnectTransport
-    ) {
+    if (!this.isCurrentAccountTransition(transition) || this.walletConnectTransport) {
       return
     }
+    const transports: DAppInternalTransport[] = []
+    if (this.postMessageTransport || this.p2pTransport) {
+      if (!this.postMessageTransport || !this.p2pTransport) {
+        return
+      }
+      // Role retirement replaces WalletConnect while preserving the other adapters.
+    } else {
+      const pendingPairings = new PendingPairingRequests()
+      this.postMessageTransport = new DappPostMessageTransport(
+        this.name,
+        keyPair,
+        this.storage,
+        pendingPairings
+      )
 
-    const pendingPairings = new PendingPairingRequests()
-    this.postMessageTransport = new DappPostMessageTransport(
-      this.name,
-      keyPair,
-      this.storage,
-      pendingPairings
-    )
-
-    this.p2pTransport = new DappP2PTransport(
-      this.name,
-      keyPair,
-      this.storage,
-      this.matrixNodes,
-      this.iconUrl,
-      this.appUrl,
-      pendingPairings
-    )
+      this.p2pTransport = new DappP2PTransport(
+        this.name,
+        keyPair,
+        this.storage,
+        this.matrixNodes,
+        this.iconUrl,
+        this.appUrl,
+        pendingPairings
+      )
+      transports.push(this.postMessageTransport, this.p2pTransport)
+    }
 
     const wcOptions = {
       projectId: this.wcProjectId,
@@ -1100,11 +1177,8 @@ export class DAppClient extends Client {
 
     this.initEvents()
 
-    await Promise.all([
-      this.addListener(this.postMessageTransport),
-      this.addListener(this.p2pTransport),
-      this.addListener(this.walletConnectTransport)
-    ])
+    transports.push(this.walletConnectTransport)
+    await Promise.all(transports.map((transport) => this.addListener(transport)))
   }
 
   private async getOrCreateSDKSecretSeed(): Promise<string> {
@@ -1226,6 +1300,8 @@ export class DAppClient extends Client {
    * If you wish to disconnect your dApp, use `disconnect` instead.
    */
   public async destroy(): Promise<void> {
+    this.stopTabObservation()
+    this.tabLifecycle.reset()
     this.beginAccountTransition()
     if (!this._activeAccount.isSettled()) {
       this._activeAccount.resolve(undefined)
@@ -1314,6 +1390,10 @@ export class DAppClient extends Client {
 
   public async init(transport?: Transport<PeerInfoType>): Promise<TransportType> {
     this.assertNotDestroyed()
+    if (this._transport.promiseResult?.type === TransportType.WALLETCONNECT) {
+      await this.waitForTabConnection()
+      this.assertNotDestroyed()
+    }
     if (this.initialization.tearingDown) {
       await this.initialization.waitForTeardown()
       this.assertNotDestroyed()
@@ -1415,6 +1495,10 @@ export class DAppClient extends Client {
         } else if (origin === Origin.P2P) {
           resolve(await super.init(p2pTransport))
         } else if (origin === Origin.WALLETCONNECT) {
+          await walletConnectTransport.connect()
+          if (!attempt.isCurrent()) {
+            return
+          }
           resolve(await super.init(walletConnectTransport))
         }
       } else {
@@ -1927,12 +2011,28 @@ export class DAppClient extends Client {
     if (await this.resetDisconnectedWalletConnectSelection(transition)) {
       return false
     }
-    const prepared = await this.prepareAccountSelection(account, transition, source)
+    let prepared = await this.prepareAccountSelection(account, transition, source)
     if (prepared.kind === 'superseded' || !this.isCurrentAccountTransition(transition)) {
       return false
     }
     if (source === 'local' && (!activeAccountAlreadyCleared || hasPendingAccountWrite)) {
       await this.persistActiveAccount(account, transition)
+    }
+    if (account) {
+      // A role change can retire the prepared adapter while the account write is pending.
+      while (true) {
+        await this.initialization.waitForTeardown()
+        if (!this.isCurrentAccountTransition(transition)) {
+          return false
+        }
+        if (prepared.transport === this.selectAccountTransport(account)) {
+          break
+        }
+        prepared = await this.prepareAccountSelection(account, transition, source)
+        if (prepared.kind === 'superseded') {
+          return false
+        }
+      }
     }
     if (!this.isCurrentAccountTransition(transition)) {
       return false
@@ -2223,9 +2323,16 @@ export class DAppClient extends Client {
   }
 
   private async checkMakeRequest() {
+    await this.initialization.waitForTeardown()
+    if (
+      !this._transport.isResolved() &&
+      this._activeAccount.promiseResult?.origin.type === Origin.WALLETCONNECT
+    ) {
+      await this.init()
+    }
     const isResolved = this._transport.isResolved()
     const isWCInstance = isResolved && (await this.transport) instanceof WalletConnectTransport
-    await this.multiTabChannel.init()
+    this.startTabChannel()
     const isLeader = this.multiTabChannel.isLeader()
 
     return !isResolved || !isWCInstance || isLeader || isMobileOS(window)
@@ -3204,6 +3311,9 @@ export class DAppClient extends Client {
     }
 
     const result = super.setTransport(transport)
+    if (transport instanceof WalletConnectTransport) {
+      this.startTabChannel()
+    }
 
     const event = transport ? { ...(transport as any) } : undefined
 
@@ -3627,6 +3737,7 @@ export class DAppClient extends Client {
     permissionOwner?: PermissionRequestOwner
   ): Promise<{ message: U; connectionInfo: ConnectionContext } | undefined> {
     const delegated = otherTabMessageId ? this.getRequest(otherTabMessageId) : undefined
+    const proxyKey = delegated?.key
     if (otherTabMessageId && !delegated) {
       throw this.createAbortedError(otherTabMessageId)
     }
@@ -3634,7 +3745,7 @@ export class DAppClient extends Client {
     const delegatedCompletion = delegated?.promise
     const prepare = async (): Promise<RequestResponse | undefined> => {
       const messageId = otherTabMessageId ?? (await generateGUID())
-      const stillAdmitted = () => !delegated || this.requestTracker.isCurrent(delegated.key)
+      const stillAdmitted = () => !delegated || this.isRequestCurrent(delegated.key)
 
       await this.init()
       if (!stillAdmitted()) {
@@ -3685,7 +3796,7 @@ export class DAppClient extends Client {
 
       const canDispatch = () =>
         !owned ||
-        (this.requestTracker.isCurrent(owned.key) &&
+        (this.isRequestCurrent(owned.key) &&
           this.requestTracker.get(owned.key.id)?.state !== 'ResponsePreparing')
       const dispatch = async (): Promise<void> => {
         try {
@@ -3709,6 +3820,8 @@ export class DAppClient extends Client {
           if (!canDispatch()) {
             return
           }
+          // Account replacement can cancel preparation, but not an operation already sent.
+          this.finishProxyPreparation(proxyKey)
           try {
             await transport.send(payload, peer)
           } finally {
@@ -3789,13 +3902,14 @@ export class DAppClient extends Client {
     permissionOwner?: PermissionRequestOwner
   ): Promise<{ message: U; connectionInfo: ConnectionContext }> {
     const delegated = otherTabMessageId ? this.getRequest(otherTabMessageId) : undefined
+    const proxyKey = delegated?.key
     if (otherTabMessageId && !delegated) {
       throw this.createAbortedError(otherTabMessageId)
     }
 
     const prepare = async (): Promise<RequestResponse> => {
       const messageId = otherTabMessageId ?? (await generateGUID())
-      const stillAdmitted = () => !delegated || this.requestTracker.isCurrent(delegated.key)
+      const stillAdmitted = () => !delegated || this.isRequestCurrent(delegated.key)
       await this.init()
       if (delegated && !stillAdmitted()) {
         return delegated.promise
@@ -3835,7 +3949,7 @@ export class DAppClient extends Client {
       this.armRequestDeadline(owned.key)
 
       const canDispatch = () =>
-        this.requestTracker.isCurrent(owned.key) &&
+        this.isRequestCurrent(owned.key) &&
         this.requestTracker.get(owned.key.id)?.state !== 'ResponsePreparing'
       const dispatch = async (): Promise<void> => {
         try {
@@ -3859,6 +3973,8 @@ export class DAppClient extends Client {
           if (!canDispatch()) {
             return
           }
+          // Account replacement can cancel preparation, but not an operation already sent.
+          this.finishProxyPreparation(proxyKey)
           try {
             await transport.send(payload, peer)
           } finally {
@@ -3927,27 +4043,38 @@ export class DAppClient extends Client {
     request: Optional<T, IgnoredRequestInputProperties>,
     permissionOwner?: PermissionRequestOwner
   ): Promise<{ message: U; connectionInfo: ConnectionContext } | undefined> {
+    const route = this.tabLifecycle.followerSignal
+    const transition = this.accountTransition.signal
+    const assertCurrent = (requestId?: string): void => {
+      if (route.aborted || transition.aborted || this.destroyed) {
+        throw this.createAbortedError(requestId)
+      }
+    }
     if (!this._transport.isResolved()) {
       return undefined
     }
     const transport = await this.transport
+    assertCurrent()
     if (transport.type !== TransportType.WALLETCONNECT) {
       return undefined
     }
-    if (await this.addRequestAndCheckIfRateLimited()) {
+    const rateLimited = await this.addRequestAndCheckIfRateLimited()
+    assertCurrent()
+    if (rateLimited) {
       this.events
         .emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
         .catch((emitError) => logger.warn('requestDispatch', emitError))
       throw new Error('rate limit reached')
     }
     const id = await generateGUID()
+    assertCurrent(id)
     const owned = this.createRequest(id, 'Follower')
     if (!owned) {
       throw this.createAbortedError(id)
     }
     this.admitPermissionRequest(permissionOwner, owned.key)
     const canDispatch = () =>
-      this.requestTracker.isCurrent(owned.key) &&
+      this.isRequestCurrent(owned.key) &&
       this.requestTracker.get(owned.key.id)?.state !== 'ResponsePreparing'
     const dispatch = async (): Promise<void> => {
       try {
@@ -3993,6 +4120,7 @@ export class DAppClient extends Client {
     const { notifyPeers = true } = options
 
     if (!this._disconnectPromise) {
+      this.tabLifecycle.reset()
       this.beginAccountTransition()
       this._disconnectNotifyPeers = false
     }
@@ -4260,7 +4388,49 @@ export class DAppClient extends Client {
       }
     })
 
+    if (key && route !== 'Direct') {
+      const signal =
+        route === 'Follower' ? this.tabLifecycle.followerSignal : this.tabLifecycle.leaderSignal
+      const abort = () => this.requestTracker.abort(key, this.createAbortedError(id))
+      signal.addEventListener('abort', abort, { once: true })
+      this.requestTracker.attachCleanup(key, () => signal.removeEventListener('abort', abort))
+      if (route === 'LeaderProxy') {
+        const transition = this.accountTransition.signal
+        const release = () => {
+          transition.removeEventListener('abort', abort)
+          this.proxyAccountPreparations.delete(key)
+        }
+        this.proxyAccountPreparations.set(key, release)
+        transition.addEventListener('abort', abort, { once: true })
+        this.requestTracker.attachCleanup(key, release)
+        if (transition.aborted) {
+          abort()
+        }
+      }
+      if (signal.aborted) {
+        abort()
+      }
+    }
+
     return key ? this.getRequest(id) : undefined
+  }
+
+  private finishProxyPreparation(key: RequestKey | undefined): void {
+    if (key) {
+      this.proxyAccountPreparations.get(key)?.()
+    }
+  }
+
+  private isRequestCurrent(key: RequestKey): boolean {
+    const request = this.requestTracker.get(key.id)
+    if (!request || !this.requestTracker.isCurrent(key)) {
+      return false
+    }
+    if (request.route === 'LeaderProxy' && !this.tabLifecycle.confirmLeader()) {
+      return false
+    }
+
+    return true
   }
 
   private getRequest(id: string): RequestHandle | undefined {

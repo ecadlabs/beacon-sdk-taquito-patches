@@ -42,6 +42,7 @@ export class WalletConnectTransport<
   protected released = false
   protected readonly owner: object
   private releasePromise?: Promise<void>
+  private connectionAttempt: object | undefined
   private readonly sessionUpdateCallbacks = new WeakMap<object, SessionUpdateCallback>()
 
   constructor(
@@ -101,44 +102,58 @@ export class WalletConnectTransport<
     }
 
     this._isConnected = TransportStatus.CONNECTING
+    const attempt = {}
+    this.connectionAttempt = attempt
 
-    const isLeader = await this.isLeader()
-    if (this.released) {
-      return
-    }
+    try {
+      const isLeader = await this.isLeader()
+      if (this.released) {
+        return
+      }
 
-    if (isLeader) {
-      await this.client.init()
-    }
-    if (this.released) {
-      return
-    }
+      if (isLeader) {
+        await this.client.init()
+      }
+      if (this.released) {
+        return
+      }
 
-    const knownPeers = await this.getPeers()
-    if (this.released) {
-      return
-    }
+      const knownPeers = await this.getPeers()
+      if (this.released) {
+        return
+      }
 
-    if (knownPeers.length > 0) {
-      await Promise.all(knownPeers.map((peer) => this.listen(peer.publicKey)))
-    }
+      if (knownPeers.length > 0) {
+        await Promise.all(knownPeers.map((peer) => this.listen(peer.publicKey)))
+      }
 
-    await this.startOpenChannelListener()
-    if (this.released) {
-      return
-    }
-    await super.connect()
-    if (this.released) {
-      await super.disconnect()
+      await this.startOpenChannelListener()
+      if (this.released) {
+        return
+      }
+      await super.connect()
+      if (this.released) {
+        await super.disconnect()
 
-      return
-    }
+        return
+      }
 
-    if (!isLeader) {
-      this._isConnected = TransportStatus.SECONDARY_TAB_CONNECTED
-    }
+      if (!isLeader) {
+        this._isConnected = TransportStatus.SECONDARY_TAB_CONNECTED
+      }
 
-    this.isReady.resolve(true)
+      this.isReady.resolve(true)
+    } catch (error: unknown) {
+      if (!this.released && this.connectionAttempt === attempt) {
+        // Failed restoration must allow a later connection attempt to run.
+        this._isConnected = TransportStatus.NOT_CONNECTED
+      }
+      throw error
+    } finally {
+      if (this.connectionAttempt === attempt) {
+        this.connectionAttempt = undefined
+      }
+    }
   }
 
   wasDisconnectedByWallet() {
@@ -211,6 +226,7 @@ export class WalletConnectTransport<
   }
 
   public async disconnect(): Promise<void> {
+    this.connectionAttempt = undefined
     if (this.released) {
       return
     }
@@ -224,6 +240,7 @@ export class WalletConnectTransport<
   /** @internal Retire this adapter without closing a session owned by another adapter. */
   public release(closeSession = true): Promise<void> {
     if (!this.releasePromise) {
+      this.connectionAttempt = undefined
       this.released = true
       this.newPeerListener = undefined
       this.releasePromise = this.client.releaseOwner(this.owner, closeSession).finally(async () => {
