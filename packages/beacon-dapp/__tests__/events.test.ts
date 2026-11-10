@@ -14,8 +14,10 @@ import {
   NetworkType,
   OperationResponse,
   Origin,
+  SignPayloadResponse,
   SigningType
 } from '@ecadlabs/beacon-types'
+import { RequestErrorResponse } from '../src/dapp-client/request-error'
 import { TzktBlockExplorer } from '../src/utils/tzkt-blockexplorer'
 import { shortenString } from '../src/utils/shorten-string'
 
@@ -316,12 +318,12 @@ describe('request timeout toast', () => {
   // The dApp raises PEER_UNREACHABLE itself when its request deadline fires. The wallet
   // returned nothing and still holds the request, so the toast must not claim the wallet
   // answered, and must show the description that warns the request can still complete.
-  // The toast keys on `origin`, not on the error type: a wallet can send PEER_UNREACHABLE too.
+  // The toast keys on `errorOrigin`, not on the error type: a wallet can send PEER_UNREACHABLE too.
   function errorResponse(
     errorType: BeaconErrorType,
-    origin: 'wallet' | 'local'
-  ): ErrorResponse & { origin: 'wallet' | 'local' } {
-    return { ...envelope, type: BeaconMessageType.Error, errorType, origin }
+    errorOrigin: 'wallet' | 'local'
+  ): ErrorResponse & { errorOrigin: 'wallet' | 'local' } {
+    return { ...envelope, type: BeaconMessageType.Error, errorType, errorOrigin }
   }
   type ErrorToast = {
     request: string
@@ -436,54 +438,72 @@ describe('late response toast', () => {
   const connectionInfo = { origin: Origin.P2P, id: 'peer' }
   const hash = 'ooLateOperationHashThatIsLongEnoughToShorten'
   type LateResponse = BeaconEventType[BeaconEvent.LATE_RESPONSE_RECEIVED]
-  function late(requestType: BeaconMessageType, message: LateResponse['message']): LateResponse {
-    return { requestId: 'one', requestType, message, connectionInfo, walletInfo }
+  const base = { requestId: 'one', connectionInfo, walletInfo }
+  const operation: OperationResponse = {
+    ...envelope,
+    type: BeaconMessageType.OperationResponse,
+    transactionHash: hash
+  }
+  const v3Operation = {
+    ...envelope,
+    version: '3',
+    message: {
+      type: BeaconMessageType.BlockchainResponse,
+      blockchainIdentifier: 'tezos',
+      blockchainData: { transactionHash: hash }
+    }
+  }
+  const signature: SignPayloadResponse = {
+    ...envelope,
+    type: BeaconMessageType.SignPayloadResponse,
+    signingType: SigningType.RAW,
+    signature: 'late-signature'
+  }
+  const walletError: RequestErrorResponse = {
+    ...envelope,
+    type: BeaconMessageType.Error,
+    errorType: BeaconErrorType.ABORTED_ERROR,
+    errorOrigin: 'wallet'
   }
 
   // A user who saw the timeout toast may be about to retry. If the operation went through
   // after all, the default UI has to say so, with the hash, before they pay twice.
-  it.each([
+  it.each<{ response: string; data: LateResponse; body: string }>([
     {
       response: 'V2 operation',
-      data: late(BeaconMessageType.OperationRequest, {
-        ...envelope,
-        type: BeaconMessageType.OperationResponse,
+      data: {
+        ...base,
+        kind: 'success',
+        requestType: BeaconMessageType.OperationRequest,
+        message: operation,
+        output: operation,
         transactionHash: hash
-      }),
-      body: '{{wallet}}  submitted the operation after the request timed out'
+      },
+      body: '{{wallet}}\u00A0 submitted the operation after the request timed out'
     },
     {
       response: 'V3 operation',
-      data: late(BeaconMessageType.BlockchainRequest, {
-        ...envelope,
-        version: '3',
-        message: {
-          type: BeaconMessageType.BlockchainResponse,
-          blockchainIdentifier: 'tezos',
-          blockchainData: { transactionHash: hash }
-        }
-      }),
-      body: '{{wallet}}  submitted the operation after the request timed out'
-    },
-    {
-      response: 'V2 operation with an extra message field',
-      data: late(
-        BeaconMessageType.OperationRequest,
-        Object.assign<OperationResponse, { message: { note: string } }>(
-          { ...envelope, type: BeaconMessageType.OperationResponse, transactionHash: hash },
-          { message: { note: 'injected' } }
-        )
-      ),
+      data: {
+        ...base,
+        kind: 'success',
+        requestType: BeaconMessageType.BlockchainRequest,
+        message: v3Operation,
+        output: v3Operation.message,
+        transactionHash: hash
+      },
       body: '{{wallet}}\u00A0 submitted the operation after the request timed out'
     },
     {
       response: 'V2 broadcast',
-      data: late(BeaconMessageType.BroadcastRequest, {
-        ...envelope,
-        type: BeaconMessageType.BroadcastResponse,
+      data: {
+        ...base,
+        kind: 'success',
+        requestType: BeaconMessageType.BroadcastRequest,
+        message: { ...operation, type: BeaconMessageType.BroadcastResponse },
+        output: { ...operation, type: BeaconMessageType.BroadcastResponse },
         transactionHash: hash
-      }),
-      body: '{{wallet}}  broadcast the transaction after the request timed out'
+      },
+      body: '{{wallet}}\u00A0 broadcast the transaction after the request timed out'
     }
   ])('shows the hash for a late $response response', async ({ data, body }) => {
     // Through the handler, so the default callback is also registered for the event.
@@ -500,65 +520,38 @@ describe('late response toast', () => {
     )
   })
 
-  it.each([
+  // The toast follows the normalised payload; extracting the hash is tested with the helper
+  // that builds it (request-error.test.ts).
+  it.each<{ response: string; data: LateResponse }>([
     {
       response: 'wallet error for an operation',
-      data: late(BeaconMessageType.OperationRequest, {
-        ...envelope,
-        type: BeaconMessageType.Error,
-        errorType: BeaconErrorType.ABORTED_ERROR
-      })
+      data: {
+        ...base,
+        kind: 'error',
+        requestType: BeaconMessageType.OperationRequest,
+        message: walletError,
+        error: walletError
+      }
     },
     {
       response: 'signature',
-      data: late(BeaconMessageType.SignPayloadRequest, {
-        ...envelope,
-        type: BeaconMessageType.SignPayloadResponse,
-        signingType: SigningType.RAW,
-        signature: 'late-signature'
-      })
+      data: {
+        ...base,
+        kind: 'success',
+        requestType: BeaconMessageType.SignPayloadRequest,
+        message: signature,
+        output: signature
+      }
     },
     {
-      response: 'permission',
-      data: late(BeaconMessageType.PermissionRequest, {
-        ...envelope,
-        type: BeaconMessageType.PermissionResponse,
-        walletType: 'implicit',
-        appMetadata: { senderId: 'wallet', name: 'Wallet' },
-        publicKey: 'edpk-late',
-        network,
-        scopes: []
-      })
-    },
-    // V3 blockchainData is untyped; only a non-empty string transactionHash is an operation.
-    ...[
-      ['V3 signature', { signature: 'late-signature' }],
-      ['V3 null payload', null],
-      ['V3 string payload', 'edsigtLateSignature'],
-      ['V3 empty transaction hash', { transactionHash: '' }],
-      ['V3 non-string transaction hash', { transactionHash: 42 }]
-    ].map(([response, blockchainData]) => ({
-      response: String(response),
-      data: late(BeaconMessageType.BlockchainRequest, {
-        ...envelope,
-        version: '3',
-        message: {
-          type: BeaconMessageType.BlockchainResponse,
-          blockchainIdentifier: 'tezos',
-          blockchainData
-        }
-      })
-    })),
-    {
-      // Wallets add free-text fields; a V2 `message` string is not a V3 wrapper.
-      response: 'V2 error with a message string',
-      data: late(
-        BeaconMessageType.OperationRequest,
-        Object.assign<ErrorResponse, { message: string }>(
-          { ...envelope, type: BeaconMessageType.Error, errorType: BeaconErrorType.ABORTED_ERROR },
-          { message: 'User aborted' }
-        )
-      )
+      response: 'success without a transaction hash',
+      data: {
+        ...base,
+        kind: 'success',
+        requestType: BeaconMessageType.OperationRequest,
+        message: { ...operation, transactionHash: '' },
+        output: { ...operation, transactionHash: '' }
+      }
     }
   ])('stays quiet for a late $response', async ({ data }) => {
     // The handler swallows callback errors, so call the default callback directly as well.

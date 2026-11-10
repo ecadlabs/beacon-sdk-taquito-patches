@@ -11,7 +11,8 @@ import {
   Origin,
   PermissionScope,
   SigningType,
-  TransportStatus
+  TransportStatus,
+  TransportType
 } from '@ecadlabs/beacon-types'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
@@ -99,14 +100,14 @@ function observe(promise: Promise<unknown>) {
 function localError(
   id: string,
   errorType: BeaconErrorType
-): ErrorResponse & { origin: 'wallet' | 'local' } {
+): ErrorResponse & { errorOrigin: 'wallet' | 'local' } {
   return {
     id,
     type: BeaconMessageType.Error,
     errorType,
     senderId: '',
     version: '2',
-    origin: 'local'
+    errorOrigin: 'local'
   }
 }
 
@@ -320,7 +321,7 @@ describe('Delegated request lifetime', () => {
       }
       await receiveWallet(error)
       // The leader marks the wallet's error before forwarding; the follower keeps that mark.
-      const forwarded = { ...error, origin: 'wallet' }
+      const forwarded = { ...error, errorOrigin: 'wallet' }
       expect(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: forwarded })
       expect(bus.endpoints[0].sent).toEqual([
         { type: 'RESPONSE', id: pending.id, data: { message: forwarded, connectionInfo } }
@@ -479,15 +480,17 @@ describe('Delegated request lifetime', () => {
       })
       await receiveWallet(walletSuccess(version, pending.id))
       expect(pending.settled).toHaveBeenCalledTimes(1)
-      expect(bus.endpoints[0].sent).toHaveLength(1)
+      // After a timeout the leader forwards the late answer for the follower to report. An
+      // abort forgets the request, so nothing more is sent.
+      expect(bus.endpoints[0].sent).toHaveLength(ending === 'timeout' ? 2 : 1)
       expect(followerFailed).toHaveBeenCalledTimes(1)
     }
   )
   // The follower receives forwarded results on the same path the leader uses for wallet
-  // messages, so `origin` cannot be trusted by message shape. The leader marks every
+  // messages, so `errorOrigin` cannot be trusted by message shape. The leader marks every
   // forwarded wallet error itself; only the follower trusts the mark it gets from the leader.
   it.each(['2', '3'] as const)(
-    'forwards a V%s wallet error that claims to be local as origin wallet',
+    'forwards a V%s wallet error that claims to be local as errorOrigin wallet',
     async (version) => {
       const pending = await begin(version)
       const spoofed = {
@@ -496,24 +499,26 @@ describe('Delegated request lifetime', () => {
         errorType: BeaconErrorType.PEER_UNREACHABLE,
         senderId: 'wallet',
         version: '2',
-        origin: 'local'
+        errorOrigin: 'local'
       }
       await receiveWallet(spoofed)
       expect(pending.settled).toHaveBeenCalledExactlyOnceWith({
-        error: { ...spoofed, origin: 'wallet' }
+        error: { ...spoofed, errorOrigin: 'wallet' }
       })
       expect(bus.endpoints[0].sent).toEqual([
         {
           type: 'RESPONSE',
           id: pending.id,
-          data: { message: { ...spoofed, origin: 'wallet' }, connectionInfo }
+          data: { message: { ...spoofed, errorOrigin: 'wallet' }, connectionInfo }
         }
       ])
     }
   )
 
+  // The user sees "did not respond" in the tab that made the request, so that tab is where a
+  // late answer has to be reported. The leader forwards it instead of reporting it itself.
   it.each(['2', '3'] as const)(
-    'reports a V%s wallet response that reaches the leader after its deadline',
+    'reports a V%s wallet response that reaches the leader after its deadline in the follower',
     async (version) => {
       const late = vi.fn()
       const followerLate = vi.fn()
@@ -531,25 +536,65 @@ describe('Delegated request lifetime', () => {
       const response = walletSuccess(version, pending.id)
       await receiveWallet(response)
 
-      // Reported in the tab that received it; the follower already has its answer.
-      expect(late).toHaveBeenCalledExactlyOnceWith(
+      expect(followerLate).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
+          kind: 'success',
           requestId: pending.id,
           requestType:
             version === '2'
               ? BeaconMessageType.SignPayloadRequest
               : BeaconMessageType.BlockchainRequest,
           message: response,
+          output: 'message' in response ? response.message : response,
           connectionInfo
         })
       )
-      expect(followerLate).not.toHaveBeenCalled()
+      expect(late).not.toHaveBeenCalled()
       expect(pending.settled).toHaveBeenCalledTimes(1)
-      expect(bus.endpoints[0].sent).toHaveLength(1)
+      expect(bus.endpoints[0].sent).toEqual([
+        expect.objectContaining({ type: 'RESPONSE', id: pending.id }),
+        { type: 'RESPONSE', id: pending.id, data: { message: response, connectionInfo } }
+      ])
     }
   )
+
+  it.each(['2', '3'] as const)(
+    'forwards a late V%s wallet error to the follower stamped as origin wallet',
+    async (version) => {
+      const followerLate = vi.fn()
+      await follower.subscribeToEvent(BeaconEvent.LATE_RESPONSE_RECEIVED, (info) =>
+        followerLate(info)
+      )
+      const pending = await begin(version)
+      await vi.advanceTimersByTimeAsync(25)
+      await deliverResponses()
+
+      const inner = {
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.ABORTED_ERROR,
+        errorOrigin: 'local'
+      }
+      await receiveWallet(
+        version === '2'
+          ? { id: pending.id, version, senderId: 'wallet', ...inner }
+          : { id: pending.id, version, senderId: 'wallet', message: inner }
+      )
+
+      expect(followerLate).toHaveBeenCalledTimes(1)
+      expect(followerLate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'error',
+          error: expect.objectContaining({
+            errorType: BeaconErrorType.ABORTED_ERROR,
+            errorOrigin: 'wallet'
+          })
+        })
+      )
+    }
+  )
+
   // V3 responses carry the error inside the wrapper; the leader must mark that inner error.
-  it('forwards a V3-wrapped wallet error that claims to be local as origin wallet', async () => {
+  it('forwards a V3-wrapped wallet error that claims to be local as errorOrigin wallet', async () => {
     const pending = await begin('3')
     const spoofed = {
       id: pending.id,
@@ -558,22 +603,23 @@ describe('Delegated request lifetime', () => {
       message: {
         type: BeaconMessageType.Error,
         errorType: BeaconErrorType.PEER_UNREACHABLE,
-        origin: 'local'
+        errorOrigin: 'local'
       }
     }
     await receiveWallet(spoofed)
     expect(await pending.outcome).toEqual({
       error: expect.objectContaining({
         errorType: BeaconErrorType.PEER_UNREACHABLE,
-        origin: 'wallet'
+        errorOrigin: 'wallet'
       })
     })
   })
 
   // Both tabs run the same options. When the follower's own deadline fires first, the
   // leader's later timeout reaches it as a forwarded local error, which is not a late answer.
+  // It must not use up the follower's record either: the wallet's real answer comes later.
   it.each(['2', '3'] as const)(
-    'does not report the leader timeout as a late V%s response in a follower that timed out first',
+    'reports a late V%s response in a follower that timed out before the leader',
     async (version) => {
       Object.defineProperty(follower, 'requestTimeoutMs', { value: 20 })
       const late = vi.fn()
@@ -588,14 +634,125 @@ describe('Delegated request lifetime', () => {
       expect(await pending.outcome).toEqual({
         error: expect.objectContaining({
           errorType: BeaconErrorType.PEER_UNREACHABLE,
-          origin: 'local'
+          errorOrigin: 'local'
         })
       })
       expect(followerLate).not.toHaveBeenCalled()
 
       await receiveWallet(walletSuccess(version, pending.id))
-      expect(late).toHaveBeenCalledTimes(1)
-      expect(followerLate).not.toHaveBeenCalled()
+      expect(followerLate).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ kind: 'success', requestId: pending.id })
+      )
+      expect(late).not.toHaveBeenCalled()
+    }
+  )
+
+  // The other order: the follower's deadline fires, then the wallet answers before the leader's
+  // deadline. The leader forwards a normal response, which reaches the follower late.
+  it.each(['2', '3'] as const)(
+    'reports a V%s response the leader forwards after only the follower timed out',
+    async (version) => {
+      Object.defineProperty(follower, 'requestTimeoutMs', { value: 20 })
+      const late = vi.fn()
+      const followerLate = vi.fn()
+      await leader.subscribeToEvent(BeaconEvent.LATE_RESPONSE_RECEIVED, (info) => late(info))
+      await follower.subscribeToEvent(BeaconEvent.LATE_RESPONSE_RECEIVED, (info) =>
+        followerLate(info)
+      )
+      const pending = await begin(version)
+      await vi.advanceTimersByTimeAsync(22)
+      expect(await pending.outcome).toEqual({
+        error: expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+      })
+
+      await receiveWallet(walletSuccess(version, pending.id))
+      await vi.advanceTimersByTimeAsync(10)
+      await deliverResponses()
+
+      expect(followerLate).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ kind: 'success', requestId: pending.id })
+      )
+      expect(late).not.toHaveBeenCalled()
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  // Routing on a string errorType let these resolve as successes in the follower too.
+  it.each(['2', '3'] as const)(
+    'rejects a forwarded V%s wallet error with no errorType instead of resolving',
+    async (version) => {
+      const pending = await begin(version)
+      await receiveWallet(
+        version === '2'
+          ? { id: pending.id, version, senderId: 'wallet', type: BeaconMessageType.Error }
+          : {
+              id: pending.id,
+              version,
+              senderId: 'wallet',
+              message: { type: BeaconMessageType.Error }
+            }
+      )
+
+      const outcome = await pending.outcome
+      expect(outcome).not.toHaveProperty('value')
+      expect(outcome).toEqual({
+        error: expect.objectContaining({
+          type: BeaconMessageType.Error,
+          errorType: BeaconErrorType.UNKNOWN_ERROR
+        })
+      })
+      expect(outcome).toEqual({ error: expect.objectContaining({ errorOrigin: 'wallet' }) })
+    }
+  )
+
+  // The leader stamps by message type. If it only stamped errors with a string errorType, this
+  // one would reach the follower unstamped and the follower would trust its claim.
+  it.each(['2', '3'] as const)(
+    'forwards a V%s wallet error with no errorType that claims to be local as origin wallet',
+    async (version) => {
+      const pending = await begin(version)
+      const inner = { type: BeaconMessageType.Error, errorOrigin: 'local' }
+      await receiveWallet(
+        version === '2'
+          ? { id: pending.id, version, senderId: 'wallet', ...inner }
+          : { id: pending.id, version, senderId: 'wallet', message: inner }
+      )
+
+      const outcome = await pending.outcome
+      expect(outcome).not.toHaveProperty('value')
+      expect(outcome).toEqual({ error: expect.objectContaining({ errorOrigin: 'wallet' }) })
+    }
+  )
+
+  // The WalletConnect adapter builds every message it delivers, so its own local stamp (the
+  // sign-client request expiry) is trusted and survives forwarding. The same message arriving
+  // on the tab channel is not trusted; see the spoof tests above.
+  it.each(['2', '3'] as const)(
+    'forwards a V%s WalletConnect expiry from the leader adapter as origin local',
+    async (version) => {
+      const pending = await begin(version)
+      const expiry = {
+        id: pending.id,
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.PEER_UNREACHABLE,
+        errorOrigin: 'local',
+        senderId: 'current-topic',
+        version: '2'
+      }
+      const fromAdapter = leader['handleResponse'] as (
+        message: unknown,
+        context: ConnectionContext,
+        transportType: TransportType
+      ) => Promise<void>
+      await fromAdapter(expiry, connectionInfo, TransportType.WALLETCONNECT)
+      await deliverResponses()
+
+      expect(await pending.outcome).toEqual({
+        error: expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+      })
+      expect(await pending.outcome).toEqual({
+        error: expect.objectContaining({ errorOrigin: 'local' })
+      })
     }
   )
 })

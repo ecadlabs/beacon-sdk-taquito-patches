@@ -212,7 +212,7 @@ it('forwards a permission request after fresh pairing before any local request',
   expect(boundary.channel.postMessage).toHaveBeenCalledExactlyOnceWith({
     type: 'RESPONSE',
     id,
-    data: { message: { ...message, origin: 'wallet' }, connectionInfo }
+    data: { message: { ...message, errorOrigin: 'wallet' }, connectionInfo }
   })
 })
 

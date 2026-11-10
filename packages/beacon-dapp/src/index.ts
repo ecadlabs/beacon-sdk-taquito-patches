@@ -31,8 +31,15 @@ export { BeaconEvent, BeaconEventHandler, defaultEventCallbacks }
 export type { BeaconEventType, InvalidAccountDeactivatedEvent, InvalidAccountDeactivatedReason }
 export type {
   ErrorOrigin,
+  LateErrorResponseInfo,
   LateResponseInfo,
-  RequestErrorResponse
+  LateSuccessResponseInfo,
+  RequestErrorResponse,
+  ResponseMessage,
+  ResponseOutput,
+  V3ResponsePayload,
+  WireErrorMessage,
+  WireErrorPayload
 } from './dapp-client/request-error'
 
 // BlockExplorer

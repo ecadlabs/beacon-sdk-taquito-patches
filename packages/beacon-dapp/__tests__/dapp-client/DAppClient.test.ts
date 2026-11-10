@@ -299,7 +299,7 @@ describe('DAppClient: basic unit tests', () => {
       context: ConnectionContext
     ) => Promise<void>
     await receive(error, { origin: Origin.P2P, id: 'wallet-public-key' })
-    await expect(pending.promise).rejects.toEqual({ ...error, origin: 'wallet' })
+    await expect(pending.promise).rejects.toEqual({ ...error, errorOrigin: 'wallet' })
     expect(client['requestTracker'].isCurrent(request.key)).toBe(false)
   })
 

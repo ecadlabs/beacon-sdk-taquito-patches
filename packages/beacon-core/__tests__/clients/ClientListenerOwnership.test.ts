@@ -104,7 +104,7 @@ describe('Client listener ownership', () => {
       await second.deliver(wire, context)
 
       expect(previousDeliveries).toBe(0)
-      expect(handler).toHaveBeenCalledExactlyOnceWith(message, context)
+      expect(handler).toHaveBeenCalledExactlyOnceWith(message, context, second.type)
       expect(otherObserver).toHaveBeenCalledExactlyOnceWith(wire, context)
     } finally {
       await client.clear([first, second])
@@ -245,7 +245,7 @@ describe('Client listener ownership', () => {
 
       expect(finishedBeforeRelease).toBe(true)
       expect(previousDeliveries).toBe(0)
-      expect(handler).toHaveBeenCalledExactlyOnceWith(message, context)
+      expect(handler).toHaveBeenCalledExactlyOnceWith(message, context, second.type)
     } finally {
       release.resolve()
       await Promise.allSettled([cleanup, registration])

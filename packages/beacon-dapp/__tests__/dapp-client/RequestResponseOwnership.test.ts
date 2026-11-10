@@ -239,7 +239,7 @@ describe('Request response ownership', () => {
       errorType,
       senderId: '',
       version: '2',
-      origin: 'local'
+      errorOrigin: 'local'
     }
   }
 

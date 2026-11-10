@@ -145,11 +145,13 @@ import { PairingAttempt } from './PairingAttempt'
 import { DAppClientOptions } from './DAppClientOptions'
 import { RequestTracker, RequestKey, RequestRoute } from './RequestTracker'
 import {
-  attributeError,
-  getErrorOrigin,
+  classifyLateResponse,
   isErrorResponse,
   LateResponseInfo,
-  localError
+  localError,
+  ResponseMessage,
+  stampErrorOrigin,
+  toRequestError
 } from './request-error'
 import { PermissionRequestOwner } from './PermissionRequestOwner'
 import { TabLifecycle } from './TabLifecycle'
@@ -172,7 +174,7 @@ const LATE_RESPONSE_RETENTION = 100
 
 interface TimedOutRequest {
   readonly requestType: BeaconMessageType
-  readonly route: RequestRoute | undefined
+  readonly route: RequestRoute
   // The wallet the request was sent to, so its removal or Disconnect forgets the request.
   readonly senderId: string | undefined
   // Releases transport state that was kept so the late response could still arrive.
@@ -537,8 +539,12 @@ export class DAppClient extends Client {
 
     this.handleResponse = async (
       message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>,
-      connectionInfo: ConnectionContext
+      connectionInfo: ConnectionContext,
+      transportType?: TransportType
     ): Promise<void> => {
+      // The WalletConnect adapter builds every message it delivers from WalletConnect results, so
+      // the marks it sets are trusted. Messages relayed between tabs arrive without a transport.
+      const fromAdapter = transportType === TransportType.WALLETCONNECT
       const isV3WrappedMessage = message.version === '3' && 'message' in message
 
       const typedMessage = isV3WrappedMessage ? message.message : (message as BeaconMessage)
@@ -561,9 +567,9 @@ export class DAppClient extends Client {
       }
 
       // Taken before any await, so concurrent duplicates find the entry only once.
-      const timedOut = this.takeLateResponse(message.id, typedMessage.type)
+      const timedOut = this.takeLateResponse(message, typedMessage.type, fromAdapter)
       if (timedOut) {
-        await this.reportLateResponse(message.id, timedOut, message, connectionInfo)
+        await this.reportLateResponse(message.id, timedOut, message, connectionInfo, fromAdapter)
 
         return
       }
@@ -610,6 +616,13 @@ export class DAppClient extends Client {
       }
 
       if (!request || !this.isRequestCurrent(request.key)) {
+        // The deadline can fire while V3 metadata loads. The response is then late, not unknown.
+        const late = this.takeLateResponse(message, typedMessage.type, fromAdapter)
+        if (late) {
+          await this.reportLateResponse(message.id, late, message, connectionInfo, fromAdapter)
+
+          return
+        }
         logger.warn('handleResponse', 'received response for unknown or closed request', {
           id: message.id,
           type: typedMessage.type,
@@ -630,7 +643,7 @@ export class DAppClient extends Client {
           }
         } else {
           this.requestTracker.resolve(request.key, {
-            message: this.attributeForwardedMessage(message),
+            message: this.attributeForwardedMessage(message, fromAdapter),
             connectionInfo
           })
         }
@@ -658,6 +671,8 @@ export class DAppClient extends Client {
         return
       }
 
+      // Routed on the message type alone: a wallet error without errorType is still an error.
+      const error = toRequestError(message, this.trustsClaimedOrigin(request.route, fromAdapter))
       if (preparing) {
         if (appMetadata) {
           try {
@@ -678,12 +693,8 @@ export class DAppClient extends Client {
           }
         }
         this.requestTracker.prepared(request.key, { message, connectionInfo })
-      } else if (isErrorResponse(typedMessage)) {
-        // A follower trusts the origin its leader stamped; every other route got it from the wallet.
-        this.requestTracker.reject(
-          request.key,
-          attributeError(typedMessage, request.route === 'Follower')
-        )
+      } else if (error) {
+        this.requestTracker.reject(request.key, error)
       } else {
         this.requestTracker.resolve(request.key, { message, connectionInfo })
       }
@@ -4114,7 +4125,7 @@ export class DAppClient extends Client {
     }
     const id = await generateGUID()
     assertCurrent(id)
-    const owned = this.createRequest(id, 'Follower')
+    const owned = this.createRequest(id, 'Follower', request.type)
     if (!owned) {
       throw this.createAbortedError(id)
     }
@@ -4412,8 +4423,22 @@ export class DAppClient extends Client {
     })
   }
 
-  private createRequest(id: string, route: RequestRoute = 'Direct'): RequestHandle | undefined {
+  private createRequest(
+    id: string,
+    route: RequestRoute = 'Direct',
+    requestType?: BeaconMessageType
+  ): RequestHandle | undefined {
     const key = this.requestTracker.admit(id, route, (result) => {
+      // The leader's deadline fired for this follower's request. The leader forwards a late
+      // wallet answer here, where the user saw the timeout.
+      if (
+        route === 'Follower' &&
+        requestType !== undefined &&
+        result.tag === 'Rejected' &&
+        this.isLocalTimeout(result.error)
+      ) {
+        this.rememberTimedOutRequest(id, requestType, route)
+      }
       try {
         if (route === 'LeaderProxy') {
           const response =
@@ -4515,11 +4540,37 @@ export class DAppClient extends Client {
         senderId: '',
         version: '2'
       }),
-      () => this.rememberTimedOutRequest(key.id, requestType)
+      () => {
+        const route = this.requestTracker.get(key.id)?.route
+        if (route) {
+          this.rememberTimedOutRequest(key.id, requestType, route)
+        }
+      }
     )
   }
 
-  private rememberTimedOutRequest(id: string, requestType: BeaconMessageType): void {
+  private isLocalTimeout(error: unknown): boolean {
+    return (
+      isErrorResponse(error) &&
+      error.errorType === BeaconErrorType.PEER_UNREACHABLE &&
+      'errorOrigin' in error &&
+      error.errorOrigin === 'local'
+    )
+  }
+
+  /**
+   * Whether a claimed errorOrigin is believed: a follower's leader stamps what it forwards, and
+   * the WalletConnect adapter builds its messages itself. Anything else came from the wallet.
+   */
+  private trustsClaimedOrigin(route: RequestRoute, fromAdapter: boolean): boolean {
+    return route === 'Follower' || fromAdapter
+  }
+
+  private rememberTimedOutRequest(
+    id: string,
+    requestType: BeaconMessageType,
+    route: RequestRoute
+  ): void {
     // A late permission response carries no funds, and a timed-out first pairing resets the
     // transport and active peer, so there is nothing reliable to report it against.
     if (requestType === BeaconMessageType.PermissionRequest) {
@@ -4529,7 +4580,7 @@ export class DAppClient extends Client {
     this.timedOutRequests.delete(id)
     this.timedOutRequests.set(id, {
       requestType,
-      route: this.requestTracker.get(id)?.route,
+      route,
       senderId: activePeer && 'senderId' in activePeer ? activePeer.senderId : undefined
     })
     while (this.timedOutRequests.size > LATE_RESPONSE_RETENTION) {
@@ -4542,29 +4593,39 @@ export class DAppClient extends Client {
   }
 
   /** Takes the timed-out request a wallet response answers; acknowledges are not answers. */
-  private takeLateResponse(id: string, type: unknown): TimedOutRequest | undefined {
-    if (type === BeaconMessageType.Acknowledge || this.requestTracker.get(id)) {
+  private takeLateResponse(
+    message: ResponseMessage,
+    type: unknown,
+    fromAdapter: boolean
+  ): TimedOutRequest | undefined {
+    if (type === BeaconMessageType.Acknowledge || this.requestTracker.get(message.id)) {
       return undefined
     }
-    const timedOut = this.timedOutRequests.get(id)
+    const timedOut = this.timedOutRequests.get(message.id)
+    if (!timedOut) {
+      return undefined
+    }
+    // A local error forwarded by the leader (its own timeout or abort) is not the wallet's
+    // answer, so the request stays remembered for the answer that may still come.
+    const error = toRequestError(message, this.trustsClaimedOrigin(timedOut.route, fromAdapter))
+    if (error?.errorOrigin === 'local') {
+      return undefined
+    }
     // The transport already released a request it delivered a response for.
-    this.timedOutRequests.delete(id)
+    this.timedOutRequests.delete(message.id)
 
     return timedOut
   }
 
-  /** The leader marks a wallet error before forwarding it, since followers trust that mark. */
+  /**
+   * The leader marks an error before forwarding it, since followers trust that mark. It routes
+   * on the message type, so an error without errorType is marked too.
+   */
   private attributeForwardedMessage(
-    message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>
+    message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>,
+    fromAdapter: boolean
   ): BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage> {
-    // V3 responses carry the error inside the wrapper.
-    if ('message' in message && message.version === '3') {
-      return isErrorResponse(message.message)
-        ? { ...message, message: attributeError(message.message, false) }
-        : message
-    }
-
-    return isErrorResponse(message) ? attributeError(message, false) : message
+    return stampErrorOrigin(message, fromAdapter)
   }
 
   private forgetTimedOutRequest(id: string): void {
@@ -4609,17 +4670,19 @@ export class DAppClient extends Client {
   private async reportLateResponse(
     requestId: string,
     timedOut: TimedOutRequest,
-    message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>,
-    connectionInfo: ConnectionContext
+    message: ResponseMessage,
+    connectionInfo: ConnectionContext,
+    fromAdapter: boolean
   ): Promise<void> {
-    const answer = 'message' in message && message.version === '3' ? message.message : message
-    // A follower whose own deadline fired first later receives the leader's timeout. That is a
-    // forwarded local error, not a wallet answer.
-    if (
-      timedOut.route === 'Follower' &&
-      isErrorResponse(answer) &&
-      getErrorOrigin(answer) === 'local'
-    ) {
+    const trusted = this.trustsClaimedOrigin(timedOut.route, fromAdapter)
+    if (timedOut.route === 'LeaderProxy') {
+      // The follower tab made the request and showed the timeout, so it reports the answer.
+      this.multiTabChannel.postMessage({
+        type: 'RESPONSE',
+        id: requestId,
+        data: { message: stampErrorOrigin(message, trusted), connectionInfo }
+      })
+
       return
     }
     logger.warn('handleResponse', 'received a response after the request deadline', {
@@ -4628,9 +4691,9 @@ export class DAppClient extends Client {
     })
     const walletInfo = await this.getWalletInfo()
     const info: LateResponseInfo = {
+      ...classifyLateResponse(message, trusted),
       requestId,
       requestType: timedOut.requestType,
-      message,
       connectionInfo,
       walletInfo
     }

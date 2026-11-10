@@ -42,8 +42,8 @@ import { BeaconEvent } from '../../src/events'
 //   Operation, sign, broadcast and proof-of-event requests wait for the wallet.
 // - An explicitly configured requestTimeoutMs applies to every request type. Zero or a
 //   negative value disables the deadline for every request type.
-// - Every rejection says whether the wallet sent it (`origin: 'wallet'`) or the dApp
-//   produced it (`origin: 'local'`). A wallet cannot mark its own error as local.
+// - Every rejection says whether the wallet sent it (`errorOrigin: 'wallet'`) or the dApp
+//   produced it (`errorOrigin: 'local'`). A wallet cannot mark its own error as local.
 // - A wallet response to a timed-out non-permission request is reported once through
 //   LATE_RESPONSE_RECEIVED instead of being dropped. Late permission responses are not
 //   reported: they carry no funds, and a timed-out first pairing resets the transport and
@@ -96,12 +96,18 @@ class ControlledTransport extends Transport<
     )
   }
   async listen(): Promise<void> {}
-  async receive(message: WalletMessage) {
+  // Wallet messages are not validated before routing, so tests can deliver malformed ones.
+  async receive(message: WalletMessage | MalformedWalletMessage) {
     await this.notifyListeners(await new Serializer().serialize(message), context)
   }
 }
 
 type WalletMessage = BeaconMessage | BeaconMessageWrapper<BlockchainMessage>
+// An error message as a wallet may actually send it: errorType missing, extra fields present.
+type MalformedErrorMessage = { type: BeaconMessageType.Error; [field: string]: unknown }
+type MalformedWalletMessage =
+  | ({ id: string; version: '2'; senderId: string } & MalformedErrorMessage)
+  | { id: string; version: '3'; senderId: string; message: MalformedErrorMessage }
 type Outcome = { value: unknown } | { error: unknown }
 
 const peer: ExtendedPostMessagePairingResponse = {
@@ -384,6 +390,12 @@ describe('Request timeout policy', () => {
     }
   }
 
+  // The hash the late event extracts from successResponse(); only submitted operations have one.
+  function lateTransactionHash({ kind, version }: RequestCase): string | undefined {
+    if (version === '3') return kind === 'operation' ? 'ooLateHash' : undefined
+    return kind === 'operation' || kind === 'broadcast' ? 'ooLate' : undefined
+  }
+
   function acknowledge(id: string): WalletMessage {
     return { id, version: '2', senderId: peer.senderId, type: BeaconMessageType.Acknowledge }
   }
@@ -413,7 +425,7 @@ describe('Request timeout policy', () => {
             id: pending.id,
             type: BeaconMessageType.Error,
             errorType: BeaconErrorType.PEER_UNREACHABLE,
-            origin: 'local'
+            errorOrigin: 'local'
           })
         })
         expect(closed).toHaveBeenCalledTimes(1)
@@ -462,7 +474,7 @@ describe('Request timeout policy', () => {
         expect(await pending.outcome).toEqual({
           error: expect.objectContaining({
             errorType: BeaconErrorType.PEER_UNREACHABLE,
-            origin: 'local'
+            errorOrigin: 'local'
           })
         })
       }
@@ -494,7 +506,7 @@ describe('Request timeout policy', () => {
         error: expect.objectContaining({
           errorType: BeaconErrorType.ABORTED_ERROR,
           senderId: peer.senderId,
-          origin: 'wallet'
+          errorOrigin: 'wallet'
         })
       })
     })
@@ -504,14 +516,17 @@ describe('Request timeout policy', () => {
       const pending = await dispatch(operation)
 
       await transport.receive(
-        walletError(pending.id, { errorType: BeaconErrorType.PEER_UNREACHABLE, origin: 'local' })
+        walletError(pending.id, {
+          errorType: BeaconErrorType.PEER_UNREACHABLE,
+          errorOrigin: 'local'
+        })
       )
       await vi.advanceTimersByTimeAsync(0)
 
       expect(await pending.outcome).toEqual({
         error: expect.objectContaining({
           errorType: BeaconErrorType.PEER_UNREACHABLE,
-          origin: 'wallet'
+          errorOrigin: 'wallet'
         })
       })
     })
@@ -526,7 +541,7 @@ describe('Request timeout policy', () => {
       expect(await pending.outcome).toEqual({
         error: expect.objectContaining({
           errorType: BeaconErrorType.ABORTED_ERROR,
-          origin: 'local'
+          errorOrigin: 'local'
         })
       })
     })
@@ -553,9 +568,86 @@ describe('Request timeout policy', () => {
         else await transport.receive(walletError(await sentId()))
         await vi.advanceTimersByTimeAsync(0)
 
-        expect(await outcome).toEqual({ error: expect.objectContaining({ origin }) })
+        expect(await outcome).toEqual({ error: expect.objectContaining({ errorOrigin: origin }) })
         expect(errorEvent).toHaveBeenCalledWith(
-          expect.objectContaining({ errorResponse: expect.objectContaining({ origin }) })
+          expect.objectContaining({
+            errorResponse: expect.objectContaining({ errorOrigin: origin })
+          })
+        )
+      }
+    )
+  })
+
+  // Routing on a string errorType let these resolve as successes: the caller got the error
+  // message back as its output and a success event fired.
+  describe('error messages without an errorType', () => {
+    function errorWithoutType(
+      version: '2' | '3',
+      id: string,
+      extra: Record<string, unknown> = {}
+    ): MalformedWalletMessage {
+      return version === '2'
+        ? { id, version, senderId: peer.senderId, type: BeaconMessageType.Error, ...extra }
+        : {
+            id,
+            version,
+            senderId: peer.senderId,
+            message: { type: BeaconMessageType.Error, ...extra }
+          }
+    }
+
+    it.each(['2', '3'] as const)(
+      'rejects instead of resolving on a V%s wallet error with no errorType',
+      async (version) => {
+        await start(25)
+        const pending = await dispatch({ kind: 'operation', version })
+
+        await transport.receive(errorWithoutType(version, pending.id))
+        await vi.advanceTimersByTimeAsync(0)
+
+        const outcome = await pending.outcome
+        expect(outcome).not.toHaveProperty('value')
+        expect(outcome).toEqual({
+          error: expect.objectContaining({
+            id: pending.id,
+            type: BeaconMessageType.Error,
+            errorType: BeaconErrorType.UNKNOWN_ERROR
+          })
+        })
+        expect(outcome).toEqual({ error: expect.objectContaining({ errorOrigin: 'wallet' }) })
+      }
+    )
+
+    it.each(['2', '3'] as const)(
+      'does not let a V%s wallet error with no errorType mark itself as local',
+      async (version) => {
+        await start(25)
+        const pending = await dispatch({ kind: 'operation', version })
+
+        await transport.receive(errorWithoutType(version, pending.id, { errorOrigin: 'local' }))
+        await vi.advanceTimersByTimeAsync(0)
+
+        const outcome = await pending.outcome
+        expect(outcome).not.toHaveProperty('value')
+        expect(outcome).toEqual({ error: expect.objectContaining({ errorOrigin: 'wallet' }) })
+      }
+    )
+
+    it.each(['2', '3'] as const)(
+      'reports a late V%s wallet error with no errorType as an error',
+      async (version) => {
+        await start(25)
+        const pending = await timeOut({ kind: 'operation', version }, 25)
+
+        await transport.receive(errorWithoutType(version, pending.id))
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect(late).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            kind: 'error',
+            requestId: pending.id,
+            error: expect.objectContaining({ errorType: BeaconErrorType.UNKNOWN_ERROR })
+          })
         )
       }
     )
@@ -574,9 +666,12 @@ describe('Request timeout policy', () => {
         await vi.advanceTimersByTimeAsync(0)
 
         expect(late).toHaveBeenCalledExactlyOnceWith({
+          kind: 'success',
           requestId: pending.id,
           requestType: requestType(request),
           message,
+          output: 'message' in message && message.version === '3' ? message.message : message,
+          transactionHash: lateTransactionHash(request),
           connectionInfo: context,
           walletInfo: expect.objectContaining({ name: peer.name })
         })
@@ -609,8 +704,88 @@ describe('Request timeout policy', () => {
       await vi.advanceTimersByTimeAsync(0)
 
       expect(late).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({ requestId: pending.id, message })
+        expect.objectContaining({
+          kind: 'error',
+          requestId: pending.id,
+          error: expect.objectContaining({ errorType: BeaconErrorType.ABORTED_ERROR })
+        })
       )
+      expect(late).toHaveBeenCalledWith(
+        expect.objectContaining({ error: expect.objectContaining({ errorOrigin: 'wallet' }) })
+      )
+    })
+
+    // The rejection path never lets a wallet error mark itself as local. The late event must
+    // not either, in the normalised error or in the raw message it carries.
+    it.each(['2', '3'] as const)(
+      'stamps a late V%s wallet error that claims to be local as origin wallet',
+      async (version) => {
+        await start(25)
+        const pending = await timeOut({ kind: 'operation', version }, 25)
+        const inner: MalformedErrorMessage = {
+          type: BeaconMessageType.Error,
+          errorType: BeaconErrorType.PEER_UNREACHABLE,
+          errorOrigin: 'local'
+        }
+        await transport.receive(
+          version === '2'
+            ? { id: pending.id, version, senderId: peer.senderId, ...inner }
+            : { id: pending.id, version, senderId: peer.senderId, message: inner }
+        )
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect(late).toHaveBeenCalledTimes(1)
+        const [info] = late.mock.calls[0]
+        expect(info).toEqual(
+          expect.objectContaining({
+            kind: 'error',
+            error: expect.objectContaining({ errorOrigin: 'wallet' })
+          })
+        )
+        const raw = version === '2' ? info.message : info.message.message
+        expect(raw).toEqual(expect.objectContaining({ errorOrigin: 'wallet' }))
+      }
+    )
+
+    // V3 responses load wallet metadata from storage before the request is looked up again.
+    // A deadline that fires during those reads must not lose the response.
+    it('reports a V3 response that arrives while the deadline fires during metadata lookup', async () => {
+      await start(25)
+      const v3Operation: RequestCase = { kind: 'operation', version: '3' }
+      const pending = await dispatch(v3Operation)
+      await vi.advanceTimersByTimeAsync(20)
+
+      const storage = dapp['storage']
+      const read = storage.get.bind(storage)
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      vi.spyOn(storage, 'get').mockImplementation(async <K extends StorageKey>(key: K) => {
+        if (key === StorageKey.TRANSPORT_P2P_PEERS_DAPP) await held
+        return read(key)
+      })
+      const delivery = transport.receive(successResponse(v3Operation, pending.id))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(pending.settled).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(5)
+      expect(await pending.outcome).toEqual({
+        error: expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+      })
+
+      release()
+      await delivery
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(late).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          kind: 'success',
+          requestId: pending.id,
+          transactionHash: 'ooLateHash'
+        })
+      )
+      expect(pending.settled).toHaveBeenCalledTimes(1)
     })
 
     it('does not report a late acknowledge', async () => {

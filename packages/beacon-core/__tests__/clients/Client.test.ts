@@ -89,7 +89,7 @@ describe('Client transport subscription', () => {
     await expect(transport.deliver('serialized-message', context)).rejects.toBe(failure)
 
     expect(deserialize).toHaveBeenCalledWith('serialized-message')
-    expect(handler).toHaveBeenCalledWith(message, context)
+    expect(handler).toHaveBeenCalledWith(message, context, transport.type)
   })
 
   it('retries failed listener registration without caching the failed subscription', async () => {
@@ -109,7 +109,7 @@ describe('Client transport subscription', () => {
     expect(registration).toHaveBeenCalledTimes(2)
     expect(removal).not.toHaveBeenCalled()
     expect(handler).toHaveBeenCalledTimes(1)
-    expect(handler).toHaveBeenCalledWith(message, context)
+    expect(handler).toHaveBeenCalledWith(message, context, transport.type)
   })
   it('delivers once after concurrent registrations and removes the subscription on cleanup', async () => {
     const storage = new LocalStorage('client-concurrent-registration-test')

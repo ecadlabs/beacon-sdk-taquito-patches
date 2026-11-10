@@ -340,7 +340,7 @@ it('times out a forwarded permission request after the 60 s default', async () =
     expect(await outcome).toEqual({
       error: expect.objectContaining({
         errorType: BeaconErrorType.PEER_UNREACHABLE,
-        origin: 'local'
+        errorOrigin: 'local'
       })
     })
   } finally {

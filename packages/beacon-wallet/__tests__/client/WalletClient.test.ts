@@ -546,7 +546,7 @@ describe('WalletClient', () => {
     try {
       await client._connect()
       expect(handler).toHaveBeenCalledTimes(1)
-      expect(handler).toHaveBeenCalledWith(request, context)
+      expect(handler).toHaveBeenCalledWith(request, context, transport.type)
       expect(listeners.size).toBe(1)
       expect(transport.removeListener).toHaveBeenCalledTimes(1)
     } finally {

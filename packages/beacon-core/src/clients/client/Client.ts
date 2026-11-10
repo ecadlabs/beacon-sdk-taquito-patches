@@ -49,9 +49,14 @@ interface TransportSubscription {
 export abstract class Client extends BeaconClient {
   protected readonly accountManager: AccountManager
 
+  /**
+   * @param transportType the transport that delivered the message. Messages relayed between
+   * tabs are handled without one.
+   */
   protected handleResponse: (
     _event: BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage>,
-    connectionInfo: ConnectionContext
+    connectionInfo: ConnectionContext,
+    transportType?: TransportType
   ) => void | Promise<void>
 
   /**
@@ -287,7 +292,7 @@ export abstract class Client extends BeaconClient {
           message
         )) as BeaconRequestMessage
         if (subscription.active) {
-          await this.handleResponse(deserializedMessage, connectionInfo)
+          await this.handleResponse(deserializedMessage, connectionInfo, transport.type)
         }
       }
     }

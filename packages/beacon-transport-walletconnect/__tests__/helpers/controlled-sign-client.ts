@@ -2,7 +2,9 @@ import { SessionTypes } from '@walletconnect/types'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  let reject!: (reason: Error) => void
+  // Sign-client rejects with an Error for its own failures and with the wallet's JSON-RPC error
+  // object, which is not an Error, when the wallet answers with an error.
+  let reject!: (reason: unknown) => void
   const promise = new Promise<T>((yes, no) => {
     resolve = yes
     reject = no

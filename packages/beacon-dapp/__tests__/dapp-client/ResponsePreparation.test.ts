@@ -234,7 +234,7 @@ describe('Response metadata preparation', () => {
       errorType,
       senderId: '',
       version: '2',
-      origin: 'local'
+      errorOrigin: 'local'
     }
   }
 

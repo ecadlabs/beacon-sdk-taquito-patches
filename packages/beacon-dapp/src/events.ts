@@ -39,7 +39,7 @@ import {
 } from '@ecadlabs/beacon-core'
 import { BlockExplorer } from './utils/block-explorer'
 import { shortenString } from './utils/shorten-string'
-import { getErrorOrigin, LateResponseInfo, RequestErrorResponse } from './dapp-client/request-error'
+import { LateResponseInfo, RequestErrorResponse } from './dapp-client/request-error'
 
 const logger = new Logger('BeaconEvents')
 
@@ -427,7 +427,7 @@ const showErrorToast = async (
   const error = response.errorResponse.errorType
     ? getError(response.errorResponse.errorType, response.errorResponse.errorData)
     : new UnknownBeaconError()
-  const local = getErrorOrigin(response.errorResponse) === 'local'
+  const local = response.errorResponse.errorOrigin === 'local'
 
   const actions: ToastAction[] = [
     {
@@ -528,55 +528,12 @@ const showRelayerErrorAlert = async (): Promise<void> => {
 /**
  * Show a "channel closed" alert for 1.5 seconds
  */
-/**
- * The transaction hash of a late response that submitted something, if any.
- * V3 blockchainData is untyped, so only a non-empty string counts.
- */
-// Only a version 3 envelope wraps its payload; a V2 message may carry its own `message` field.
-const isV3Envelope = (
-  message: LateResponseInfo['message']
-): message is Extract<LateResponseInfo['message'], { message: unknown }> =>
-  'message' in message && message.version === '3'
-
-const lateTransactionHash = (message: LateResponseInfo['message']): string | undefined => {
-  const hashOf = (value: unknown): string | undefined =>
-    typeof value === 'object' &&
-    value !== null &&
-    'transactionHash' in value &&
-    typeof value.transactionHash === 'string' &&
-    value.transactionHash.length > 0
-      ? value.transactionHash
-      : undefined
-
-  if (isV3Envelope(message)) {
-    const inner: unknown = message.message
-
-    return typeof inner === 'object' &&
-      inner !== null &&
-      'type' in inner &&
-      inner.type === BeaconMessageType.BlockchainResponse &&
-      'blockchainData' in inner
-      ? hashOf(inner.blockchainData)
-      : undefined
-  }
-
-  return message.type === BeaconMessageType.OperationResponse ||
-    message.type === BeaconMessageType.BroadcastResponse
-    ? hashOf(message)
-    : undefined
-}
-
-/**
- * Tell the user that a request they saw time out went through after all, so they do not
- * submit it again. Late errors, signatures and permissions change nothing on chain.
- */
 const showLateResponseToast = async (data: LateResponseInfo): Promise<void> => {
-  const hash = lateTransactionHash(data.message)
-  if (!hash) {
+  if (data.kind !== 'success' || !data.transactionHash) {
     return
   }
-  const broadcast =
-    !isV3Envelope(data.message) && data.message.type === BeaconMessageType.BroadcastResponse
+  const hash = data.transactionHash
+  const broadcast = data.requestType === BeaconMessageType.BroadcastRequest
 
   openToast({
     body: broadcast

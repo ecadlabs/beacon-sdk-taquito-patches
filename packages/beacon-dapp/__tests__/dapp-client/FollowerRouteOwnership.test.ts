@@ -604,7 +604,7 @@ describe('Follower route ownership', () => {
   })
   // A leader always marks forwarded errors. An unmarked one did not come from this SDK's
   // leader logic, so the follower must not treat it as a local timeout or abort.
-  it('treats a forwarded error without an origin as a wallet error', async () => {
+  it('treats a forwarded error without an errorOrigin as a wallet error', async () => {
     await create()
     await create()
     const pending = await begin(1)
@@ -626,7 +626,7 @@ describe('Follower route ownership', () => {
     expect(await pending.outcome).toEqual({
       error: expect.objectContaining({
         errorType: BeaconErrorType.PEER_UNREACHABLE,
-        origin: 'wallet'
+        errorOrigin: 'wallet'
       })
     })
   })
