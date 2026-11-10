@@ -34,6 +34,9 @@ import { getDAppClientInstance } from '../../src/utils/get-instance'
 type RequestResponse = Awaited<NonNullable<ReturnType<DAppClient['createRequest']>>['promise']>
 type RequestRoute = NonNullable<Parameters<DAppClient['createRequest']>[1]>
 
+// The default deadline for permission requests when requestTimeoutMs is not configured.
+const DEFAULT_PERMISSION_DEADLINE_MS = 60_000
+
 function admitRequest<Failure>(
   owner: DAppClient,
   id: string,
@@ -43,14 +46,16 @@ function admitRequest<Failure>(
     reject(error?: Failure): void
   },
   route: RequestRoute = 'Direct',
-  armDeadline = true
+  armDeadline = true,
+  // Only permission requests keep a deadline when requestTimeoutMs is not configured.
+  requestType: BeaconMessageType = BeaconMessageType.PermissionRequest
 ) {
   const request = owner['createRequest'](id, route)
   if (!request) throw new Error('Request already registered')
   // Observe fixture teardown even when the test ends without a response.
   void pending.promise.catch(() => undefined)
   void request.promise.then(pending.resolve, pending.reject)
-  if (armDeadline) owner['armRequestDeadline'](request.key)
+  if (armDeadline) owner['armRequestDeadline'](request.key, requestType)
   return request
 }
 
@@ -294,7 +299,7 @@ describe('DAppClient: basic unit tests', () => {
       context: ConnectionContext
     ) => Promise<void>
     await receive(error, { origin: Origin.P2P, id: 'wallet-public-key' })
-    await expect(pending.promise).rejects.toEqual(error)
+    await expect(pending.promise).rejects.toEqual({ ...error, origin: 'wallet' })
     expect(client['requestTracker'].isCurrent(request.key)).toBe(false)
   })
 
@@ -2621,7 +2626,7 @@ describe('DAppClient: basic unit tests', () => {
         expect(forwarded).not.toHaveBeenCalled()
         expect(request.resolved).not.toHaveBeenCalled()
         expect(request.rejected).not.toHaveBeenCalled()
-        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        await vi.advanceTimersByTimeAsync(DEFAULT_PERMISSION_DEADLINE_MS)
         expect(request.rejected).toHaveBeenCalledWith(
           expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
         )
@@ -2688,7 +2693,7 @@ describe('DAppClient: basic unit tests', () => {
         await expect(client.getActiveAccount()).resolves.toEqual(createStoredAccount())
         expect(request.resolved).not.toHaveBeenCalled()
         expect(request.rejected).not.toHaveBeenCalled()
-        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        await vi.advanceTimersByTimeAsync(DEFAULT_PERMISSION_DEADLINE_MS)
         expect(request.rejected).toHaveBeenCalledWith(
           expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
         )
@@ -2730,7 +2735,7 @@ describe('DAppClient: basic unit tests', () => {
         await expect(client['storage'].get(StorageKey.ACCOUNTS)).resolves.toEqual([
           createStoredAccount()
         ])
-        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        await vi.advanceTimersByTimeAsync(DEFAULT_PERMISSION_DEADLINE_MS)
         expect(request.rejected).toHaveBeenCalledWith(
           expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
         )
@@ -2761,7 +2766,7 @@ describe('DAppClient: basic unit tests', () => {
         )
         expect(request.resolved).not.toHaveBeenCalled()
         expect(request.rejected).not.toHaveBeenCalled()
-        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        await vi.advanceTimersByTimeAsync(DEFAULT_PERMISSION_DEADLINE_MS)
         expect(request.rejected).toHaveBeenCalledWith(
           expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
         )
@@ -2800,7 +2805,7 @@ describe('DAppClient: basic unit tests', () => {
         )
         await entered.promise
 
-        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        await vi.advanceTimersByTimeAsync(DEFAULT_PERMISSION_DEADLINE_MS)
         expect(request.rejected).toHaveBeenCalledWith(
           expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
         )
@@ -2849,7 +2854,7 @@ describe('DAppClient: basic unit tests', () => {
 
         expect(request.resolved).not.toHaveBeenCalled()
         expect(acknowledged).not.toHaveBeenCalled()
-        await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
+        await vi.advanceTimersByTimeAsync(DEFAULT_PERMISSION_DEADLINE_MS)
         expect(request.rejected).toHaveBeenCalledWith(
           expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
         )

@@ -208,10 +208,11 @@ it('forwards a permission request after fresh pairing before any local request',
   }
   await wc['notifyListeners'](await new Serializer().serialize(message), connectionInfo)
   await vi.advanceTimersByTimeAsync(0)
+  // The leader marks the wallet's error before forwarding it to the follower.
   expect(boundary.channel.postMessage).toHaveBeenCalledExactlyOnceWith({
     type: 'RESPONSE',
     id,
-    data: { message, connectionInfo }
+    data: { message: { ...message, origin: 'wallet' }, connectionInfo }
   })
 })
 

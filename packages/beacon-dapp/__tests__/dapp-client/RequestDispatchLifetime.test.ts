@@ -254,7 +254,16 @@ describe('Request dispatch lifetime', () => {
     return { send, settled, outcome, id: () => id }
   }
   function expectedError(id: string, errorType: BeaconErrorType) {
-    return { error: { id, type: BeaconMessageType.Error, errorType, senderId: '', version: '2' } }
+    return {
+      error: {
+        id,
+        type: BeaconMessageType.Error,
+        errorType,
+        senderId: '',
+        version: '2',
+        origin: 'local'
+      }
+    }
   }
 
   it.each(cases)(

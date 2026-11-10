@@ -144,6 +144,13 @@ import { InitializationLifecycle } from './InitializationLifecycle'
 import { PairingAttempt } from './PairingAttempt'
 import { DAppClientOptions } from './DAppClientOptions'
 import { RequestTracker, RequestKey, RequestRoute } from './RequestTracker'
+import {
+  attributeError,
+  getErrorOrigin,
+  isErrorResponse,
+  LateResponseInfo,
+  localError
+} from './request-error'
 import { PermissionRequestOwner } from './PermissionRequestOwner'
 import { TabLifecycle } from './TabLifecycle'
 
@@ -157,7 +164,25 @@ interface RequestHandle {
 }
 
 const logger = new Logger('DAppClient')
-const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
+// Only permission requests get a default deadline. Beacon cannot cancel a request at the wallet,
+// so a timed-out operation or signature can still complete there, and a retry can pay twice.
+const DEFAULT_PERMISSION_TIMEOUT_MS = 60_000
+// Timed-out request IDs kept so a late wallet response can still be reported.
+const LATE_RESPONSE_RETENTION = 100
+
+interface TimedOutRequest {
+  readonly requestType: BeaconMessageType
+  readonly route: RequestRoute | undefined
+  // The wallet the request was sent to, so its removal or Disconnect forgets the request.
+  readonly senderId: string | undefined
+  // Releases transport state that was kept so the late response could still arrive.
+  release?: () => void
+}
+
+interface DetachableTransport {
+  cancelRequest(id: string): void
+  detachRequest(id: string): void
+}
 
 const createLazyPromise = <T>(factory: () => Promise<T>): PromiseLike<T> => {
   let promise: Promise<T> | undefined
@@ -278,7 +303,10 @@ export class DAppClient extends Client {
     onError: (error) => logger.error('requestTracker', error)
   })
 
-  private readonly requestTimeoutMs: number
+  private readonly requestTimeoutMs: number | undefined
+
+  // Insertion order is age order; the oldest entry is evicted first.
+  private readonly timedOutRequests = new Map<string, TimedOutRequest>()
 
   /**
    * The currently active account. For all requests that are associated to a specific request (operation request, signing request),
@@ -445,7 +473,7 @@ export class DAppClient extends Client {
 
     this.enableAppSwitching =
       config.enableAppSwitching === undefined ? true : Boolean(config.enableAppSwitching)
-    this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    this.requestTimeoutMs = config.requestTimeoutMs
 
     // Subscribe to storage changes and update the active account if it changes on other tabs
     this.storage
@@ -532,6 +560,14 @@ export class DAppClient extends Client {
         return
       }
 
+      // Taken before any await, so concurrent duplicates find the entry only once.
+      const timedOut = this.takeLateResponse(message.id, typedMessage.type)
+      if (timedOut) {
+        await this.reportLateResponse(message.id, timedOut, message, connectionInfo)
+
+        return
+      }
+
       // Capture arrival identity without changing the deadline during V3 enrichment.
       const request = this.requestTracker.get(message.id)
       const preparing =
@@ -593,7 +629,10 @@ export class DAppClient extends Client {
             })
           }
         } else {
-          this.requestTracker.resolve(request.key, { message, connectionInfo })
+          this.requestTracker.resolve(request.key, {
+            message: this.attributeForwardedMessage(message),
+            connectionInfo
+          })
         }
 
         return
@@ -624,20 +663,27 @@ export class DAppClient extends Client {
           try {
             await this.appMetadataManager.addAppMetadata(appMetadata)
           } catch {
-            this.requestTracker.preparationFailed(request.key, {
-              id: message.id,
-              type: BeaconMessageType.Error,
-              errorType: BeaconErrorType.UNKNOWN_ERROR,
-              senderId: '',
-              version: '2'
-            })
+            this.requestTracker.preparationFailed(
+              request.key,
+              localError({
+                id: message.id,
+                type: BeaconMessageType.Error,
+                errorType: BeaconErrorType.UNKNOWN_ERROR,
+                senderId: '',
+                version: '2'
+              })
+            )
 
             return
           }
         }
         this.requestTracker.prepared(request.key, { message, connectionInfo })
-      } else if (typedMessage.type === BeaconMessageType.Error) {
-        this.requestTracker.reject(request.key, typedMessage)
+      } else if (isErrorResponse(typedMessage)) {
+        // A follower trusts the origin its leader stamped; every other route got it from the wallet.
+        this.requestTracker.reject(
+          request.key,
+          attributeError(typedMessage, request.route === 'Follower')
+        )
       } else {
         this.requestTracker.resolve(request.key, { message, connectionInfo })
       }
@@ -865,6 +911,7 @@ export class DAppClient extends Client {
         }
       }
 
+      this.forgetTimedOutRequestsForPeer(message.senderId)
       await this.removeAccountsForPeerIds([message.senderId])
       await this.events.emit(BeaconEvent.CHANNEL_CLOSED)
     }
@@ -1051,26 +1098,17 @@ export class DAppClient extends Client {
   }
 
   private buildDelegatedRequestError(id: string, error: unknown): ErrorResponse {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'type' in error &&
-      'errorType' in error &&
-      error.type === BeaconMessageType.Error
-    ) {
-      return {
-        ...(error as ErrorResponse),
-        id
-      }
+    if (isErrorResponse(error)) {
+      return { ...localError(error), ...error, id }
     }
 
-    return {
+    return localError({
       id,
       type: BeaconMessageType.Error,
       errorType: BeaconErrorType.UNKNOWN_ERROR,
       senderId: '',
       version: '2'
-    }
+    })
   }
 
   private async onStorageChanged(
@@ -1366,13 +1404,13 @@ export class DAppClient extends Client {
   }
 
   private createAbortedError(id: string = ''): ErrorResponse {
-    return {
+    return localError({
       type: BeaconMessageType.Error,
       id,
       senderId: '',
       version: '2',
       errorType: BeaconErrorType.ABORTED_ERROR
-    }
+    })
   }
 
   /**
@@ -1460,13 +1498,13 @@ export class DAppClient extends Client {
         // Bare return here used to strand the promise forever -- no UI is
         // emitted, no peer ever pairs, no abort path fires. Reject explicitly
         // so callers see a deterministic error.
-        const noTransportError: ErrorResponse = {
+        const noTransportError: ErrorResponse = localError({
           type: BeaconMessageType.Error,
           id: '',
           senderId: '',
           version: '2',
           errorType: BeaconErrorType.UNKNOWN_ERROR
-        }
+        })
         reject(noTransportError)
 
         return
@@ -2452,6 +2490,7 @@ export class DAppClient extends Client {
   ): Promise<void> {
     const transport = await this.transport
 
+    this.forgetTimedOutRequestsForPeer(peer.senderId)
     const removePeerResult = transport.removePeer(peer)
 
     await this.removeAccountsForPeers([peer])
@@ -2473,6 +2512,7 @@ export class DAppClient extends Client {
     const transport = (await this.transport) as DAppInternalTransport
 
     const peers: ExtendedPeerInfo[] = await transport.getPeers()
+    this.forgetTimedOutRequests()
     const removePeerResult = await transport.removeAllPeers()
 
     await this.removeAccountsForPeers(peers)
@@ -3791,7 +3831,7 @@ export class DAppClient extends Client {
       }
       if (owned) {
         this.admitPermissionRequest(permissionOwner, owned.key)
-        this.armRequestDeadline(owned.key)
+        this.armRequestDeadline(owned.key, request.type)
       }
 
       const canDispatch = () =>
@@ -3827,7 +3867,7 @@ export class DAppClient extends Client {
           } finally {
             if (owned && transport instanceof WalletConnectTransport) {
               this.requestTracker.attachCleanup(owned.key, () =>
-                transport.cancelRequest(request.id)
+                this.releaseTransportRequest(request.id, transport)
               )
             }
           }
@@ -3946,7 +3986,13 @@ export class DAppClient extends Client {
         throw this.createAbortedError(request.id)
       }
       this.admitPermissionRequest(permissionOwner, owned.key)
-      this.armRequestDeadline(owned.key)
+      // V3 requests are either a permission request or a generic blockchain request.
+      this.armRequestDeadline(
+        owned.key,
+        requestInput.type === BeaconMessageType.PermissionRequest
+          ? BeaconMessageType.PermissionRequest
+          : BeaconMessageType.BlockchainRequest
+      )
 
       const canDispatch = () =>
         this.isRequestCurrent(owned.key) &&
@@ -3980,7 +4026,7 @@ export class DAppClient extends Client {
           } finally {
             if (transport instanceof WalletConnectTransport) {
               this.requestTracker.attachCleanup(owned.key, () =>
-                transport.cancelRequest(request.id)
+                this.releaseTransportRequest(request.id, transport)
               )
             }
           }
@@ -4101,7 +4147,7 @@ export class DAppClient extends Client {
             extraInfo: { resetCallback: () => this.disconnect() }
           })
           .catch((emitError) => logger.warn('requestDispatch', emitError))
-        this.armRequestDeadline(owned.key)
+        this.armRequestDeadline(owned.key, request.type)
       } catch (error: unknown) {
         this.requestTracker.reject(owned.key, error)
       }
@@ -4450,14 +4496,147 @@ export class DAppClient extends Client {
     return { key: request.key, promise }
   }
 
-  private armRequestDeadline(key: RequestKey): void {
-    this.requestTracker.armDeadline(key, this.requestTimeoutMs, {
-      id: key.id,
-      type: BeaconMessageType.Error,
-      errorType: BeaconErrorType.PEER_UNREACHABLE,
-      senderId: '',
-      version: '2'
+  private requestDeadlineMs(requestType: BeaconMessageType): number {
+    if (this.requestTimeoutMs !== undefined) {
+      return this.requestTimeoutMs
+    }
+
+    return requestType === BeaconMessageType.PermissionRequest ? DEFAULT_PERMISSION_TIMEOUT_MS : 0
+  }
+
+  private armRequestDeadline(key: RequestKey, requestType: BeaconMessageType): void {
+    this.requestTracker.armDeadline(
+      key,
+      this.requestDeadlineMs(requestType),
+      localError({
+        id: key.id,
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.PEER_UNREACHABLE,
+        senderId: '',
+        version: '2'
+      }),
+      () => this.rememberTimedOutRequest(key.id, requestType)
+    )
+  }
+
+  private rememberTimedOutRequest(id: string, requestType: BeaconMessageType): void {
+    // A late permission response carries no funds, and a timed-out first pairing resets the
+    // transport and active peer, so there is nothing reliable to report it against.
+    if (requestType === BeaconMessageType.PermissionRequest) {
+      return
+    }
+    const activePeer = this._activePeer.promiseResult
+    this.timedOutRequests.delete(id)
+    this.timedOutRequests.set(id, {
+      requestType,
+      route: this.requestTracker.get(id)?.route,
+      senderId: activePeer && 'senderId' in activePeer ? activePeer.senderId : undefined
     })
+    while (this.timedOutRequests.size > LATE_RESPONSE_RETENTION) {
+      const oldest = this.timedOutRequests.keys().next()
+      if (oldest.done) {
+        break
+      }
+      this.forgetTimedOutRequest(oldest.value)
+    }
+  }
+
+  /** Takes the timed-out request a wallet response answers; acknowledges are not answers. */
+  private takeLateResponse(id: string, type: unknown): TimedOutRequest | undefined {
+    if (type === BeaconMessageType.Acknowledge || this.requestTracker.get(id)) {
+      return undefined
+    }
+    const timedOut = this.timedOutRequests.get(id)
+    // The transport already released a request it delivered a response for.
+    this.timedOutRequests.delete(id)
+
+    return timedOut
+  }
+
+  /** The leader marks a wallet error before forwarding it, since followers trust that mark. */
+  private attributeForwardedMessage(
+    message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>
+  ): BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage> {
+    // V3 responses carry the error inside the wrapper.
+    if ('message' in message && message.version === '3') {
+      return isErrorResponse(message.message)
+        ? { ...message, message: attributeError(message.message, false) }
+        : message
+    }
+
+    return isErrorResponse(message) ? attributeError(message, false) : message
+  }
+
+  private forgetTimedOutRequest(id: string): void {
+    const timedOut = this.timedOutRequests.get(id)
+    this.timedOutRequests.delete(id)
+    timedOut?.release?.()
+  }
+
+  private forgetTimedOutRequests(): void {
+    for (const id of Array.from(this.timedOutRequests.keys())) {
+      this.forgetTimedOutRequest(id)
+    }
+  }
+
+  /**
+   * Forget the timed-out requests sent to a wallet that went away, and keep those sent to any
+   * other wallet. Requests with an unknown recipient are forgotten too.
+   */
+  private forgetTimedOutRequestsForPeer(senderId: string): void {
+    for (const [id, timedOut] of Array.from(this.timedOutRequests)) {
+      if (timedOut.senderId === undefined || timedOut.senderId === senderId) {
+        this.forgetTimedOutRequest(id)
+      }
+    }
+  }
+
+  /**
+   * Defers transport cleanup for a timed-out request so its late response can still arrive.
+   * Detaching keeps session teardown from settling it again with a synthetic error.
+   */
+  private releaseTransportRequest(id: string, transport: DetachableTransport): void {
+    const timedOut = this.timedOutRequests.get(id)
+    if (timedOut) {
+      transport.detachRequest(id)
+      timedOut.release = () => transport.cancelRequest(id)
+
+      return
+    }
+    transport.cancelRequest(id)
+  }
+
+  private async reportLateResponse(
+    requestId: string,
+    timedOut: TimedOutRequest,
+    message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage>,
+    connectionInfo: ConnectionContext
+  ): Promise<void> {
+    const answer = 'message' in message && message.version === '3' ? message.message : message
+    // A follower whose own deadline fired first later receives the leader's timeout. That is a
+    // forwarded local error, not a wallet answer.
+    if (
+      timedOut.route === 'Follower' &&
+      isErrorResponse(answer) &&
+      getErrorOrigin(answer) === 'local'
+    ) {
+      return
+    }
+    logger.warn('handleResponse', 'received a response after the request deadline', {
+      id: requestId,
+      requestType: timedOut.requestType
+    })
+    const walletInfo = await this.getWalletInfo()
+    const info: LateResponseInfo = {
+      requestId,
+      requestType: timedOut.requestType,
+      message,
+      connectionInfo,
+      walletInfo
+    }
+    this.events
+      .emit(BeaconEvent.LATE_RESPONSE_RECEIVED, info)
+      .catch((emitError) => logger.error('reportLateResponse', emitError))
   }
 
   private abortPermissionRequests(): void {
@@ -4469,6 +4648,8 @@ export class DAppClient extends Client {
   private abortOpenRequests(): void {
     this.abortPermissionRequests()
     this.requestTracker.abortAll((key) => this.createAbortedError(key.id))
+    // Timed-out requests belong to the session being torn down.
+    this.forgetTimedOutRequests()
   }
 
   private async sendNotificationWithAccessToken(notification: {

@@ -602,4 +602,49 @@ describe('Follower route ownership', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(await pending.outcome).toMatchObject({ value: { signature: 'completed-signature' } })
   })
+  // A leader always marks forwarded errors. An unmarked one did not come from this SDK's
+  // leader logic, so the follower must not treat it as a local timeout or abort.
+  it('treats a forwarded error without an origin as a wallet error', async () => {
+    await create()
+    await create()
+    const pending = await begin(1)
+    deliver(1, {
+      type: 'RESPONSE',
+      id: pending.id,
+      data: {
+        message: {
+          id: pending.id,
+          type: BeaconMessageType.Error,
+          errorType: BeaconErrorType.PEER_UNREACHABLE,
+          senderId: 'wallet',
+          version: '2'
+        },
+        connectionInfo
+      }
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await pending.outcome).toEqual({
+      error: expect.objectContaining({
+        errorType: BeaconErrorType.PEER_UNREACHABLE,
+        origin: 'wallet'
+      })
+    })
+  })
+  it.each([0, -1])(
+    'never times out a forwarded permission request when requestTimeoutMs is %s',
+    async (timeout) => {
+      await create(timeout)
+      const follower = await create(timeout)
+      const pending = observe(
+        follower.client['makeRequestBC']({
+          type: BeaconMessageType.PermissionRequest,
+          appMetadata: { name: 'Dapp', senderId: 'dapp' },
+          network: { type: NetworkType.MAINNET },
+          scopes: []
+        })
+      )
+      await vi.advanceTimersByTimeAsync(600_000)
+      expect(pending.settled).not.toHaveBeenCalled()
+    }
+  )
 })

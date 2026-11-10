@@ -85,7 +85,16 @@ export class RequestTracker<Response, Failure> {
     return this.current(key) !== undefined
   }
 
-  public armDeadline(key: RequestKey, timeoutMs: number, error: Failure): void {
+  /**
+   * @param onExpire runs when the deadline fires, before cleanups and settlement, so cleanups
+   * can tell a timeout from other endings.
+   */
+  public armDeadline(
+    key: RequestKey,
+    timeoutMs: number,
+    error: Failure,
+    onExpire?: () => void
+  ): void {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       return
     }
@@ -94,6 +103,9 @@ export class RequestTracker<Response, Failure> {
       return
     }
     record.timer = setTimeout(() => {
+      if (onExpire && this.current(key)) {
+        this.invoke(onExpire)
+      }
       this.finish(key, 'Deadline', { tag: 'TimedOut', error })
     }, timeoutMs)
   }

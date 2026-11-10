@@ -96,8 +96,18 @@ function observe(promise: Promise<unknown>) {
   return { settled, outcome }
 }
 
-function localError(id: string, errorType: BeaconErrorType): ErrorResponse {
-  return { id, type: BeaconMessageType.Error, errorType, senderId: '', version: '2' }
+function localError(
+  id: string,
+  errorType: BeaconErrorType
+): ErrorResponse & { origin: 'wallet' | 'local' } {
+  return {
+    id,
+    type: BeaconMessageType.Error,
+    errorType,
+    senderId: '',
+    version: '2',
+    origin: 'local'
+  }
 }
 
 function walletSuccess(version: '2' | '3', id: string) {
@@ -301,11 +311,19 @@ describe('Delegated request lifetime', () => {
       )
       const pending = await begin(version)
       const task = observe(version === '2' ? v2.mock.results[0].value : v3.mock.results[0].value)
-      const error = { ...localError(pending.id, BeaconErrorType.ABORTED_ERROR), senderId: 'wallet' }
+      const error: ErrorResponse = {
+        id: pending.id,
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.ABORTED_ERROR,
+        senderId: 'wallet',
+        version: '2'
+      }
       await receiveWallet(error)
-      expect(pending.settled).toHaveBeenCalledExactlyOnceWith({ error })
+      // The leader marks the wallet's error before forwarding; the follower keeps that mark.
+      const forwarded = { ...error, origin: 'wallet' }
+      expect(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: forwarded })
       expect(bus.endpoints[0].sent).toEqual([
-        { type: 'RESPONSE', id: pending.id, data: { message: error, connectionInfo } }
+        { type: 'RESPONSE', id: pending.id, data: { message: forwarded, connectionInfo } }
       ])
       expect(task.settled).toHaveBeenCalledTimes(1)
       await vi.advanceTimersByTimeAsync(100)
@@ -463,6 +481,121 @@ describe('Delegated request lifetime', () => {
       expect(pending.settled).toHaveBeenCalledTimes(1)
       expect(bus.endpoints[0].sent).toHaveLength(1)
       expect(followerFailed).toHaveBeenCalledTimes(1)
+    }
+  )
+  // The follower receives forwarded results on the same path the leader uses for wallet
+  // messages, so `origin` cannot be trusted by message shape. The leader marks every
+  // forwarded wallet error itself; only the follower trusts the mark it gets from the leader.
+  it.each(['2', '3'] as const)(
+    'forwards a V%s wallet error that claims to be local as origin wallet',
+    async (version) => {
+      const pending = await begin(version)
+      const spoofed = {
+        id: pending.id,
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.PEER_UNREACHABLE,
+        senderId: 'wallet',
+        version: '2',
+        origin: 'local'
+      }
+      await receiveWallet(spoofed)
+      expect(pending.settled).toHaveBeenCalledExactlyOnceWith({
+        error: { ...spoofed, origin: 'wallet' }
+      })
+      expect(bus.endpoints[0].sent).toEqual([
+        {
+          type: 'RESPONSE',
+          id: pending.id,
+          data: { message: { ...spoofed, origin: 'wallet' }, connectionInfo }
+        }
+      ])
+    }
+  )
+
+  it.each(['2', '3'] as const)(
+    'reports a V%s wallet response that reaches the leader after its deadline',
+    async (version) => {
+      const late = vi.fn()
+      const followerLate = vi.fn()
+      await leader.subscribeToEvent(BeaconEvent.LATE_RESPONSE_RECEIVED, (info) => late(info))
+      await follower.subscribeToEvent(BeaconEvent.LATE_RESPONSE_RECEIVED, (info) =>
+        followerLate(info)
+      )
+      const pending = await begin(version)
+      await vi.advanceTimersByTimeAsync(25)
+      await deliverResponses()
+      expect(pending.settled).toHaveBeenCalledExactlyOnceWith({
+        error: localError(pending.id, BeaconErrorType.PEER_UNREACHABLE)
+      })
+
+      const response = walletSuccess(version, pending.id)
+      await receiveWallet(response)
+
+      // Reported in the tab that received it; the follower already has its answer.
+      expect(late).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          requestId: pending.id,
+          requestType:
+            version === '2'
+              ? BeaconMessageType.SignPayloadRequest
+              : BeaconMessageType.BlockchainRequest,
+          message: response,
+          connectionInfo
+        })
+      )
+      expect(followerLate).not.toHaveBeenCalled()
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      expect(bus.endpoints[0].sent).toHaveLength(1)
+    }
+  )
+  // V3 responses carry the error inside the wrapper; the leader must mark that inner error.
+  it('forwards a V3-wrapped wallet error that claims to be local as origin wallet', async () => {
+    const pending = await begin('3')
+    const spoofed = {
+      id: pending.id,
+      version: '3',
+      senderId: 'wallet',
+      message: {
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.PEER_UNREACHABLE,
+        origin: 'local'
+      }
+    }
+    await receiveWallet(spoofed)
+    expect(await pending.outcome).toEqual({
+      error: expect.objectContaining({
+        errorType: BeaconErrorType.PEER_UNREACHABLE,
+        origin: 'wallet'
+      })
+    })
+  })
+
+  // Both tabs run the same options. When the follower's own deadline fires first, the
+  // leader's later timeout reaches it as a forwarded local error, which is not a late answer.
+  it.each(['2', '3'] as const)(
+    'does not report the leader timeout as a late V%s response in a follower that timed out first',
+    async (version) => {
+      Object.defineProperty(follower, 'requestTimeoutMs', { value: 20 })
+      const late = vi.fn()
+      const followerLate = vi.fn()
+      await leader.subscribeToEvent(BeaconEvent.LATE_RESPONSE_RECEIVED, (info) => late(info))
+      await follower.subscribeToEvent(BeaconEvent.LATE_RESPONSE_RECEIVED, (info) =>
+        followerLate(info)
+      )
+      const pending = await begin(version)
+      await vi.advanceTimersByTimeAsync(25)
+      await deliverResponses()
+      expect(await pending.outcome).toEqual({
+        error: expect.objectContaining({
+          errorType: BeaconErrorType.PEER_UNREACHABLE,
+          origin: 'local'
+        })
+      })
+      expect(followerLate).not.toHaveBeenCalled()
+
+      await receiveWallet(walletSuccess(version, pending.id))
+      expect(late).toHaveBeenCalledTimes(1)
+      expect(followerLate).not.toHaveBeenCalled()
     }
   )
 })

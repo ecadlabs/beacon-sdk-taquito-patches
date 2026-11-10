@@ -224,7 +224,8 @@ describe('Leader proxy ownership', () => {
             type: BeaconMessageType.Error,
             errorType: BeaconErrorType.ABORTED_ERROR,
             senderId: '',
-            version: '2'
+            version: '2',
+            origin: 'local'
           },
           connectionInfo: { origin: Origin.WALLETCONNECT, id: '' }
         }

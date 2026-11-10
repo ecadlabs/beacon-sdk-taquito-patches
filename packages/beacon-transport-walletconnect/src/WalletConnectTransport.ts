@@ -225,6 +225,16 @@ export class WalletConnectTransport<
     }
   }
 
+  /**
+   * @internal Keep a request whose caller timed out able to deliver a late wallet reply, without
+   * settling it again when the session is torn down.
+   */
+  public detachRequest(id: string): void {
+    if (!this.released) {
+      this.client.detachRequest(id)
+    }
+  }
+
   public async disconnect(): Promise<void> {
     this.connectionAttempt = undefined
     if (this.released) {

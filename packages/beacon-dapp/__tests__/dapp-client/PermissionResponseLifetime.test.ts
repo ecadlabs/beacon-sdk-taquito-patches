@@ -259,7 +259,8 @@ describe('Permission response lifetime', () => {
       type: BeaconMessageType.Error,
       errorType: BeaconErrorType.ABORTED_ERROR,
       senderId: '',
-      version: '2'
+      version: '2',
+      origin: 'local'
     }
   }
 

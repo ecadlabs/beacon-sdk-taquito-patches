@@ -6,12 +6,15 @@ import { BeaconError } from './BeaconError'
  */
 export class PeerUnreachableBeaconError extends BeaconError {
   public name: string = 'PeerUnreachableBeaconError'
-  public title: string = 'Peer Unreachable'
+  public title: string = 'No Response From Wallet'
 
+  // The dApp raises this locally when its request deadline fires. The wallet is not told and
+  // can still approve the request, so the copy must not send the user off to retry.
   constructor() {
     super(
       BeaconErrorType.PEER_UNREACHABLE,
-      'The wallet did not answer the request. Reset the connection and pair the wallet again.'
+      'The wallet did not respond in time. The request may still be open in the wallet and can ' +
+        'still be approved there. Check the wallet and your recent account activity before trying again.'
     )
   }
 }

@@ -189,12 +189,23 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
   private requestGeneration = 0
   private readonly pendingRequests = new Map<string, PendingRequest>()
+  // Requests whose public caller already timed out. A real wallet reply is still delivered so
+  // the dApp can report it; session teardown drops them without a synthetic error.
+  private readonly detachedRequests = new Set<string>()
 
   /** Release transport ownership when the public caller settles or times out. */
   public cancelRequest(id: string): void {
     this.pendingRequests.delete(id)
+    this.detachedRequests.delete(id)
     if (!this.pendingRequests.size) {
       this.stopPing()
+    }
+  }
+
+  /** Keep a timed-out request open for its late reply without settling it again on teardown. */
+  public detachRequest(id: string): void {
+    if (this.pendingRequests.has(id)) {
+      this.detachedRequests.add(id)
     }
   }
 
@@ -207,6 +218,10 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     for (const request of this.pendingRequests.values()) {
       if (request !== keep) {
         this.pendingRequests.delete(request.id)
+        // A detached request's caller already settled; teardown is not a wallet answer.
+        if (this.detachedRequests.delete(request.id)) {
+          continue
+        }
         // Adapter revocation must settle public callers even when their deadline
         // is disabled. Public timeout cancellation remains silent in cancelRequest.
         this.notifyListeners(request.topic, {

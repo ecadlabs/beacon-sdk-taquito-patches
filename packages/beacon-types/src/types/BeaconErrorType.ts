@@ -103,6 +103,8 @@ export enum BeaconErrorType {
    * {@link PeerUnreachableBeaconError}
    *
    * Will be returned if the wallet peer does not acknowledge or answer a request before the request timeout.
+   * The dApp produces this locally and does not tell the wallet, so the wallet can still complete the
+   * request afterwards. Check the account's activity before retrying an operation.
    *
    * Returned by: Permission | Operation Request | Sign Request | Broadcast
    */

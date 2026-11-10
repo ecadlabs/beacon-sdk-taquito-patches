@@ -14,7 +14,6 @@ import {
   ExtendedPostMessagePairingResponse,
   ExtendedP2PPairingResponse,
   AccountInfo,
-  ErrorResponse,
   PermissionResponseOutput,
   OperationResponseOutput,
   BroadcastResponseOutput,
@@ -27,7 +26,8 @@ import {
   ExtendedWalletConnectPairingResponse,
   AnalyticsInterface,
   ProofOfEventChallengeResponseOutput,
-  SimulatedProofOfEventChallengeResponseOutput
+  SimulatedProofOfEventChallengeResponseOutput,
+  BeaconMessageType
 } from '@ecadlabs/beacon-types'
 import {
   UnknownBeaconError,
@@ -39,6 +39,7 @@ import {
 } from '@ecadlabs/beacon-core'
 import { BlockExplorer } from './utils/block-explorer'
 import { shortenString } from './utils/shorten-string'
+import { getErrorOrigin, LateResponseInfo, RequestErrorResponse } from './dapp-client/request-error'
 
 const logger = new Logger('BeaconEvents')
 
@@ -82,6 +83,8 @@ export enum BeaconEvent {
   BROADCAST_REQUEST_SUCCESS = 'BROADCAST_REQUEST_SUCCESS',
   BROADCAST_REQUEST_ERROR = 'BROADCAST_REQUEST_ERROR',
   ACKNOWLEDGE_RECEIVED = 'ACKNOWLEDGE_RECEIVED',
+  /** A wallet answered a request after its deadline fired and the caller got PEER_UNREACHABLE. */
+  LATE_RESPONSE_RECEIVED = 'LATE_RESPONSE_RECEIVED',
 
   LOCAL_RATE_LIMIT_REACHED = 'LOCAL_RATE_LIMIT_REACHED',
 
@@ -154,7 +157,10 @@ export interface BeaconEventType {
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
-  [BeaconEvent.PERMISSION_REQUEST_ERROR]: { errorResponse: ErrorResponse; walletInfo: WalletInfo }
+  [BeaconEvent.PERMISSION_REQUEST_ERROR]: {
+    errorResponse: RequestErrorResponse
+    walletInfo: WalletInfo
+  }
   [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT]: RequestSentInfo
   [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS]: {
     account: AccountInfo
@@ -164,7 +170,7 @@ export interface BeaconEventType {
     walletInfo: WalletInfo
   }
   [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]: {
-    errorResponse: ErrorResponse
+    errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
   }
   [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT]: RequestSentInfo
@@ -176,7 +182,7 @@ export interface BeaconEventType {
     walletInfo: WalletInfo
   }
   [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]: {
-    errorResponse: ErrorResponse
+    errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
   }
   [BeaconEvent.OPERATION_REQUEST_SENT]: RequestSentInfo
@@ -188,7 +194,7 @@ export interface BeaconEventType {
     walletInfo: WalletInfo
   }
   [BeaconEvent.OPERATION_REQUEST_ERROR]: {
-    errorResponse: ErrorResponse
+    errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
     errorMessages: Record<string, Record<string | number, string>>
   }
@@ -198,7 +204,7 @@ export interface BeaconEventType {
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
-  [BeaconEvent.SIGN_REQUEST_ERROR]: { errorResponse: ErrorResponse; walletInfo: WalletInfo }
+  [BeaconEvent.SIGN_REQUEST_ERROR]: { errorResponse: RequestErrorResponse; walletInfo: WalletInfo }
   // TODO: ENCRYPTION
   // [BeaconEvent.ENCRYPT_REQUEST_SENT]: RequestSentInfo
   // [BeaconEvent.ENCRYPT_REQUEST_SUCCESS]: {
@@ -206,7 +212,7 @@ export interface BeaconEventType {
   //   connectionContext: ConnectionContext
   //   walletInfo: WalletInfo
   // }
-  // [BeaconEvent.ENCRYPT_REQUEST_ERROR]: { errorResponse: ErrorResponse; walletInfo: WalletInfo }
+  // [BeaconEvent.ENCRYPT_REQUEST_ERROR]: { errorResponse: RequestErrorResponse; walletInfo: WalletInfo }
   [BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]: RequestSentInfo
   [BeaconEvent.BROADCAST_REQUEST_SENT]: RequestSentInfo
   [BeaconEvent.BROADCAST_REQUEST_SUCCESS]: {
@@ -216,7 +222,10 @@ export interface BeaconEventType {
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
-  [BeaconEvent.BROADCAST_REQUEST_ERROR]: { errorResponse: ErrorResponse; walletInfo: WalletInfo }
+  [BeaconEvent.BROADCAST_REQUEST_ERROR]: {
+    errorResponse: RequestErrorResponse
+    walletInfo: WalletInfo
+  }
   [BeaconEvent.ACKNOWLEDGE_RECEIVED]: {
     message: AcknowledgeResponse
     extraInfo: ExtraInfo
@@ -246,6 +255,7 @@ export interface BeaconEventType {
     | ExtendedP2PPairingResponse
     | ExtendedWalletConnectPairingResponse
   [BeaconEvent.CHANNEL_CLOSED]: string
+  [BeaconEvent.LATE_RESPONSE_RECEIVED]: LateResponseInfo
   [BeaconEvent.INTERNAL_ERROR]: { text: string; buttons?: AlertButton[] }
   [BeaconEvent.RELAYER_ERROR]: undefined
   [BeaconEvent.UNKNOWN]: undefined
@@ -384,13 +394,31 @@ const showGenericErrorAlert = async (errorMessage: string): Promise<void> => {
 }
 
 /**
+ * An error the dApp produced itself (timeout, abort) did not come from the wallet, so the
+ * toast must not say the wallet returned it.
+ */
+const errorToastBody = (errorType: BeaconErrorType, local: boolean): string => {
+  if (!local) {
+    return `{{wallet}}\u00A0 has returned an error`
+  }
+  switch (errorType) {
+    case BeaconErrorType.PEER_UNREACHABLE:
+      return `{{wallet}}\u00A0 did not respond`
+    case BeaconErrorType.ABORTED_ERROR:
+      return `{{wallet}}\u00A0 request was cancelled`
+    default:
+      return `{{wallet}}\u00A0 request failed`
+  }
+}
+
+/**
  * Show an error toast
  *
  * @param beaconError The beacon error
  */
 const showErrorToast = async (
   response: {
-    errorResponse: ErrorResponse
+    errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
     errorMessages?: Record<string, Record<string | number, string>>
   },
@@ -399,6 +427,7 @@ const showErrorToast = async (
   const error = response.errorResponse.errorType
     ? getError(response.errorResponse.errorType, response.errorResponse.errorData)
     : new UnknownBeaconError()
+  const local = getErrorOrigin(response.errorResponse) === 'local'
 
   const actions: ToastAction[] = [
     {
@@ -406,6 +435,12 @@ const showErrorToast = async (
       isBold: true
     }
   ]
+
+  // A local timeout is not an answer: the wallet may still approve the request, so the user
+  // needs the explanation before deciding whether to retry.
+  if (local && response.errorResponse.errorType === BeaconErrorType.PEER_UNREACHABLE) {
+    actions.push({ text: error.description })
+  }
 
   if (
     response.errorResponse.errorType === BeaconErrorType.TRANSACTION_INVALID_ERROR &&
@@ -451,7 +486,7 @@ const showErrorToast = async (
   }
 
   openToast({
-    body: `{{wallet}}\u00A0 has returned an error`,
+    body: errorToastBody(response.errorResponse.errorType, local),
     timer:
       response.errorResponse.errorType === BeaconErrorType.ABORTED_ERROR
         ? SUCCESS_TIMER
@@ -493,6 +528,80 @@ const showRelayerErrorAlert = async (): Promise<void> => {
 /**
  * Show a "channel closed" alert for 1.5 seconds
  */
+/**
+ * The transaction hash of a late response that submitted something, if any.
+ * V3 blockchainData is untyped, so only a non-empty string counts.
+ */
+// Only a version 3 envelope wraps its payload; a V2 message may carry its own `message` field.
+const isV3Envelope = (
+  message: LateResponseInfo['message']
+): message is Extract<LateResponseInfo['message'], { message: unknown }> =>
+  'message' in message && message.version === '3'
+
+const lateTransactionHash = (message: LateResponseInfo['message']): string | undefined => {
+  const hashOf = (value: unknown): string | undefined =>
+    typeof value === 'object' &&
+    value !== null &&
+    'transactionHash' in value &&
+    typeof value.transactionHash === 'string' &&
+    value.transactionHash.length > 0
+      ? value.transactionHash
+      : undefined
+
+  if (isV3Envelope(message)) {
+    const inner: unknown = message.message
+
+    return typeof inner === 'object' &&
+      inner !== null &&
+      'type' in inner &&
+      inner.type === BeaconMessageType.BlockchainResponse &&
+      'blockchainData' in inner
+      ? hashOf(inner.blockchainData)
+      : undefined
+  }
+
+  return message.type === BeaconMessageType.OperationResponse ||
+    message.type === BeaconMessageType.BroadcastResponse
+    ? hashOf(message)
+    : undefined
+}
+
+/**
+ * Tell the user that a request they saw time out went through after all, so they do not
+ * submit it again. Late errors, signatures and permissions change nothing on chain.
+ */
+const showLateResponseToast = async (data: LateResponseInfo): Promise<void> => {
+  const hash = lateTransactionHash(data.message)
+  if (!hash) {
+    return
+  }
+  const broadcast =
+    !isV3Envelope(data.message) && data.message.type === BeaconMessageType.BroadcastResponse
+
+  openToast({
+    body: broadcast
+      ? `{{wallet}}\u00A0 broadcast the transaction after the request timed out`
+      : `{{wallet}}\u00A0 submitted the operation after the request timed out`,
+    state: 'finished',
+    walletInfo: data.walletInfo,
+    actions: [
+      {
+        text: shortenString(hash),
+        isBold: true,
+        actionText: 'Copy to clipboard',
+        actionCallback: async (): Promise<void> => {
+          navigator.clipboard.writeText(hash).then(
+            () => logger.log('showLateResponseToast', 'Copying to clipboard was successful!'),
+            (err) =>
+              logger.error('showLateResponseToast', 'Could not copy text to clipboard: ', err)
+          )
+          closeToast()
+        }
+      }
+    ]
+  })
+}
+
 const showChannelClosedAlert = async (): Promise<void> => {
   // openAlert({
   //   title: 'Channel closed',
@@ -836,6 +945,7 @@ export const defaultEventCallbacks: {
   [BeaconEvent.BROADCAST_REQUEST_SUCCESS]: showBroadcastSuccessAlert,
   [BeaconEvent.BROADCAST_REQUEST_ERROR]: showErrorToast,
   [BeaconEvent.ACKNOWLEDGE_RECEIVED]: showAcknowledgedToast,
+  [BeaconEvent.LATE_RESPONSE_RECEIVED]: showLateResponseToast,
   [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: showRateLimitReached,
   [BeaconEvent.NO_PERMISSIONS]: showNoPermissionAlert,
   [BeaconEvent.ACTIVE_ACCOUNT_SET]: emptyHandler(),
@@ -899,6 +1009,7 @@ export class BeaconEventHandler {
     [BeaconEvent.BROADCAST_REQUEST_ERROR]: [defaultEventCallbacks.BROADCAST_REQUEST_ERROR],
     [BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]: [defaultEventCallbacks.BLOCKCHAIN_REQUEST_SUCCESS],
     [BeaconEvent.ACKNOWLEDGE_RECEIVED]: [defaultEventCallbacks.ACKNOWLEDGE_RECEIVED],
+    [BeaconEvent.LATE_RESPONSE_RECEIVED]: [defaultEventCallbacks.LATE_RESPONSE_RECEIVED],
     [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: [defaultEventCallbacks.LOCAL_RATE_LIMIT_REACHED],
     [BeaconEvent.NO_PERMISSIONS]: [defaultEventCallbacks.NO_PERMISSIONS],
     [BeaconEvent.ACTIVE_ACCOUNT_SET]: [defaultEventCallbacks.ACTIVE_ACCOUNT_SET],

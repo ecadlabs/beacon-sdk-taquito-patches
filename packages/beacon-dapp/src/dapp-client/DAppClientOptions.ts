@@ -145,17 +145,21 @@ export interface DAppClientOptions {
 
   /**
    * Maximum time in milliseconds to wait for a wallet acknowledge or response before rejecting
-   * the request (default: 60_000). WalletConnect's legacy requestAcknowledged events
-   * cannot identify a Beacon request, so they do not acknowledge requests or disable
-   * this deadline. Set a longer finite value for slow signing/operation approvals, for
-   * example 120_000. Correlated WalletConnect ACKs require future wallet capability
-   * negotiation; neither a ping nor the outer event ID supplies that correlation.
-   * Permission renewal is also bounded by this deadline; initial pairing starts
-   * before it. Session establishment additionally has separate adapter timeouts.
-   * Timeout or ABORTED revocation does not cancel the wallet action: an operation
-   * may still be injected.
-   * Check its chain status before retrying to avoid submitting it twice.
-   * Set to 0 or a negative value to opt out of bounded request completion.
+   * the request with PEER_UNREACHABLE.
+   *
+   * When this is not set, only permission requests have a deadline (60_000). Operation, sign,
+   * broadcast and proof-of-event requests wait for the wallet: Beacon has no way to cancel a
+   * request at the wallet, so a timed-out request can still be approved there, and retrying it
+   * can submit an operation twice. Mobile wallets often only receive a request once the app is
+   * opened, and WalletConnect acknowledges cannot be matched to a Beacon request, so a deadline
+   * over WalletConnect covers the whole approval.
+   *
+   * When this is set, it applies to every request type. Set 0 or a negative value to disable
+   * deadlines entirely.
+   *
+   * A wallet response that arrives after a non-permission request timed out is reported through
+   * BeaconEvent.LATE_RESPONSE_RECEIVED. Rejections carry `origin: 'local'` when the dApp
+   * produced them (timeout, abort) and `origin: 'wallet'` when the wallet sent them.
    */
   requestTimeoutMs?: number
 }

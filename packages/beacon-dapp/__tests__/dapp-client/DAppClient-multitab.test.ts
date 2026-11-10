@@ -291,16 +291,58 @@ it.each([
   expect(emitted).toHaveBeenCalledTimes(1)
   expect(permissionEmitted).not.toHaveBeenCalled()
 })
-it('times out an unanswered secondary-tab request and clears its ownership', async () => {
+// Sign, operation and broadcast requests have no default deadline: the wallet keeps the
+// request after a local timeout, so timing out invites a double submission. Explicit-deadline
+// timeout and ownership cleanup for forwarded requests are covered in
+// FollowerRouteOwnership and DelegatedRequestLifetime.
+it('keeps an unanswered secondary-tab sign request open by default', async () => {
   vi.useFakeTimers()
   try {
     const { id, pending } = await forwardedSign()
-    const outcome = pending.catch((error: unknown) => error)
-    expect(client['requestTracker'].get(id)?.deadline === 'Armed').toBe(true)
-    await vi.advanceTimersByTimeAsync(client['requestTimeoutMs'])
-    expect(await outcome).toMatchObject({ errorType: BeaconErrorType.PEER_UNREACHABLE })
-    expect(client['requestTracker'].get(id) !== undefined).toBe(false)
+    const settled = vi.fn()
+    void pending.then(settled, settled)
     expect(client['requestTracker'].get(id)?.deadline === 'Armed').toBe(false)
+    await vi.advanceTimersByTimeAsync(600_000)
+    expect(settled).not.toHaveBeenCalled()
+    expect(client['requestTracker'].get(id) !== undefined).toBe(true)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+// Permission requests keep the default deadline, including when a secondary tab forwards them.
+it('times out a forwarded permission request after the 60 s default', async () => {
+  vi.useFakeTimers()
+  try {
+    const pending = client['makeRequestBC']({
+      type: BeaconMessageType.PermissionRequest,
+      appMetadata: { name: 'Dapp', senderId: 'dapp' },
+      network,
+      scopes: []
+    })
+    const settled = vi.fn()
+    const outcome = pending.then(
+      (value) => {
+        settled({ value })
+        return { value }
+      },
+      (error: unknown) => {
+        settled({ error })
+        return { error }
+      }
+    )
+    // Not vi.waitFor: under fake timers it advances the clock while polling.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(client['requestTracker'].size).toBe(1)
+    await vi.advanceTimersByTimeAsync(59_999)
+    expect(settled).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await outcome).toEqual({
+      error: expect.objectContaining({
+        errorType: BeaconErrorType.PEER_UNREACHABLE,
+        origin: 'local'
+      })
+    })
   } finally {
     vi.useRealTimers()
   }
