@@ -10,6 +10,9 @@ const minimumVersions = {
   'picomatch': '2.3.2'
 }
 
+// WalletConnect stays at exactly 2.18.0 because Kukai iOS depends on it.
+// Do not loosen or bump these without testing pairing and signing against
+// Kukai iOS.
 const pinnedVersions = {
   '@walletconnect/sign-client': '2.18.0',
   '@walletconnect/types': '2.18.0',

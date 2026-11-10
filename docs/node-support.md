@@ -48,8 +48,10 @@ Keep Node typings at the oldest supported runtime, currently Node 22. A Node
 26 runtime does not require Node 26 typings or a TypeScript upgrade. The SDK
 also runs in browsers, so do not introduce Node 26-only globals into shared
 source or raise browser output targets as part of runtime support work.
-Keep the WalletConnect 2.18.0 compatibility pin unless a separately tested
-dependency upgrade replaces it.
+Keep the WalletConnect 2.18.0 pin. Kukai iOS depends on it, so only replace
+it with an upgrade that has been tested against Kukai iOS.
+`scripts/check-security-deps.mjs` enforces the exact version in the package
+manifests, root overrides and lockfile.
 
 Node 26 entered LTS on October 28, 2026 and receives updates through April
 2029. Its official Linux binaries require `libatomic`, as do Node 25 binaries.
