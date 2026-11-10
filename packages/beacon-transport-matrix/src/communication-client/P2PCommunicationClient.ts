@@ -1023,13 +1023,17 @@ export class P2PCommunicationClient extends CommunicationClient {
     this.relayServer = undefined
     this.client.reject(new DOMException('Matrix session stopped', 'AbortError'))
     this.client = this.createReadiness()
-    this.activeListeners.clear()
     this.ignoredRooms = []
+    this.retireEncryptedMessageListeners()
+    this.seenCiphertexts = new Set()
+    this.inFlightCiphertexts = new Set()
+  }
+
+  private retireEncryptedMessageListeners(): void {
+    this.activeListeners.clear()
     this.initialReplay = { pending: 0, buffered: new WeakSet(), claimed: new WeakSet() }
     this.initialEvent = undefined
     this.initialListener = undefined
-    this.seenCiphertexts = new Set()
-    this.inFlightCiphertexts = new Set()
   }
 
   public async listenForEncryptedMessage(
@@ -1208,17 +1212,13 @@ export class P2PCommunicationClient extends CommunicationClient {
   }
 
   public async unsubscribeFromEncryptedMessages(): Promise<void> {
-    const session = this.captureSession()
-    const client = await session.ready.promise
-    if (!this.isCurrentSession(session)) {
-      return
-    }
+    // A transport that never started has no listeners, but its readiness can stay pending forever.
+    this.retireEncryptedMessageListeners()
     for (const subscription of this.subscriptions) {
-      if (subscription.client === client && subscription.event === MatrixClientEventType.MESSAGE) {
+      if (subscription.event === MatrixClientEventType.MESSAGE) {
         subscription.dispose()
       }
     }
-    this.activeListeners.clear()
   }
 
   public async sendMessage(

@@ -4301,6 +4301,10 @@ export class DAppClient extends Client {
     const seen = new Set<string>()
 
     peersByTransport.forEach(({ transport, peers: transportPeers }) => {
+      // A stored Matrix peer does not imply that its transport has started in this session.
+      if (transport.type === TransportType.P2P && !this.isTransportConnected(transport)) {
+        return
+      }
       transportPeers.forEach((peer) => {
         const key = this.getPeerNotificationKey(transport, peer)
         if (seen.has(key)) {
