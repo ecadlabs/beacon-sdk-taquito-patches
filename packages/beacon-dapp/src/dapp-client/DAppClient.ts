@@ -2542,7 +2542,9 @@ export class DAppClient extends Client {
   }
 
   /**
-   * Allows the user to subscribe to specific events that are fired in the SDK
+   * Subscribe to SDK events and return an idempotent cleanup function.
+   * Duplicate callback references share one subscription, removable by either cleanup function.
+   * Cleanup does not affect a later subscription or callbacks already being dispatched.
    *
    * @param internalEvent The event to subscribe to
    * @param eventCallback The callback that will be called when the event occurs
@@ -2550,12 +2552,12 @@ export class DAppClient extends Client {
   public async subscribeToEvent<K extends BeaconEvent>(
     internalEvent: K,
     eventCallback: BeaconEventHandlerFunction<BeaconEventType[K]>
-  ): Promise<void> {
+  ): Promise<() => void> {
     if (internalEvent === BeaconEvent.ACTIVE_ACCOUNT_SET) {
       this.isGetActiveAccountHandled = true
     }
 
-    await this.events.on(internalEvent, eventCallback)
+    return this.events.on(internalEvent, eventCallback)
   }
 
   /**

@@ -623,3 +623,65 @@ describe('transaction error details', () => {
     )
   })
 })
+
+
+describe('event subscription cleanup', () => {
+  it('removes only the subscribed callback and preserves defaults and other events', async () => {
+    const handler = new BeaconEventHandler()
+    const listener = vi.fn()
+    const other = vi.fn()
+    const unsubscribe = await handler.on(BeaconEvent.GENERIC_ERROR, listener)
+    await handler.on(BeaconEvent.GENERIC_ERROR, other)
+    await handler.on(BeaconEvent.INTERNAL_ERROR, listener)
+
+    await handler.emit(BeaconEvent.GENERIC_ERROR, 'before')
+    expect(listener).toHaveBeenCalledWith('before', undefined)
+    expect(unsubscribe).toBeTypeOf('function')
+    unsubscribe()
+    unsubscribe()
+    vi.clearAllMocks()
+
+    await handler.emit(BeaconEvent.GENERIC_ERROR, 'after')
+    expect(listener).not.toHaveBeenCalled()
+    expect(other).toHaveBeenCalledWith('after', undefined)
+    expect(openAlert).toHaveBeenCalledWith({ title: 'after', body: 'Please try again.' })
+    await handler.emit(BeaconEvent.INTERNAL_ERROR, { text: 'other event' })
+    expect(listener).toHaveBeenCalledWith({ text: 'other event' }, undefined)
+  })
+
+  it('deduplicates a callback and lets either cleanup remove the shared subscription', async () => {
+    const handler = new BeaconEventHandler({}, true)
+    const listener = vi.fn()
+    const first = await handler.on(BeaconEvent.GENERIC_ERROR, listener)
+    const second = await handler.on(BeaconEvent.GENERIC_ERROR, listener)
+
+    await handler.emit(BeaconEvent.GENERIC_ERROR, 'once')
+    expect(listener).toHaveBeenCalledTimes(1)
+    second()
+    await handler.emit(BeaconEvent.GENERIC_ERROR, 'removed')
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    const current = await handler.on(BeaconEvent.GENERIC_ERROR, listener)
+    first()
+    second()
+    await handler.emit(BeaconEvent.GENERIC_ERROR, 'resubscribed')
+    expect(listener).toHaveBeenCalledTimes(2)
+    current()
+    await handler.emit(BeaconEvent.GENERIC_ERROR, 'removed again')
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('allows self-unsubscription without skipping the next callback', async () => {
+    const handler = new BeaconEventHandler({}, true)
+    let unsubscribe: () => void = () => {}
+    const listener = vi.fn(() => unsubscribe())
+    const next = vi.fn()
+    unsubscribe = await handler.on(BeaconEvent.GENERIC_ERROR, listener)
+    await handler.on(BeaconEvent.GENERIC_ERROR, next)
+
+    await handler.emit(BeaconEvent.GENERIC_ERROR, 'first')
+    await handler.emit(BeaconEvent.GENERIC_ERROR, 'second')
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(next).toHaveBeenCalledTimes(2)
+  })
+})

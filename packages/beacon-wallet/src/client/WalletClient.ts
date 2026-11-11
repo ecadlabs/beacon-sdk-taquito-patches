@@ -75,7 +75,7 @@ export class WalletClient extends Client {
     BeaconRequestMessage | BeaconMessageWrapper<BeaconBaseMessage>,
     ConnectionContext
   ][] = []
-  private readonly disconnectListeners: Set<DisconnectListener> = new Set()
+  private readonly disconnectListeners = new Map<DisconnectListener, () => void>()
 
   constructor(config: WalletClientOptions) {
     super({
@@ -192,13 +192,28 @@ export class WalletClient extends Client {
   }
 
   /**
-   * Subscribe to inbound disconnects from known peers. Duplicate listener identities are ignored.
+   * Subscribe to inbound disconnects from known peers and return an idempotent cleanup function.
+   * Duplicate listener references share one subscription, removable by either cleanup function.
+   * Cleanup does not affect a later subscription or listeners already being notified.
    *
    * Listeners are notified after local peer cleanup is attempted. Listener failures are logged and do
    * not prevent other listeners from running.
    */
-  public subscribeToDisconnect(listener: DisconnectListener): void {
-    this.disconnectListeners.add(listener)
+  public subscribeToDisconnect(listener: DisconnectListener): () => void {
+    const existing = this.disconnectListeners.get(listener)
+    if (existing) {
+      return existing
+    }
+
+    const unsubscribe = (): void => {
+      // Identity removal and resubscription must invalidate all older cleanup functions.
+      if (this.disconnectListeners.get(listener) === unsubscribe) {
+        this.disconnectListeners.delete(listener)
+      }
+    }
+    this.disconnectListeners.set(listener, unsubscribe)
+
+    return unsubscribe
   }
 
   /**
@@ -599,7 +614,7 @@ export class WalletClient extends Client {
   }
 
   private notifyDisconnectListeners(senderId: string): void {
-    for (const listener of Array.from(this.disconnectListeners)) {
+    for (const listener of Array.from(this.disconnectListeners.keys())) {
       try {
         Promise.resolve(listener(senderId)).catch((error) => {
           logger.error('disconnect listener', error)

@@ -939,6 +939,11 @@ export const defaultEventCallbacks: {
  * Handles beacon events
  */
 export class BeaconEventHandler {
+  private readonly subscriptions = new Map<
+    BeaconEvent,
+    Map<BeaconEventHandlerFunction<never>, () => void>
+  >()
+
   private readonly callbackMap: {
     [key in BeaconEvent]: BeaconEventHandlerFunction<any>[] // TODO: Fix type
   } = {
@@ -1012,7 +1017,9 @@ export class BeaconEventHandler {
   }
 
   /**
-   * A method to subscribe to a specific beacon event and register a callback
+   * Subscribe to a beacon event. Duplicate callback references share one subscription.
+   * Returns an idempotent cleanup function; either duplicate's cleanup removes the subscription.
+   * Cleanup leaves configured defaults and callbacks already being dispatched intact.
    *
    * @param event The event being emitted
    * @param eventCallback The callback that will be invoked
@@ -1020,10 +1027,32 @@ export class BeaconEventHandler {
   public async on<K extends BeaconEvent>(
     event: K,
     eventCallback: BeaconEventHandlerFunction<BeaconEventType[K]>
-  ): Promise<void> {
-    const listeners = this.callbackMap[event] || []
-    listeners.push(eventCallback)
-    this.callbackMap[event] = listeners
+  ): Promise<() => void> {
+    let subscriptions = this.subscriptions.get(event)
+    if (!subscriptions) {
+      subscriptions = new Map()
+      this.subscriptions.set(event, subscriptions)
+    }
+    const existing = subscriptions.get(eventCallback)
+    if (existing) {
+      return existing
+    }
+
+    // A wrapper keeps subscriber cleanup separate from configured default handlers.
+    const listener: BeaconEventHandlerFunction<BeaconEventType[K]> = (data, buttons) =>
+      eventCallback(data, buttons)
+    this.callbackMap[event].push(listener)
+    const unsubscribe = (): void => {
+      // Duplicate registrations share ownership; stale cleanup cannot remove a new registration.
+      if (subscriptions.get(eventCallback) !== unsubscribe) {
+        return
+      }
+      subscriptions.delete(eventCallback)
+      this.callbackMap[event] = this.callbackMap[event].filter((entry) => entry !== listener)
+    }
+    subscriptions.set(eventCallback, unsubscribe)
+
+    return unsubscribe
   }
 
   /**

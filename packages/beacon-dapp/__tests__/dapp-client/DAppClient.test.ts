@@ -235,6 +235,22 @@ describe('DAppClient: basic unit tests', () => {
     client.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
   })
 
+  it('returns event cleanup that stops notifications without removing other subscribers', async () => {
+    const listener = vi.fn()
+    const other = vi.fn()
+    const unsubscribe = await client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, listener)
+    await client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, other)
+    await client['events'].emit(BeaconEvent.CHANNEL_CLOSED, undefined)
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(unsubscribe).toBeTypeOf('function')
+
+    unsubscribe()
+    unsubscribe()
+    await client['events'].emit(BeaconEvent.CHANNEL_CLOSED, undefined)
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(other).toHaveBeenCalledTimes(2)
+  })
+
   const seedPeerStorage = async () => {
     await (client as any).storage.set(StorageKey.TRANSPORT_P2P_PEERS_DAPP, [])
     await (client as any).storage.set(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP, [])

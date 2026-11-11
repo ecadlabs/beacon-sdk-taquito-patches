@@ -2,7 +2,7 @@ import type { Mocked, MockInstance } from 'vitest'
 // __tests__/client/WalletClient.test.ts
 
 import { Client, LocalStorage, Serializer } from '@ecadlabs/beacon-core'
-import { BeaconMessageType, StorageKey, TransportStatus } from '@ecadlabs/beacon-types'
+import { BeaconMessageType, Origin, StorageKey, TransportStatus } from '@ecadlabs/beacon-types'
 import { WalletClient } from '../../src/client/WalletClient'
 import { WalletP2PTransport } from '../../src/transports/WalletP2PTransport'
 
@@ -474,6 +474,50 @@ describe('WalletClient', () => {
 
       expect(disconnectListener).toHaveBeenCalledTimes(1)
     })
+
+    it('returns idempotent disconnect cleanup that preserves other listeners', async () => {
+      const { peerA } = createConnectedTransport()
+      const listener = vi.fn()
+      const other = vi.fn()
+      const unsubscribe = client.subscribeToDisconnect(listener)
+      client.subscribeToDisconnect(other)
+      expect(unsubscribe).toBeTypeOf('function')
+      unsubscribe()
+      unsubscribe()
+
+      await client.connect(vi.fn())
+      await client['handleResponse'](
+        { id: 'disconnect', type: BeaconMessageType.Disconnect, version: '2', senderId: 'sender-a' },
+        { id: peerA.publicKey, origin: Origin.P2P }
+      )
+      expect(listener).not.toHaveBeenCalled()
+      expect(other).toHaveBeenCalledWith('sender-a')
+    })
+
+    it.each(['cleanup', 'identity'] as const)(
+      'keeps a new disconnect subscription when stale cleanup follows removal by %s',
+      async (removal) => {
+        const { peerA } = createConnectedTransport()
+        const listener = vi.fn()
+        const first = client.subscribeToDisconnect(listener)
+        const duplicate = client.subscribeToDisconnect(listener)
+        expect(first).toBeTypeOf('function')
+        expect(duplicate).toBeTypeOf('function')
+        if (removal === 'cleanup') first()
+        else client.unsubscribeFromDisconnect(listener)
+
+        const current = client.subscribeToDisconnect(listener)
+        first()
+        duplicate()
+        await client.connect(vi.fn())
+        await client['handleResponse'](
+          { id: 'disconnect', type: BeaconMessageType.Disconnect, version: '2', senderId: 'sender-a' },
+          { id: peerA.publicKey, origin: Origin.P2P }
+        )
+        expect(listener).toHaveBeenCalledTimes(1)
+        current()
+      }
+    )
 
     it('unsubscribes disconnect listeners by identity', async () => {
       const { peerA } = createConnectedTransport()
