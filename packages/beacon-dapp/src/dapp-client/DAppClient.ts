@@ -155,6 +155,7 @@ import {
 } from './request-error'
 import { PermissionRequestOwner } from './PermissionRequestOwner'
 import { TabLifecycle } from './TabLifecycle'
+import { BeaconMessageRecord, MessageObserver } from './message-observer'
 
 interface RequestResponse {
   message: BeaconMessage | BeaconMessageWrapper<BeaconBaseMessage | BlockchainMessage>
@@ -303,6 +304,8 @@ export class DAppClient extends Client {
 
   // Object ownership keeps receipt times through async preparation without retaining settled IDs.
   private readonly responseReceivedAt = new WeakMap<object, number>()
+
+  private readonly messageObserver = new MessageObserver()
 
   private readonly requestTracker = new RequestTracker<RequestResponse, unknown>({
     onError: (error) => logger.error('requestTracker', error)
@@ -546,6 +549,20 @@ export class DAppClient extends Client {
       transportType?: TransportType
     ): Promise<void> => {
       const receivedAt = Date.now()
+      // Inter-tab forwarding has no source transport and is not a wire observation.
+      if (transportType !== undefined) {
+        const senderId =
+          message !== null &&
+          typeof message === 'object' &&
+          'senderId' in message &&
+          typeof message.senderId === 'string'
+            ? message.senderId
+            : undefined
+        this.messageObserver.notify('incoming', transportType, message, senderId)
+      }
+      if (this.destroyed) {
+        return
+      }
       if (!this.responseReceivedAt.has(message)) {
         this.responseReceivedAt.set(message, receivedAt)
       }
@@ -1376,6 +1393,9 @@ export class DAppClient extends Client {
       this._activeAccount.resolve(undefined)
     }
     this.destroyed = true
+    // Retire requests before asynchronous cleanup, including caller-supplied transports.
+    this.abortOpenRequests()
+    this.messageObserver.clear()
     this.initialization.destroy()
 
     await this.initialization.cleanup(async () => {
@@ -2575,6 +2595,33 @@ export class DAppClient extends Client {
     }
 
     return removePeerResult
+  }
+
+  /**
+   * Observe immutable plaintext protocol snapshots. Incoming data is unvalidated; outgoing
+   * records describe attempts. Callbacks run synchronously, so keep them short. Failures are
+   * logged and isolated. No snapshots are built when there are no listeners.
+   *
+   * Duplicate callback references share a subscription. The returned cleanup is idempotent
+   * and cannot remove a later subscription. Inter-tab forwarding and pairing data are excluded.
+   */
+  public subscribeToMessages(listener: (record: BeaconMessageRecord) => void): () => void {
+    this.assertNotDestroyed()
+
+    return this.messageObserver.subscribe(listener)
+  }
+
+  protected onOutgoingMessage(
+    message: unknown,
+    transportType: TransportType,
+    peer?: PeerInfo
+  ): boolean {
+    const senderId =
+      peer && 'senderId' in peer && typeof peer.senderId === 'string' ? peer.senderId : undefined
+    this.messageObserver.notify('outgoing', transportType, message, senderId)
+
+    // Observers can invoke lifecycle APIs, even though they cannot mutate the wire message.
+    return !this.destroyed
   }
 
   /**
@@ -3933,10 +3980,6 @@ export class DAppClient extends Client {
           this.requestTracker.get(owned.key.id)?.state !== 'ResponsePreparing')
       const dispatch = async (): Promise<void> => {
         try {
-          const payload = await new Serializer().serialize(request)
-          if (!canDispatch()) {
-            return
-          }
           const account = await this.getActiveAccount()
           if (!canDispatch()) {
             return
@@ -3950,6 +3993,17 @@ export class DAppClient extends Client {
             return
           }
           const transport = await this.transport
+          if (!canDispatch()) {
+            return
+          }
+          if (!this.onOutgoingMessage(request, transport.type, peer)) {
+            if (owned) {
+              this.requestTracker.abort(owned.key, this.createAbortedError(request.id))
+            }
+
+            return
+          }
+          const payload = await new Serializer().serialize(request)
           if (!canDispatch()) {
             return
           }
@@ -4102,10 +4156,6 @@ export class DAppClient extends Client {
         this.requestTracker.get(owned.key.id)?.state !== 'ResponsePreparing'
       const dispatch = async (): Promise<void> => {
         try {
-          const payload = await new Serializer().serialize(request)
-          if (!canDispatch()) {
-            return
-          }
           const account = await this.getActiveAccount()
           if (!canDispatch()) {
             return
@@ -4119,6 +4169,15 @@ export class DAppClient extends Client {
             return
           }
           const transport = await this.transport
+          if (!canDispatch()) {
+            return
+          }
+          if (!this.onOutgoingMessage(request, transport.type, peer)) {
+            this.requestTracker.abort(owned.key, this.createAbortedError(request.id))
+
+            return
+          }
+          const payload = await new Serializer().serialize(request)
           if (!canDispatch()) {
             return
           }

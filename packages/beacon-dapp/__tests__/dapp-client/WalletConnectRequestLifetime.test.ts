@@ -9,7 +9,8 @@ import {
   NetworkType,
   Origin,
   PermissionScope,
-  SigningType
+  SigningType,
+  TransportType
 } from '@ecadlabs/beacon-types'
 import { WalletConnectCommunicationClient } from '../../../beacon-transport-walletconnect/src/communication-client/WalletConnectCommunicationClient'
 import { getAddressFromPublicKey } from '@ecadlabs/beacon-utils'
@@ -188,6 +189,47 @@ describe('WalletConnect public request lifetime (#102)', () => {
     ) => Promise<void>
     await handleResponse(message, connectionInfo)
   }
+
+  it('observes WalletConnect Beacon messages without exposing session or pairing state (#149)', async () => {
+    await start(0)
+    const observed = vi.fn()
+    dapp.subscribeToMessages(observed)
+    const pending = await sign('aa')
+    expect(observed).toHaveBeenCalledTimes(1)
+    expect(observed.mock.calls[0][0]).toMatchObject({
+      direction: 'outgoing',
+      transport: TransportType.WALLETCONNECT,
+      message: { id: pending.id, type: BeaconMessageType.SignPayloadRequest, payload: 'aa' }
+    })
+    // A pairing status callback is UI metadata, not a Beacon wire message.
+    await adapter['eventHandlers'].get(ClientEvents.WC_ACK_NOTIFICATION)?.('pending')
+    await flush()
+    expect(observed).toHaveBeenCalledTimes(1)
+    mockRequests[0].reply.resolve({ signature: 'completed-signature' })
+    await flush()
+    expect(await pending.outcome).toHaveProperty('value')
+    expect(observed).toHaveBeenCalledTimes(2)
+    expect(observed.mock.calls[1][0]).toMatchObject({
+      direction: 'incoming',
+      transport: TransportType.WALLETCONNECT,
+      message: {
+        id: pending.id,
+        type: BeaconMessageType.SignPayloadResponse,
+        signature: 'completed-signature'
+      }
+    })
+    for (const [record] of observed.mock.calls) {
+      expect(Object.keys(record).sort()).toEqual([
+        'direction',
+        'message',
+        'senderId',
+        'transport',
+        'ts'
+      ])
+      expect(record.message).not.toHaveProperty('session')
+      expect(record.message).not.toHaveProperty('pairing')
+    }
+  })
 
   it('reports WalletConnect pending as uncorrelated without a placeholder message (#148)', async () => {
     await start(0)

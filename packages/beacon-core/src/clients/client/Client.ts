@@ -342,6 +342,19 @@ export abstract class Client extends BeaconClient {
     }
   }
 
+  /**
+   * Observe a fully built protocol message before serialization.
+   * Return false if synchronous observation retired the sender before dispatch.
+   */
+  protected onOutgoingMessage(
+    message: unknown,
+    transportType: TransportType,
+    peer?: PeerInfo
+  ): boolean
+  protected onOutgoingMessage(): boolean {
+    return true
+  }
+
   protected async sendDisconnectToPeer(peer: PeerInfo, transport?: ClientTransport): Promise<void> {
     const request: DisconnectMessage = {
       id: await generateGUID(),
@@ -350,8 +363,11 @@ export abstract class Client extends BeaconClient {
       type: BeaconMessageType.Disconnect
     }
 
-    const payload = await new Serializer().serialize(request)
     const selectedTransport = transport ?? (await this.transport)
+    if (!this.onOutgoingMessage(request, selectedTransport.type, peer)) {
+      return
+    }
+    const payload = await new Serializer().serialize(request)
 
     await selectedTransport.send(payload, peer)
   }

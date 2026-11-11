@@ -56,3 +56,5 @@ export type {
 
 // BlockExplorer
 export { BlockExplorer, TzktBlockExplorer, TzktBlockExplorer as TezblockBlockExplorer }
+
+export type { BeaconMessageRecord } from './dapp-client/message-observer'

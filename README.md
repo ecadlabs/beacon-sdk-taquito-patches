@@ -167,6 +167,45 @@ account type corrections require consumers that assumed a message or account was
 always present to update their callbacks. Code constructing event payloads must
 also supply the new correlation fields and dispatch discriminator.
 
+## Plaintext message observation
+
+Use `subscribeToMessages()` for protocol inspectors and diagnostic traces:
+
+```ts
+const unsubscribe = dAppClient.subscribeToMessages((record) => {
+  console.log(record.direction, record.transport, record.ts)
+  // Incoming payloads are unvalidated, so narrow before reading protocol fields.
+  const message = record.message
+  if (message !== null && typeof message === 'object' && 'id' in message) {
+    console.log(message.id)
+  }
+})
+
+// Call when the inspector or component is disposed.
+unsubscribe()
+```
+
+Each record contains `direction`, `transport`, optional remote-wallet `senderId`,
+`ts` (epoch milliseconds), and `message`. Incoming records are captured after
+plaintext deserialization, before validation or stale-request filtering. Their
+sender identity is untrusted. Outgoing records capture fully built messages before
+serialization; they describe attempts even if serialization or transport send
+subsequently fails. Disconnect messages are included. Inter-tab forwarding,
+pairing data, and transport control traffic are excluded.
+
+Observers receive detached, deeply frozen copies of protocol data. Cloning or
+freezing failures, including unsupported caller-provided containers such as `Map`
+or `Date`, skip that observation and are logged without failing the request.
+No copies are made without listeners. Callbacks run synchronously; keep them short
+and hand off expensive work. Thrown exceptions and rejected callback promises are
+logged without preventing other observers or request settlement.
+
+Duplicate callback references share a subscription. Cleanup is idempotent, and
+stale cleanup cannot remove a later subscription. Destroying the client clears
+its observers. Message traces can contain addresses, signatures, operation
+contents, and arbitrary fields supplied by a peer. Redact them before persistence
+or export; the observer does not add SDK secrets, storage, or session objects.
+
 ## Example wallet integration
 
 ```ts

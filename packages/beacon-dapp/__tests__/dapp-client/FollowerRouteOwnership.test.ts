@@ -254,6 +254,45 @@ describe('Follower route ownership', () => {
   }
 
   it.each(['2', '3'] as const)(
+    'does not report V%s inter-tab forwarding as wire messages (#149)',
+    async (version) => {
+      await create()
+      const follower = await create()
+      const observed = vi.fn()
+      follower.client.subscribeToMessages(observed)
+      const pending = await begin(1, version)
+      expect(observed).not.toHaveBeenCalled()
+      const forwarded = response(pending.id)
+      deliver(
+        1,
+        version === '2'
+          ? forwarded
+          : {
+              type: 'RESPONSE',
+              id: pending.id,
+              data: {
+                connectionInfo,
+                message: {
+                  id: pending.id,
+                  version: '3',
+                  senderId: 'wallet',
+                  message: {
+                    type: BeaconMessageType.BlockchainResponse,
+                    blockchainIdentifier: 'tezos',
+                    blockchainData: { signature: 'completed-signature' }
+                  }
+                }
+              }
+            }
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      expect(await pending.outcome).toHaveProperty('value')
+      expect(observed).not.toHaveBeenCalled()
+      expect(follower.transport.send).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(['2', '3'] as const)(
     'labels V%s follower SENT as forwarding, not transport dispatch (#148)',
     async (version) => {
       await create()
