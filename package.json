@@ -43,7 +43,7 @@
     "e2e": "playwright test e2e",
     "e2e:smoke": "playwright test e2e --grep-invert @extended",
     "audit-ci": "node scripts/dependency-scanning.js",
-    "check:versions": "node scripts/check-workspace-version.mjs && node scripts/check-security-deps.mjs",
+    "check:versions": "node scripts/check-workspace-version.mjs && node scripts/check-security-deps.mjs && node scripts/check-playwright-image.mjs",
     "check:sourcemaps": "node scripts/check-sourcemaps.mjs",
     "check-version": "npm run check:versions",
     "version:sync": "node scripts/set-workspace-version.mjs",

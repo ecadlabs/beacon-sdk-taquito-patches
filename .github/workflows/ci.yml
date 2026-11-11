@@ -71,6 +71,12 @@ jobs:
     name: end-to-end
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Browsers and their system libraries ship in the image, so e2e never
+    # depends on Ubuntu's apt mirrors. scripts/check-playwright-image.mjs keeps
+    # the tag in step with the locked @playwright/test version.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --user 1001 --ipc=host
 
     steps:
       - uses: actions/checkout@v7
@@ -91,9 +97,6 @@ jobs:
 
       - name: Build packages
         run: ./scripts/npm11.sh run build
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
 
       - name: Run end-to-end tests
         run: ./scripts/npm11.sh run e2e:smoke

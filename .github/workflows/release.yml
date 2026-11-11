@@ -10,8 +10,36 @@ permissions:
   id-token: write
 
 jobs:
+  end-to-end:
+    name: end-to-end
+    if: github.repository == 'ecadlabs/beacon-sdk-taquito-patches'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Same image and tag as ci.yml; check:versions enforces both.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --user 1001 --ipc=host
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: ./scripts/npm11.sh ci --include=optional
+
+      - name: Build packages
+        run: ./scripts/npm11.sh run build
+
+      - name: Run end-to-end tests
+        run: ./scripts/npm11.sh run e2e:smoke
+
   publish-packages:
     name: publish-packages
+    needs: end-to-end
     if: github.repository == 'ecadlabs/beacon-sdk-taquito-patches'
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -44,12 +72,6 @@ jobs:
 
       - name: Test installed Node packages
         run: ./scripts/npm11.sh run test:node-consumers
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
-      - name: Run end-to-end tests
-        run: ./scripts/npm11.sh run e2e:smoke
 
       - name: Determine npm dist-tag from ref
         id: dist_tag
