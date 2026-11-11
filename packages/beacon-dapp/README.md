@@ -63,3 +63,20 @@ Reason meanings:
 The default UI intentionally keeps a generic "session expired" message for end
 users, while the event payload and debug logs expose the specific restore failure
 reason for applications and diagnostics.
+
+## Active wallet metadata
+
+```ts
+import type { WalletInfo } from '@ecadlabs/beacon-dapp'
+
+const wallet: WalletInfo | undefined = await client.getActiveWalletInfo()
+```
+
+Returns metadata for the active account using its app metadata, matching transport
+peer, then the last selected wallet. Known wallet names receive registry details
+such as an icon, deep link and wallet type. Returns `undefined` when disconnected
+or no wallet name is available, without initiating pairing or waiting for a peer.
+
+Older pairing UI versions stored the wallet key without a display name. These
+records remain readable: a missing or blank stored name falls back to the key.
+Reading active wallet metadata does not rewrite the saved wallet selection.

@@ -26,7 +26,8 @@ export interface StorageKeyReturnType {
   [StorageKey.LAST_SELECTED_WALLET]:
     | {
         key: string
-        name: string
+        // Older pairing UI versions persisted only the wallet key.
+        name?: string
         type: 'extension' | 'mobile' | 'web' | 'desktop'
         icon: string
         url?: string

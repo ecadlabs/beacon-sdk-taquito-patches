@@ -50,6 +50,7 @@ const useConnect = (
       StorageKey.LAST_SELECTED_WALLET,
       JSON.stringify({
         key: selectedWallet?.key,
+        name: selectedWallet?.name,
         type: 'mobile',
         icon: selectedWallet?.image
       })
@@ -195,6 +196,7 @@ const useConnect = (
       StorageKey.LAST_SELECTED_WALLET,
       JSON.stringify({
         key: wallet?.key,
+        name: wallet.name,
         type: 'mobile',
         icon: wallet?.image
       })

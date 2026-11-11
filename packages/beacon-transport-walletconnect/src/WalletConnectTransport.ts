@@ -206,6 +206,7 @@ export class WalletConnectTransport<
         id: session.peer.publicKey,
         type: 'walletconnect-pairing-response',
         name: session.peer.metadata.name,
+        icon: session.peer.metadata.icons[0],
         publicKey: session.peer.publicKey,
         version: 'first'
       }

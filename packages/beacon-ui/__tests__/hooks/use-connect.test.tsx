@@ -4,7 +4,7 @@ import useConnect from '../../src/ui/alert/hooks/useConnect'
 import { StorageKey, ExtensionMessageTarget, NetworkType } from '@ecadlabs/beacon-types'
 import { windowRef } from '@ecadlabs/beacon-core'
 import getDefaultLogo from '../../src/ui/alert/getDefautlLogo'
-import { OSLink } from '../../src/utils/wallets'
+import { type MergedWallet, OSLink } from '../../src/utils/wallets'
 import { AlertState } from '../../src/ui/common'
 
 vi.mock('../../src/utils/get-tzip10-link', () => ({
@@ -744,4 +744,51 @@ describe('useConnect hook', () => {
     vi.clearAllMocks()
     vi.restoreAllMocks()
   })
+})
+
+describe('useConnect persisted wallet display names', () => {
+  const wallet: MergedWallet = {
+    id: 'example-mobile',
+    key: 'example_mobile',
+    name: 'Example Wallet',
+    image: 'https://wallet.test/icon',
+    descriptions: [],
+    types: ['ios'],
+    links: [],
+    supportedInteractionStandards: ['beacon']
+  }
+
+  it.each(['wallet tile', 'mobile deep link'] as const)(
+    'stores the display name when selecting through %s',
+    async (entryPoint) => {
+      const { result } = renderHook(() =>
+        useConnect(
+          false,
+          Promise.resolve('wc-payload'),
+          Promise.resolve('p2p-payload'),
+          Promise.resolve('post-payload'),
+          new Map([[wallet.id, wallet]]),
+          vi.fn()
+        )
+      )
+
+      await act(async () => {
+        if (entryPoint === 'wallet tile') {
+          await result.current[7](wallet.id, { title: 'Select wallet' })
+        } else {
+          await result.current[9](wallet)
+        }
+      })
+
+      const persisted: unknown = JSON.parse(
+        localStorage.getItem(StorageKey.LAST_SELECTED_WALLET) ?? 'null'
+      )
+      expect(persisted).toEqual({
+        key: wallet.key,
+        name: wallet.name,
+        type: 'mobile',
+        icon: wallet.image
+      })
+    }
+  )
 })

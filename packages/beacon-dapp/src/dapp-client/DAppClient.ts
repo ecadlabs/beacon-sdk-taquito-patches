@@ -1851,6 +1851,22 @@ export class DAppClient extends Client {
     return this._activeAccount.promise
   }
 
+  /**
+   * Returns resolved wallet metadata for the active account, or undefined when
+   * disconnected or no wallet name is available. Does not initialize a transport
+   * or wait for a wallet to connect.
+   */
+  public async getActiveWalletInfo(): Promise<WalletInfo | undefined> {
+    const account = await this.getActiveAccount()
+    if (!account) {
+      return undefined
+    }
+
+    const walletInfo = await this.getWalletInfo(undefined, account, true, { updateStorage: false })
+
+    return walletInfo.name.trim() ? walletInfo : undefined
+  }
+
   private resolveActiveAccount(account: AccountInfo | undefined): void {
     if (this._activeAccount.isSettled()) {
       this._activeAccount = ExposedPromise.resolve<AccountInfo | undefined>(account)
@@ -3673,13 +3689,14 @@ export class DAppClient extends Client {
 
     wallet.name = walletInfo.name
     wallet.icon = walletInfo.icon ?? wallet.icon
-    this.storage.set(StorageKey.LAST_SELECTED_WALLET, wallet)
+    await this.storage.set(StorageKey.LAST_SELECTED_WALLET, wallet)
   }
 
   private async getWalletInfo(
     peer?: PeerInfo,
     account?: AccountInfo,
-    readFromStorage: boolean = true
+    readFromStorage: boolean = true,
+    { updateStorage = true }: { updateStorage?: boolean } = {}
   ): Promise<WalletInfo> {
     const selectedAccount = account ? account : await this.getActiveAccount()
 
@@ -3696,14 +3713,23 @@ export class DAppClient extends Client {
       storageWallet = await this.getWalletInfoFromStorage()
     }
 
-    if (!walletInfo) {
+    if (!walletInfo?.name.trim()) {
       walletInfo = {
-        name: selectedPeer?.name ?? storageWallet?.key ?? '',
+        name:
+          selectedPeer?.name.trim() || storageWallet?.name?.trim() || storageWallet?.key.trim() || '',
         icon: selectedPeer?.icon ?? storageWallet?.icon,
         type: storageWallet?.type
       }
 
-      this.updateStorageWallet(walletInfo)
+      if (updateStorage) {
+        this.updateStorageWallet(walletInfo).catch((error: unknown) =>
+          logger.warn('updateStorageWallet', error)
+        )
+      }
+    }
+
+    if (!walletInfo.name.trim()) {
+      return walletInfo
     }
 
     const lowerCaseCompare = (str1?: string, str2?: string): boolean => {
@@ -3722,7 +3748,7 @@ export class DAppClient extends Client {
       ...getDesktopList(),
       ...getExtensionList()
     ].filter((app: AppBase) =>
-      lowerCaseCompare(getOrgName(app.key), getOrgName(walletInfo?.name ?? 'wallet'))
+      lowerCaseCompare(getOrgName(app.key), getOrgName(walletInfo.name))
     )
 
     // TODO: Remove once all wallets send the icon?
@@ -3800,7 +3826,9 @@ export class DAppClient extends Client {
       peer = peers.find((peerEl) => peerEl.senderId === account.senderId)
       if (!peer) {
         // We could not find an exact match for a sender, so we most likely received it over a relay
-        peer = peers.find((peerEl) => peerEl.id === account.origin.id)
+        peer = peers.find(
+          (peerEl) => peerEl.id === account.origin.id || peerEl.publicKey === account.origin.id
+        )
       }
     } else {
       peer = await this._activePeer.promise

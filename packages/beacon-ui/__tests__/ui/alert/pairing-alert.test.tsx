@@ -421,7 +421,12 @@ describe('PairingAlert Component', () => {
         })
         expect(screen.getByTestId('qr')).toHaveTextContent(wcCode)
         expect(localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)).toEqual(
-          JSON.stringify({ key: walletObj.key, type: 'mobile', icon: walletObj.image })
+          JSON.stringify({
+            key: walletObj.key,
+            name: walletObj.name,
+            type: 'mobile',
+            icon: walletObj.image
+          })
         )
       } finally {
         vi.mocked(useConnect).mockReset()
