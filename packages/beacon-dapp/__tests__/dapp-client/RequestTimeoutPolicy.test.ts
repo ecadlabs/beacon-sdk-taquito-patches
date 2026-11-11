@@ -25,7 +25,9 @@ import {
   TransportType
 } from '@ecadlabs/beacon-types'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
+import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { BeaconEvent } from '../../src/events'
+import { messageEvents } from '../../src/beacon-message-events'
 
 // Request deadline policy, local error attribution and late-response reporting over a
 // message transport (P2P). WalletConnect delivers responses through its own request
@@ -408,6 +410,264 @@ describe('Request timeout policy', () => {
     })
     return pending
   }
+
+  describe('request event correlation (#148)', () => {
+    const epoch = 1_800_000_000_000
+
+    async function startPublic(requestTimeoutMs = 0) {
+      await start(requestTimeoutMs)
+      vi.spyOn(dapp, 'getActiveAccount').mockResolvedValue({
+        ...account,
+        verificationType: 'proof_of_event'
+      })
+      dapp.addBlockchain({
+        identifier: 'tezos',
+        async validateRequest() {},
+        async handleResponse() {},
+        async getAccountInfosFromPermissionResponse() {
+          return []
+        },
+        async getWalletLists() {
+          return { extensionList: [], desktopList: [], webList: [], iOSList: [] }
+        }
+      })
+    }
+
+    function publicRequest(request: RequestCase) {
+      if (request.version === '3') {
+        return dapp.request({
+          type: BeaconMessageType.BlockchainRequest,
+          blockchainIdentifier: 'tezos',
+          accountId: account.accountIdentifier,
+          blockchainData: { type: request.kind, scope: request.kind }
+        })
+      }
+      switch (request.kind) {
+        case 'sign':
+          return dapp.requestSignPayload({ payload: 'aa', signingType: SigningType.RAW })
+        case 'operation':
+          return dapp.requestOperation({ operationDetails: [] })
+        case 'broadcast':
+          return dapp.requestBroadcast({ signedTransaction: 'aa', network })
+        case 'proof of event':
+          return dapp.requestProofOfEventChallenge({ payload: 'challenge' })
+        case 'simulated proof of event':
+          return dapp.requestSimulatedProofOfEventChallenge({ payload: 'challenge' })
+        default:
+          throw new Error('Permission requests use the response preparation fixture')
+      }
+    }
+
+    function observe(pending: Promise<unknown>) {
+      return pending.then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error })
+      )
+    }
+
+    it.each(allCases)('identifies V$version $kind SENT at transport dispatch', async (request) => {
+      await start()
+      const sent = vi.fn()
+      await dapp.subscribeToEvent(messageEvents[requestType(request)].sent, sent)
+      // The send returns later than it starts. sentAt records dispatch, not promise completion.
+      vi.setSystemTime(epoch - 1000)
+      dapp['getWalletInfo'] = async () => {
+        vi.setSystemTime(epoch)
+        return { name: peer.name }
+      }
+      vi.mocked(transport.send).mockImplementation(async () => {
+        vi.setSystemTime(epoch + 500)
+      })
+      const pending = await dispatch(request)
+      expect(sent).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          requestId: pending.id,
+          requestType: requestType(request),
+          transport: TransportType.P2P,
+          senderId: peer.senderId,
+          dispatchStage: 'transport',
+          sentAt: epoch
+        }),
+        undefined
+      )
+    })
+
+    it.each(
+      nonPermissionCases.flatMap((request) =>
+        ['success', 'rejection'].map((ending) => ({ ...request, ending }))
+      )
+    )('correlates V$version $kind $ending and preserves receipt time', async (request) => {
+      await startPublic()
+      const sent = vi.fn()
+      const terminal = vi.fn()
+      const events = messageEvents[requestType(request)]
+      await dapp.subscribeToEvent(events.sent, sent)
+      await dapp.subscribeToEvent(
+        request.ending === 'success' ? events.success : events.error,
+        terminal
+      )
+      const outcome = observe(publicRequest(request))
+      await vi.advanceTimersByTimeAsync(0)
+      const id = await sentId()
+      // UI metadata lookup happens after the response arrived.
+      vi.setSystemTime(epoch)
+      dapp['getWalletInfo'] = async () => {
+        vi.setSystemTime(epoch + 1000)
+        return { name: peer.name }
+      }
+      await transport.receive(
+        request.ending === 'success'
+          ? successResponse(request, id)
+          : request.version === '2'
+            ? walletError(id)
+            : {
+                id,
+                version: '3',
+                senderId: peer.senderId,
+                message: { type: BeaconMessageType.Error, errorType: BeaconErrorType.ABORTED_ERROR }
+              }
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      expect(await outcome).toHaveProperty(request.ending === 'success' ? 'value' : 'error')
+      expect(sent).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ requestId: id }),
+        undefined
+      )
+      expect(terminal).toHaveBeenCalledTimes(1)
+      expect(terminal.mock.calls[0][0]).toMatchObject({ requestId: id, receivedAt: epoch })
+      if (request.ending === 'rejection') {
+        expect(terminal.mock.calls[0][0]).toHaveProperty('errorResponse.id', id)
+      } else if (request.version === '2') {
+        expect(terminal.mock.calls[0][0]).toHaveProperty('output.id', id)
+      }
+    })
+
+    it.each([
+      { reverse: false, rejectOperation: false },
+      { reverse: true, rejectOperation: false },
+      { reverse: false, rejectOperation: true },
+      { reverse: true, rejectOperation: true }
+    ])(
+      'correlates concurrent requests (reverse=$reverse, rejectOperation=$rejectOperation)',
+      async ({ reverse, rejectOperation }) => {
+        await startPublic()
+        const signSent = vi.fn()
+        const operationSent = vi.fn()
+        const signDone = vi.fn()
+        const operationDone = vi.fn()
+        const unexpected = vi.fn()
+        await dapp.subscribeToEvent(BeaconEvent.SIGN_REQUEST_SENT, signSent)
+        await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_SENT, operationSent)
+        await dapp.subscribeToEvent(BeaconEvent.SIGN_REQUEST_SUCCESS, signDone)
+        await dapp.subscribeToEvent(BeaconEvent.SIGN_REQUEST_ERROR, unexpected)
+        await dapp.subscribeToEvent(
+          rejectOperation
+            ? BeaconEvent.OPERATION_REQUEST_ERROR
+            : BeaconEvent.OPERATION_REQUEST_SUCCESS,
+          operationDone
+        )
+        await dapp.subscribeToEvent(
+          rejectOperation
+            ? BeaconEvent.OPERATION_REQUEST_SUCCESS
+            : BeaconEvent.OPERATION_REQUEST_ERROR,
+          unexpected
+        )
+        const signCase: RequestCase = { kind: 'sign', version: '2' }
+        const signOutcome = observe(publicRequest(signCase))
+        await vi.advanceTimersByTimeAsync(0)
+        const signId = await sentId()
+        const operationOutcome = observe(publicRequest(operation))
+        await vi.advanceTimersByTimeAsync(0)
+        const operationId = await sentId()
+        expect(signId).not.toBe(operationId)
+        const replies = [
+          successResponse(signCase, signId),
+          rejectOperation ? walletError(operationId) : successResponse(operation, operationId)
+        ]
+        if (reverse) replies.reverse()
+        const preparation = new ExposedPromise<void>()
+        dapp['getWalletInfo'] = async () => {
+          await preparation.promise
+          return { name: peer.name }
+        }
+        vi.setSystemTime(epoch)
+        await transport.receive(replies[0])
+        await vi.advanceTimersByTimeAsync(0)
+        vi.setSystemTime(epoch + 100)
+        await transport.receive(replies[1])
+        await vi.advanceTimersByTimeAsync(0)
+        vi.setSystemTime(epoch + 1000)
+        preparation.resolve()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(await signOutcome).toHaveProperty('value')
+        expect(await operationOutcome).toHaveProperty(rejectOperation ? 'error' : 'value')
+        for (const [listener, id] of [
+          [signSent, signId],
+          [operationSent, operationId],
+          [signDone, signId],
+          [operationDone, operationId]
+        ] as const) {
+          expect(listener).toHaveBeenCalledTimes(1)
+          expect(listener.mock.calls[0][0]).toMatchObject({ requestId: id })
+        }
+        expect(signDone.mock.calls[0][0]).toMatchObject({ receivedAt: epoch + (reverse ? 100 : 0) })
+        expect(operationDone.mock.calls[0][0]).toMatchObject({
+          receivedAt: epoch + (reverse ? 0 : 100)
+        })
+        expect(unexpected).not.toHaveBeenCalled()
+      }
+    )
+
+    it('timestamps a local timeout before delayed error-event preparation', async () => {
+      await startPublic(25)
+      const failed = vi.fn()
+      await dapp.subscribeToEvent(BeaconEvent.SIGN_REQUEST_ERROR, failed)
+      vi.setSystemTime(epoch)
+      const outcome = observe(publicRequest({ kind: 'sign', version: '2' }))
+      await vi.advanceTimersByTimeAsync(0)
+      const id = await sentId()
+      dapp['getWalletInfo'] = async () => {
+        vi.setSystemTime(epoch + 1000)
+        return { name: peer.name }
+      }
+      await vi.advanceTimersByTimeAsync(25)
+      expect(await outcome).toHaveProperty('error')
+      expect(failed).toHaveBeenCalledTimes(1)
+      expect(failed.mock.calls[0][0]).toMatchObject({
+        requestId: id,
+        receivedAt: epoch + 25,
+        errorResponse: { id, errorOrigin: 'local', errorType: BeaconErrorType.PEER_UNREACHABLE }
+      })
+    })
+
+    it('correlates a Matrix ACK before delayed wallet metadata lookup', async () => {
+      await start()
+      const acknowledged = vi.fn()
+      await dapp.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledged)
+      const pending = await dispatch(operation)
+      vi.setSystemTime(epoch)
+      dapp['getWalletInfo'] = async () => {
+        vi.setSystemTime(epoch + 1000)
+        return { name: peer.name }
+      }
+      await transport.receive(acknowledge(pending.id))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(acknowledged).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          correlated: true,
+          requestId: pending.id,
+          receivedAt: epoch,
+          message: {
+            id: pending.id,
+            version: '2',
+            senderId: peer.senderId,
+            type: BeaconMessageType.Acknowledge
+          }
+        }),
+        undefined
+      )
+    })
+  })
 
   describe('deadline', () => {
     it.each(permissionCases)(

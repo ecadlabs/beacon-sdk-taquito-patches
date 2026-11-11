@@ -11,7 +11,8 @@ import {
   PermissionScope,
   SigningType,
   StorageKey,
-  TransportStatus
+  TransportStatus,
+  TransportType
 } from '@ecadlabs/beacon-types'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
@@ -251,6 +252,41 @@ describe('Follower route ownership', () => {
     for (let index = 1; index < tabs.length; index++) deliver(index, { type: 'LEADER_DEAD' })
     await vi.advanceTimersByTimeAsync(0)
   }
+
+  it.each(['2', '3'] as const)(
+    'labels V%s follower SENT as forwarding, not transport dispatch (#148)',
+    async (version) => {
+      await create()
+      const follower = await create()
+      const sent = vi.fn()
+      await follower.client.subscribeToEvent(
+        version === '2' ? BeaconEvent.SIGN_REQUEST_SENT : BeaconEvent.OPERATION_REQUEST_SENT,
+        sent
+      )
+      const forwardedAt = 1_800_000_000_000
+      vi.setSystemTime(forwardedAt)
+      follower.client['getWalletInfo'] = async () => {
+        vi.setSystemTime(forwardedAt + 1000)
+        return { name: 'Wallet' }
+      }
+      const pending = await begin(1, version)
+      expect(sent).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          requestId: pending.id,
+          requestType:
+            version === '2'
+              ? BeaconMessageType.SignPayloadRequest
+              : BeaconMessageType.BlockchainRequest,
+          transport: TransportType.WALLETCONNECT,
+          dispatchStage: 'forwarded',
+          forwardedAt
+        }),
+        undefined
+      )
+      expect(sent.mock.calls[0][0]).not.toHaveProperty('sentAt')
+      expect(follower.transport.send).not.toHaveBeenCalled()
+    }
+  )
 
   it.each(['2', '3'] as const)(
     'aborts both V%s followers before election and leaves the third tab a follower',

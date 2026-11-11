@@ -52,7 +52,6 @@ import {
   PermissionRequestV3,
   PermissionResponseV3,
   BeaconBaseMessage,
-  AcknowledgeResponse,
   ExtendedWalletConnectPairingResponse,
   ProofOfEventChallengeRequest,
   ProofOfEventChallengeResponse,
@@ -301,6 +300,9 @@ export class DAppClient extends Client {
 
   private readonly proxyAccountPreparations = new Map<RequestKey, () => void>()
 
+  // Object ownership keeps receipt times through async preparation without retaining settled IDs.
+  private readonly responseReceivedAt = new WeakMap<object, number>()
+
   private readonly requestTracker = new RequestTracker<RequestResponse, unknown>({
     onError: (error) => logger.error('requestTracker', error)
   })
@@ -542,6 +544,10 @@ export class DAppClient extends Client {
       connectionInfo: ConnectionContext,
       transportType?: TransportType
     ): Promise<void> => {
+      const receivedAt = Date.now()
+      if (!this.responseReceivedAt.has(message)) {
+        this.responseReceivedAt.set(message, receivedAt)
+      }
       // The WalletConnect adapter builds every message it delivers from WalletConnect results, so
       // the marks it sets are trusted. Messages relayed between tabs arrive without a transport.
       const fromAdapter = transportType === TransportType.WALLETCONNECT
@@ -662,7 +668,15 @@ export class DAppClient extends Client {
         }
         this.events
           .emit(BeaconEvent.ACKNOWLEDGE_RECEIVED, {
-            message: typedMessage as AcknowledgeResponse,
+            correlated: true,
+            requestId: message.id,
+            receivedAt,
+            message: {
+              type: BeaconMessageType.Acknowledge,
+              id: message.id,
+              version: message.version,
+              senderId: message.senderId
+            },
             extraInfo: {},
             walletInfo
           })
@@ -673,6 +687,9 @@ export class DAppClient extends Client {
 
       // Routed on the message type alone: a wallet error without errorType is still an error.
       const error = toRequestError(message, this.trustsClaimedOrigin(request.route, fromAdapter))
+      if (error) {
+        this.responseReceivedAt.set(error, receivedAt)
+      }
       if (preparing) {
         if (appMetadata) {
           try {
@@ -1299,6 +1316,7 @@ export class DAppClient extends Client {
   }
 
   private async wcToastHandler(status: string) {
+    const receivedAt = Date.now()
     const walletInfo = await (async (): Promise<WalletInfo> => {
       try {
         return await this.getWalletInfo()
@@ -1310,8 +1328,9 @@ export class DAppClient extends Client {
     await this.events.emit(BeaconEvent.HIDE_UI, ['alert'])
     if (status === 'pending') {
       this.events.emit(BeaconEvent.ACKNOWLEDGE_RECEIVED, {
-        message: {} as any,
-        extraInfo: {} as any,
+        correlated: false,
+        receivedAt,
+        extraInfo: {},
         walletInfo
       })
     } else {
@@ -2715,17 +2734,25 @@ export class DAppClient extends Client {
       owner.assertCurrent()
       const walletInfo = await this.getWalletInfo()
       owner.complete()
-      await this.notifySuccess(request as unknown as PermissionRequestInput, {
-        account: accountInfo,
-        output: {
-          address: partialAccountInfos[0].address,
-          network: { type: input.blockchainIdentifier },
-          scopes: []
-        } as unknown as PermissionResponseOutput,
-        blockExplorer: this.blockExplorer,
-        connectionContext: connectionInfo,
-        walletInfo
-      })
+      await this.notifySuccess(
+        request,
+        {
+          account: accountInfo,
+          output: {
+            id: response.id,
+            senderId: response.senderId,
+            version: response.version,
+            type: BeaconMessageType.PermissionResponse,
+            address: partialAccountInfos[0].address,
+            network: { type: input.blockchainIdentifier },
+            scopes: []
+          } as unknown as PermissionResponseOutput,
+          blockExplorer: this.blockExplorer,
+          connectionContext: connectionInfo,
+          walletInfo
+        },
+        response
+      )
 
       return response.message
     })
@@ -2780,12 +2807,7 @@ export class DAppClient extends Client {
       walletInfo: await this.getWalletInfo()
     })
 
-    await this.notifySuccess(
-      request as any,
-      {
-        walletInfo: await this.getWalletInfo()
-      } as any
-    )
+    await this.notifySuccess(request, { walletInfo: await this.getWalletInfo() }, response)
 
     return response.message
   }
@@ -2875,13 +2897,17 @@ export class DAppClient extends Client {
       }
       const walletInfo = await this.getWalletInfo()
       owner.complete()
-      await this.notifySuccess(request, {
-        account: accountInfo,
-        output,
-        blockExplorer: this.blockExplorer,
-        connectionContext: connectionInfo,
-        walletInfo
-      })
+      await this.notifySuccess(
+        request,
+        {
+          account: accountInfo,
+          output,
+          blockExplorer: this.blockExplorer,
+          connectionContext: connectionInfo,
+          walletInfo
+        },
+        message
+      )
       this.analytics.track('event', 'DAppClient', 'Permission received', {
         address: accountInfo.address
       })
@@ -2961,13 +2987,17 @@ export class DAppClient extends Client {
       { address: activeAccount.address }
     )
 
-    await this.notifySuccess(request, {
-      account: activeAccount,
-      output: message,
-      blockExplorer: this.blockExplorer,
-      connectionContext: connectionInfo,
-      walletInfo: await this.getWalletInfo()
-    })
+    await this.notifySuccess(
+      request,
+      {
+        account: activeAccount,
+        output: message,
+        blockExplorer: this.blockExplorer,
+        connectionContext: connectionInfo,
+        walletInfo: await this.getWalletInfo()
+      },
+      message
+    )
 
     return message
   }
@@ -3035,13 +3065,17 @@ export class DAppClient extends Client {
       { address: activeAccount.address }
     )
 
-    await this.notifySuccess(request, {
-      account: activeAccount,
-      output: message,
-      blockExplorer: this.blockExplorer,
-      connectionContext: connectionInfo,
-      walletInfo: await this.getWalletInfo()
-    })
+    await this.notifySuccess(
+      request,
+      {
+        account: activeAccount,
+        output: message,
+        blockExplorer: this.blockExplorer,
+        connectionContext: connectionInfo,
+        walletInfo: await this.getWalletInfo()
+      },
+      message
+    )
 
     return message
   }
@@ -3123,12 +3157,16 @@ export class DAppClient extends Client {
 
     logger.time(false, logId)
 
-    await this.notifySuccess(request, {
-      account: activeAccount,
-      output: message,
-      connectionContext: connectionInfo,
-      walletInfo: await this.getWalletInfo()
-    })
+    await this.notifySuccess(
+      request,
+      {
+        account: activeAccount,
+        output: message,
+        connectionContext: connectionInfo,
+        walletInfo: await this.getWalletInfo()
+      },
+      message
+    )
 
     this.analytics.track('event', 'DAppClient', 'Signature response')
 
@@ -3238,13 +3276,17 @@ export class DAppClient extends Client {
 
     logger.time(false, logId)
 
-    await this.notifySuccess(request, {
-      account: activeAccount,
-      output: message,
-      blockExplorer: this.blockExplorer,
-      connectionContext: connectionInfo,
-      walletInfo: await this.getWalletInfo()
-    })
+    await this.notifySuccess(
+      request,
+      {
+        account: activeAccount,
+        output: message,
+        blockExplorer: this.blockExplorer,
+        connectionContext: connectionInfo,
+        walletInfo: await this.getWalletInfo()
+      },
+      message
+    )
 
     this.analytics.track('event', 'DAppClient', 'Operation response')
 
@@ -3297,13 +3339,17 @@ export class DAppClient extends Client {
 
     logger.time(false, logId)
 
-    await this.notifySuccess(request, {
-      network: this.network,
-      output: message,
-      blockExplorer: this.blockExplorer,
-      connectionContext: connectionInfo,
-      walletInfo: await this.getWalletInfo()
-    })
+    await this.notifySuccess(
+      request,
+      {
+        network: this.network,
+        output: message,
+        blockExplorer: this.blockExplorer,
+        connectionContext: connectionInfo,
+        walletInfo: await this.getWalletInfo()
+      },
+      message
+    )
 
     this.analytics.track('event', 'DAppClient', 'Broadcast response')
 
@@ -3478,6 +3524,7 @@ export class DAppClient extends Client {
     beaconError: ErrorResponse,
     resetPermissionState = true
   ): Promise<void> {
+    const receivedAt = this.responseReceivedAt.get(beaconError) ?? Date.now()
     logger.error('handleRequestError', 'error response', beaconError)
     if (beaconError.errorType) {
       const buttons: AlertButton[] = []
@@ -3534,6 +3581,8 @@ export class DAppClient extends Client {
         .emit(
           messageEvents[request.type].error,
           {
+            requestId: beaconError.id,
+            receivedAt,
             errorResponse: beaconError,
             walletInfo: this.destroyed
               ? { name: peer?.name ?? '' }
@@ -3557,7 +3606,7 @@ export class DAppClient extends Client {
    * @param response The response we received
    */
   private async notifySuccess(
-    request: BeaconRequestInputMessage,
+    request: { type: BeaconMessageType },
     response:
       | {
           account: AccountInfo
@@ -3604,9 +3653,15 @@ export class DAppClient extends Client {
           connectionContext: ConnectionContext
           walletInfo: WalletInfo
         }
+      | { walletInfo: WalletInfo },
+    message: { id: string }
   ): Promise<void> {
     this.events
-      .emit(messageEvents[request.type].success, response)
+      .emit(messageEvents[request.type].success, {
+        ...response,
+        requestId: message.id,
+        receivedAt: this.responseReceivedAt.get(message) ?? Date.now()
+      })
       .catch((emitError) => console.warn(emitError))
   }
 
@@ -3875,6 +3930,7 @@ export class DAppClient extends Client {
           }
           // Account replacement can cancel preparation, but not an operation already sent.
           this.finishProxyPreparation(proxyKey)
+          const sentAt = Date.now()
           try {
             await transport.send(payload, peer)
           } finally {
@@ -3899,6 +3955,15 @@ export class DAppClient extends Client {
           if (!otherTabMessageId && canDispatch()) {
             this.events
               .emit(messageEvents[requestInput.type].sent, {
+                requestId: request.id,
+                requestType: requestInput.type,
+                transport: transport.type,
+                senderId:
+                  peer && 'senderId' in peer && typeof peer.senderId === 'string'
+                    ? peer.senderId
+                    : undefined,
+                dispatchStage: 'transport',
+                sentAt,
                 walletInfo: { ...walletInfo, name: walletInfo.name ?? 'Wallet' },
                 extraInfo: { resetCallback: async () => this.disconnect() }
               })
@@ -4034,6 +4099,7 @@ export class DAppClient extends Client {
           }
           // Account replacement can cancel preparation, but not an operation already sent.
           this.finishProxyPreparation(proxyKey)
+          const sentAt = Date.now()
           try {
             await transport.send(payload, peer)
           } finally {
@@ -4056,9 +4122,21 @@ export class DAppClient extends Client {
             this.tryToAppSwitch(canDispatch).catch((error) => logger.warn('tryToAppSwitch', error))
           }
           if (!otherTabMessageId && canDispatch()) {
-            const index = requestInput.type as BeaconMessageType
+            const index =
+              requestInput.type === BeaconMessageType.PermissionRequest
+                ? BeaconMessageType.PermissionRequest
+                : BeaconMessageType.BlockchainRequest
             this.events
               .emit(messageEvents[index].sent, {
+                requestId: request.id,
+                requestType: index,
+                transport: transport.type,
+                senderId:
+                  peer && 'senderId' in peer && typeof peer.senderId === 'string'
+                    ? peer.senderId
+                    : undefined,
+                dispatchStage: 'transport',
+                sentAt,
                 walletInfo: { ...walletInfo, name: walletInfo.name ?? 'Wallet' },
                 extraInfo: { resetCallback: async () => this.disconnect() }
               })
@@ -4137,6 +4215,11 @@ export class DAppClient extends Client {
       this.requestTracker.get(owned.key.id)?.state !== 'ResponsePreparing'
     const dispatch = async (): Promise<void> => {
       try {
+        if (!canDispatch()) {
+          return
+        }
+        const senderId = this._activeAccount.promiseResult?.senderId
+        const forwardedAt = Date.now()
         this.multiTabChannel.postMessage({ type: request.type, data: request, id })
         if (!canDispatch()) {
           return
@@ -4156,6 +4239,12 @@ export class DAppClient extends Client {
         }
         this.events
           .emit(messageEvents[request.type].sent, {
+            requestId: id,
+            requestType: request.type,
+            transport: transport.type,
+            senderId,
+            dispatchStage: 'forwarded',
+            forwardedAt,
             walletInfo,
             extraInfo: { resetCallback: () => this.disconnect() }
           })
@@ -4435,6 +4524,14 @@ export class DAppClient extends Client {
     requestType?: BeaconMessageType
   ): RequestHandle | undefined {
     const key = this.requestTracker.admit(id, route, (result) => {
+      if (
+        result.tag !== 'Resolved' &&
+        typeof result.error === 'object' &&
+        result.error !== null &&
+        !this.responseReceivedAt.has(result.error)
+      ) {
+        this.responseReceivedAt.set(result.error, Date.now())
+      }
       // The leader's deadline fired for this follower's request. The leader forwards a late
       // wallet answer here, where the user saw the timeout.
       if (

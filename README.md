@@ -130,6 +130,43 @@ try {
 
 For a more complete example, see [`examples/dapp.html`](./examples/dapp.html).
 
+## dApp event correlation
+
+Request SENT events include `requestId`, `requestType`, `transport`, and the target
+peer's `senderId` when known. Narrow `dispatchStage` before reading the timestamp:
+
+- `transport`: `sentAt` records when transport send was invoked. The event is
+  emitted after that call completes; it does not confirm wallet delivery.
+- `forwarded`: `forwardedAt` records when a follower tab forwarded the request to
+  its leader. `transport` identifies the intended wallet transport. There is no
+  `sentAt`, since the follower has not sent the request to the wallet.
+
+SUCCESS and ERROR events include top-level `requestId` and `receivedAt`.
+`receivedAt` records response arrival at this client, before asynchronous metadata
+or account preparation. For local timeouts and aborts, it records local settlement.
+All timestamps are epoch milliseconds. Correlate by ID rather than event arrival
+order. An error before request admission can have an empty ID and no preceding
+SENT event. V3 correlation uses the outer Beacon envelope ID.
+
+ACK events distinguish real protocol acknowledgements from WalletConnect pairing
+status. Narrow `correlated` before accessing `message` or `requestId`:
+
+```ts
+await dAppClient.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, (ack) => {
+  if (ack.correlated) {
+    console.log('Wallet acknowledged', ack.requestId, ack.message)
+  } else {
+    console.log('WalletConnect pairing is pending', ack.receivedAt)
+  }
+})
+```
+
+`ACTIVE_ACCOUNT_SET` is typed as `AccountInfo | undefined`, matching account
+selection and clearing. Subscribers must handle the cleared case. These ACK and
+account type corrections require consumers that assumed a message or account was
+always present to update their callbacks. Code constructing event payloads must
+also supply the new correlation fields and dispatch discriminator.
+
 ## Example wallet integration
 
 ```ts

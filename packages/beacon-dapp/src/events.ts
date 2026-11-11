@@ -27,7 +27,8 @@ import {
   AnalyticsInterface,
   ProofOfEventChallengeResponseOutput,
   SimulatedProofOfEventChallengeResponseOutput,
-  BeaconMessageType
+  BeaconMessageType,
+  TransportType
 } from '@ecadlabs/beacon-types'
 import {
   UnknownBeaconError,
@@ -167,71 +168,102 @@ export interface InvalidAccountDeactivatedEvent {
   reason: InvalidAccountDeactivatedReason
 }
 
-interface RequestSentInfo {
+/** Metadata shared by transport dispatch and inter-tab forwarding notifications. */
+interface RequestDispatchInfo {
+  requestId: string
+  requestType: BeaconMessageType
+  /** Actual transport for dispatch, intended wallet transport for forwarding. */
+  transport: TransportType
+  /** Target wallet peer, when known. */
+  senderId?: string
   extraInfo: ExtraInfo
   walletInfo: WalletInfo
 }
+
+/** SENT is emitted after dispatch completes; timestamps mark the start of dispatch. */
+export type RequestSentInfo = RequestDispatchInfo &
+  (
+    | { dispatchStage: 'transport'; sentAt: number }
+    | { dispatchStage: 'forwarded'; forwardedAt: number }
+  )
+
+/** Correlation metadata for terminal request events. Times are epoch milliseconds. */
+export interface RequestResponseInfo {
+  requestId: string
+  /** Response arrival at this client, or settlement time for a locally generated error. */
+  receivedAt: number
+}
+
+/** WalletConnect pairing status is not a correlated protocol acknowledgement. */
+export type AcknowledgeInfo = {
+  receivedAt: number
+  walletInfo: WalletInfo
+  extraInfo: ExtraInfo
+} & ({ correlated: true; requestId: string; message: AcknowledgeResponse } | { correlated: false })
 
 /**
  * The type of the payload of the different BeaconEvents
  */
 export interface BeaconEventType {
   [BeaconEvent.PERMISSION_REQUEST_SENT]: RequestSentInfo
-  [BeaconEvent.PERMISSION_REQUEST_SUCCESS]: {
+  [BeaconEvent.PERMISSION_REQUEST_SUCCESS]: RequestResponseInfo & {
     account: AccountInfo
     output: PermissionResponseOutput
     blockExplorer: BlockExplorer
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
-  [BeaconEvent.PERMISSION_REQUEST_ERROR]: {
+  [BeaconEvent.PERMISSION_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
   }
   [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT]: RequestSentInfo
-  [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS]: {
+  [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS]: RequestResponseInfo & {
     account: AccountInfo
     output: ProofOfEventChallengeResponseOutput
     blockExplorer: BlockExplorer
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
-  [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]: {
+  [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
   }
   [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT]: RequestSentInfo
-  [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS]: {
+  [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS]: RequestResponseInfo & {
     account: AccountInfo
     output: SimulatedProofOfEventChallengeResponseOutput
     blockExplorer: BlockExplorer
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
-  [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]: {
+  [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
   }
   [BeaconEvent.OPERATION_REQUEST_SENT]: RequestSentInfo
-  [BeaconEvent.OPERATION_REQUEST_SUCCESS]: {
+  [BeaconEvent.OPERATION_REQUEST_SUCCESS]: RequestResponseInfo & {
     account: AccountInfo
     output: OperationResponseOutput
     blockExplorer: BlockExplorer
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
-  [BeaconEvent.OPERATION_REQUEST_ERROR]: {
+  [BeaconEvent.OPERATION_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
     errorMessages: Record<string, Record<string | number, string>>
   }
   [BeaconEvent.SIGN_REQUEST_SENT]: RequestSentInfo
-  [BeaconEvent.SIGN_REQUEST_SUCCESS]: {
+  [BeaconEvent.SIGN_REQUEST_SUCCESS]: RequestResponseInfo & {
     output: SignPayloadResponseOutput
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
-  [BeaconEvent.SIGN_REQUEST_ERROR]: { errorResponse: RequestErrorResponse; walletInfo: WalletInfo }
+  [BeaconEvent.SIGN_REQUEST_ERROR]: RequestResponseInfo & {
+    errorResponse: RequestErrorResponse
+    walletInfo: WalletInfo
+  }
   // TODO: ENCRYPTION
   // [BeaconEvent.ENCRYPT_REQUEST_SENT]: RequestSentInfo
   // [BeaconEvent.ENCRYPT_REQUEST_SUCCESS]: {
@@ -240,27 +272,23 @@ export interface BeaconEventType {
   //   walletInfo: WalletInfo
   // }
   // [BeaconEvent.ENCRYPT_REQUEST_ERROR]: { errorResponse: RequestErrorResponse; walletInfo: WalletInfo }
-  [BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]: RequestSentInfo
+  [BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]: RequestResponseInfo & { walletInfo: WalletInfo }
   [BeaconEvent.BROADCAST_REQUEST_SENT]: RequestSentInfo
-  [BeaconEvent.BROADCAST_REQUEST_SUCCESS]: {
+  [BeaconEvent.BROADCAST_REQUEST_SUCCESS]: RequestResponseInfo & {
     network: Network
     output: BroadcastResponseOutput
     blockExplorer: BlockExplorer
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
-  [BeaconEvent.BROADCAST_REQUEST_ERROR]: {
+  [BeaconEvent.BROADCAST_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
   }
-  [BeaconEvent.ACKNOWLEDGE_RECEIVED]: {
-    message: AcknowledgeResponse
-    extraInfo: ExtraInfo
-    walletInfo: WalletInfo
-  }
+  [BeaconEvent.ACKNOWLEDGE_RECEIVED]: AcknowledgeInfo
   [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: undefined
   [BeaconEvent.NO_PERMISSIONS]: undefined
-  [BeaconEvent.ACTIVE_ACCOUNT_SET]: AccountInfo
+  [BeaconEvent.ACTIVE_ACCOUNT_SET]: AccountInfo | undefined
   [BeaconEvent.ACTIVE_TRANSPORT_SET]: Transport
   [BeaconEvent.INVALID_ACTIVE_ACCOUNT_STATE]: undefined
   [BeaconEvent.GENERIC_ERROR]: string
@@ -338,11 +366,7 @@ const showSentToast = async (data: RequestSentInfo): Promise<void> => {
   })
 }
 
-const showAcknowledgedToast = async (data: {
-  message: AcknowledgeResponse
-  extraInfo: ExtraInfo
-  walletInfo: WalletInfo
-}): Promise<void> => {
+const showAcknowledgedToast = async (data: AcknowledgeInfo): Promise<void> => {
   openToast({
     body: 'Awaiting confirmation in\u00A0 {{wallet}}',
     state: 'acknowledge',

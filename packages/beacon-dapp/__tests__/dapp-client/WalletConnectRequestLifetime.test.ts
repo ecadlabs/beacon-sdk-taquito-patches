@@ -30,6 +30,7 @@ import {
 import { P2PCommunicationClient } from '@ecadlabs/beacon-transport-matrix'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { BeaconEvent } from '../../src/events'
+import { ClientEvents } from '../../../beacon-core/src/transports/clients/ClientEvents'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
 
 vi.mock(
@@ -187,6 +188,33 @@ describe('WalletConnect public request lifetime (#102)', () => {
     ) => Promise<void>
     await handleResponse(message, connectionInfo)
   }
+
+  it('reports WalletConnect pending as uncorrelated without a placeholder message (#148)', async () => {
+    await start(0)
+    const acknowledged = vi.fn()
+    await dapp.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledged)
+    await sign('aa')
+    const receivedAt = 1_800_000_000_000
+    vi.setSystemTime(receivedAt)
+    dapp['getWalletInfo'] = async () => {
+      vi.setSystemTime(receivedAt + 1000)
+      return { name: 'Wallet' }
+    }
+    // Pairing ping uses this callback; legacy session_event ACKs remain ignored.
+    const pending = adapter['eventHandlers'].get(ClientEvents.WC_ACK_NOTIFICATION)
+    expect(pending).toBeTypeOf('function')
+    await pending?.('pending')
+    await flush()
+    expect(acknowledged).toHaveBeenCalledExactlyOnceWith(
+      {
+        correlated: false,
+        receivedAt,
+        walletInfo: { name: 'Wallet' },
+        extraInfo: {}
+      },
+      undefined
+    )
+  })
 
   it.each(['before the first request', 'after the last request'])(
     'applies a session account update %s without creating a pending request',

@@ -27,6 +27,7 @@ import { BeaconEvent } from '../../src/events'
 
 vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
+  ...(await import('../../../beacon-core/src/transports/clients/ClientEvents')),
   MultiTabChannel: class {
     async init() {}
     isLeader() {
@@ -226,6 +227,100 @@ describe('Response metadata preparation', () => {
           }
         }
   }
+
+  it.each(['2', '3'] as const)(
+    'correlates V%s permission success before asynchronous account preparation (#148)',
+    async (version) => {
+      await start(0)
+      const sent = vi.fn()
+      await dapp.subscribeToEvent(BeaconEvent.PERMISSION_REQUEST_SENT, sent)
+      const pending = await request(version)
+      const receivedAt = 1_800_000_000_000
+      vi.setSystemTime(receivedAt)
+      const getWalletInfo = dapp['getWalletInfo'].bind(dapp)
+      dapp['getWalletInfo'] = async (...args) => {
+        vi.setSystemTime(receivedAt + 1000)
+        return getWalletInfo(...args)
+      }
+      await transport.receive(response(version, pending.id))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(await pending.outcome).toMatchObject({ value: expect.anything() })
+      expect(sent).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          requestId: pending.id,
+          requestType: BeaconMessageType.PermissionRequest,
+          transport: TransportType.POST_MESSAGE,
+          senderId: peer.senderId
+        }),
+        undefined
+      )
+      expect(succeeded).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          requestId: pending.id,
+          receivedAt,
+          output: expect.objectContaining({ id: pending.id })
+        }),
+        undefined
+      )
+    }
+  )
+
+  it.each(['2', '3'] as const)('correlates a V%s permission rejection (#148)', async (version) => {
+    await start(0)
+    const pending = await request(version)
+    const receivedAt = 1_800_000_000_000
+    vi.setSystemTime(receivedAt)
+    const rejection = { type: BeaconMessageType.Error, errorType: BeaconErrorType.ABORTED_ERROR }
+    const envelope = { id: pending.id, version, senderId: peer.senderId }
+    await transport.receive(
+      version === '2' ? { ...envelope, ...rejection } : { ...envelope, message: rejection }
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await pending.outcome).toHaveProperty('error')
+    expect(failed).toHaveBeenCalledTimes(1)
+    expect(failed.mock.calls[0][0]).toMatchObject({
+      requestId: pending.id,
+      receivedAt,
+      errorResponse: { id: pending.id }
+    })
+  })
+
+  it.each(['2', '3'] as const)('correlates a V%s postMessage ACK (#148)', async (version) => {
+    await start(0)
+    const acknowledged = vi.fn()
+    await dapp.subscribeToEvent(BeaconEvent.ACKNOWLEDGE_RECEIVED, acknowledged)
+    const pending = await request(version)
+    const receivedAt = 1_800_000_000_000
+    vi.setSystemTime(receivedAt)
+    const envelope = { id: pending.id, version, senderId: peer.senderId }
+    const ack = { type: BeaconMessageType.Acknowledge }
+    await transport.receive(
+      version === '2' ? { ...envelope, ...ack } : { ...envelope, message: ack }
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(acknowledged).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        correlated: true,
+        requestId: pending.id,
+        receivedAt,
+        message: expect.objectContaining({ id: pending.id, type: BeaconMessageType.Acknowledge })
+      }),
+      undefined
+    )
+    expect(pending.settled).not.toHaveBeenCalled()
+  })
+
+  it('notifies subscribers with an account on selection and undefined on clearing (#137)', async () => {
+    await start(0)
+    const pending = await request('2')
+    await transport.receive(response('2', pending.id))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await pending.outcome).toMatchObject({ value: expect.anything() })
+    expect(changed).toHaveBeenCalledWith(expect.objectContaining({ publicKey }), undefined)
+    changed.mockClear()
+    await dapp.setActiveAccount(undefined)
+    expect(changed).toHaveBeenCalledExactlyOnceWith(undefined, undefined)
+  })
 
   function expectedError(id: string, errorType: BeaconErrorType) {
     return {
