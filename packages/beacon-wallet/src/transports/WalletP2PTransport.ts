@@ -1,4 +1,9 @@
-import { Storage, StorageKey, P2PPairingRequest, NodeDistributions } from '@ecadlabs/beacon-types'
+import {
+  Storage,
+  StorageKey,
+  ExtendedP2PPairingRequest,
+  NodeDistributions
+} from '@ecadlabs/beacon-types'
 import { P2PTransport } from '@ecadlabs/beacon-transport-matrix'
 import { KeyPair } from '@ecadlabs/beacon-utils'
 
@@ -10,7 +15,7 @@ import { KeyPair } from '@ecadlabs/beacon-utils'
  *
  */
 export class WalletP2PTransport extends P2PTransport<
-  P2PPairingRequest,
+  ExtendedP2PPairingRequest,
   StorageKey.TRANSPORT_P2P_PEERS_WALLET
 > {
   constructor(
@@ -33,7 +38,7 @@ export class WalletP2PTransport extends P2PTransport<
   }
 
   public async addPeer(
-    newPeer: P2PPairingRequest,
+    newPeer: ExtendedP2PPairingRequest,
     sendPairingResponse: boolean = true
   ): Promise<void> {
     await super.addPeer(newPeer)

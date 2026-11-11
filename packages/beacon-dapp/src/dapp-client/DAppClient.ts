@@ -2547,6 +2547,38 @@ export class DAppClient extends Client {
   }
 
   /**
+   * Return all known peers across dApp transports without blocking when no transport is active
+   */
+  public override async getPeers(): Promise<ExtendedPeerInfo[]> {
+    if (this._transport.isResolved() || this.transport !== this._transport.promise) {
+      const transport = await this.transport
+      if (
+        transport !== this.postMessageTransport &&
+        transport !== this.p2pTransport &&
+        transport !== this.walletConnectTransport
+      ) {
+        return transport.getPeers()
+      }
+    }
+
+    const [postMessagePeers, p2pPeers, wcTransportPeers, wcStoredPeers] = await Promise.all([
+      this.postMessageTransport
+        ? this.postMessageTransport.getPeers()
+        : this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP),
+      this.p2pTransport
+        ? this.p2pTransport.getPeers()
+        : this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
+      this.walletConnectTransport?.getPeers(),
+      this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP)
+    ])
+
+    const walletConnectPeers =
+      wcTransportPeers && wcTransportPeers.length > 0 ? wcTransportPeers : (wcStoredPeers ?? [])
+
+    return [...(postMessagePeers ?? []), ...(p2pPeers ?? []), ...walletConnectPeers]
+  }
+
+  /**
    * Removes a peer and all the accounts that have been connected through that peer
    *
    * @param peer Peer to be removed

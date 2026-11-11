@@ -209,7 +209,7 @@ export abstract class Transport<
   }
 
   protected async addPairingPeer(
-    peer: T,
+    peer: T & StorageKeyReturnType[K][number],
     isActive: () => boolean,
     accepted: () => boolean | Promise<boolean>
   ): Promise<boolean> {

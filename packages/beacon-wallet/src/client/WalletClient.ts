@@ -477,6 +477,22 @@ export class WalletClient extends Client {
   }
 
   /**
+   * Return all known peers without blocking when no transport is initialized yet
+   */
+  public override async getPeers(): Promise<ExtendedPeerInfo[]> {
+    if (this._transport.isResolved() || this.transport !== this._transport.promise) {
+      return (await this.transport).getPeers()
+    }
+
+    const [p2pPeers, postMessagePeers] = await Promise.all([
+      this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_WALLET),
+      this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET)
+    ])
+
+    return [...(p2pPeers ?? []), ...(postMessagePeers ?? [])]
+  }
+
+  /**
    * Add a new peer to the known peers
    * @param peer The new peer to add
    */

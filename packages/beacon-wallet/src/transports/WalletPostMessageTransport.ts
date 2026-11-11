@@ -1,4 +1,4 @@
-import { StorageKey, Storage, PostMessagePairingRequest } from '@ecadlabs/beacon-types'
+import { StorageKey, Storage, ExtendedPostMessagePairingRequest } from '@ecadlabs/beacon-types'
 import { PostMessageTransport } from '@ecadlabs/beacon-transport-postmessage'
 import { KeyPair } from '@ecadlabs/beacon-utils'
 
@@ -10,7 +10,7 @@ import { KeyPair } from '@ecadlabs/beacon-utils'
  *
  */
 export class WalletPostMessageTransport extends PostMessageTransport<
-  PostMessagePairingRequest,
+  ExtendedPostMessagePairingRequest,
   StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET
 > {
   constructor(name: string, keyPair: KeyPair, storage: Storage) {

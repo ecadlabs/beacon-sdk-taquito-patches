@@ -5,6 +5,7 @@ import {
   TransportStatus,
   BeaconBaseMessage,
   AccountInfo,
+  ExtendedPeerInfo,
   PeerInfo,
   BeaconMessageType,
   DisconnectMessage,
@@ -229,7 +230,7 @@ export abstract class Client extends BeaconClient {
   /**
    * Return all known peers
    */
-  public async getPeers(): Promise<PeerInfo[]> {
+  public async getPeers(): Promise<ExtendedPeerInfo[]> {
     return (await this.transport).getPeers()
   }
 
@@ -238,7 +239,12 @@ export abstract class Client extends BeaconClient {
    * @param peer The new peer to add
    */
   public async addPeer(peer: PeerInfo): Promise<void> {
-    return (await this.transport).addPeer(peer)
+    const extendedPeer: ExtendedPeerInfo =
+      'senderId' in peer && typeof peer.senderId === 'string'
+        ? { ...peer, senderId: peer.senderId }
+        : { ...peer, senderId: await getSenderId(peer.publicKey) }
+
+    return (await this.transport).addPeer(extendedPeer)
   }
 
   public async destroy(): Promise<void> {
