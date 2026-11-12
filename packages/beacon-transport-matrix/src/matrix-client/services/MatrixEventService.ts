@@ -1,7 +1,10 @@
+import { Logger } from '@ecadlabs/beacon-core'
 import { MatrixHttpClient } from '../MatrixHttpClient'
 
 import { MatrixEventSendRequest, MatrixEventSendResponse } from '../models/api/MatrixEventSend'
 import { MatrixSyncResponse } from '../models/api/MatrixSync'
+
+const logger = new Logger('MatrixEventService')
 
 interface MatrixScheduledEvent {
   accessToken: string
@@ -9,8 +12,8 @@ interface MatrixScheduledEvent {
   type: MatrixEventType
   content: MatrixEventSendRequest
   txnId: string
-  onSuccess(response: MatrixEventSendResponse): void
-  onError(error: unknown): void
+  onSuccess(response: MatrixEventSendResponse): void | Promise<void>
+  onError(error: unknown): void | Promise<void>
 }
 
 type MatrixEventType = 'm.room.message'
@@ -83,7 +86,9 @@ export class MatrixEventService {
    */
   public scheduleEvent(event: MatrixScheduledEvent) {
     // TODO: actual scheduling
-    this.sendEvent(event)
+    this.sendEvent(event).catch((error: unknown) =>
+      logger.warn('scheduleEvent callback', event.roomId, event.txnId, error)
+    )
   }
 
   /**
@@ -94,16 +99,19 @@ export class MatrixEventService {
   public async sendEvent(scheduledEvent: MatrixScheduledEvent): Promise<void> {
     const { roomId, type, txnId, content, accessToken } = scheduledEvent
 
+    let response: MatrixEventSendResponse
     try {
-      const response = await this.httpClient.put<MatrixEventSendResponse>(
+      response = await this.httpClient.put<MatrixEventSendResponse>(
         `/rooms/${encodeURIComponent(roomId)}/send/${type}/${encodeURIComponent(txnId)}`,
         content,
         { accessToken }
       )
-      scheduledEvent.onSuccess(response)
     } catch (error) {
-      scheduledEvent.onError(error)
+      await scheduledEvent.onError(error)
+
+      return
     }
+    await scheduledEvent.onSuccess(response)
   }
 
   /**

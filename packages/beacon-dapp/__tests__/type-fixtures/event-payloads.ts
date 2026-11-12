@@ -10,6 +10,8 @@ import {
   TransportStatusChangeReason,
   TransportType
 } from '@ecadlabs/beacon-types'
+import { ClientEvents, CommunicationClient } from '@ecadlabs/beacon-core'
+import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import {
   BeaconEvent,
@@ -159,4 +161,27 @@ export async function observability(client: DAppClient): Promise<void> {
   pending.push
   void connectionInfo
   void pending
+}
+
+
+export function clientCallbacks(
+  transport: DappWalletConnectTransport,
+  communication: CommunicationClient
+): void {
+  transport.setEventHandler(ClientEvents.WC_ACK_NOTIFICATION, async (status) => {
+    const acknowledged: 'pending' | 'error' = status
+    void acknowledged
+  })
+  transport.setEventHandler(ClientEvents.TRANSPORT_STATUS, async (update) => {
+    const status: TransportStatus | undefined = update.status
+    void status
+  })
+  communication.eventHandlers.set(ClientEvents.RESET_STATE, async (_type: TransportType) => {})
+  // @ts-expect-error ACK notifications carry a status, not a transport type.
+  transport.setEventHandler(ClientEvents.WC_ACK_NOTIFICATION, (_type: TransportType) => {})
+  // @ts-expect-error Transport status callbacks receive an update object.
+  communication.eventHandlers.set(ClientEvents.TRANSPORT_STATUS, (_status: string) => {})
+  // @ts-expect-error Retrieved ACK callbacks retain their status payload.
+  communication.eventHandlers.get(ClientEvents.WC_ACK_NOTIFICATION)?.(TransportType.WALLETCONNECT)
+  communication.eventHandlers.get(ClientEvents.TRANSPORT_STATUS)?.({ reason: 'relay_changed' })
 }

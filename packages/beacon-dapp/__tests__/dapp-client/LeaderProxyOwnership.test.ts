@@ -19,7 +19,7 @@ import { DappWalletConnectTransport } from '../../src/transports/DappWalletConne
 const boundary = vi.hoisted(() => ({
   channel: {
     onmessage: null as null | ((message: unknown) => Promise<void>),
-    postMessage: vi.fn<(message: unknown) => void>(),
+    postMessage: vi.fn(async (_message: unknown): Promise<void> => {}),
     removeEventListener: vi.fn(),
     close: vi.fn(async () => {})
   },

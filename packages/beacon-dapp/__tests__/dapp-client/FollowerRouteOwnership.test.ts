@@ -67,7 +67,7 @@ vi.mock('broadcast-channel', () => ({
     set onmessage(receive: (typeof this.endpoint)['onmessage']) {
       this.endpoint.onmessage = receive
     }
-    postMessage(message: unknown) {
+    async postMessage(message: unknown): Promise<void> {
       this.endpoint.sent.push(message)
     }
     removeEventListener() {}

@@ -8,7 +8,7 @@ import {
   toHex
 } from '@ecadlabs/beacon-utils'
 import { clientSessionKeys, serverSessionKeys, SessionKeys } from '@stablelib/x25519-session'
-import { ClientEvents } from './ClientEvents'
+import { ClientEventHandlerMap } from './ClientEvents'
 /**
  * @internalapi
  *
@@ -17,7 +17,7 @@ import { ClientEvents } from './ClientEvents'
 export abstract class CommunicationClient {
   constructor(protected keyPair?: KeyPair) {}
 
-  public eventHandlers: Map<ClientEvents, Function> = new Map()
+  public eventHandlers = new ClientEventHandlerMap()
 
   // todo move OS
   protected isMobileOS = (): boolean =>

@@ -125,6 +125,32 @@ describe('WalletConnect restored-session failure containment', () => {
   })
 
   it.each([
+    { event: ClientEvents.CLOSE_ALERT, failure: null, context: 'close alert callback' },
+    {
+      event: ClientEvents.WC_ACK_NOTIFICATION,
+      failure: 'Wallet rejected pairing',
+      context: 'pairing error callback'
+    }
+  ])(
+    'reports rejected $event callbacks while retiring a failed proposal',
+    async ({ event, failure, context }) => {
+      mockRemote.session.keys = []
+      mockRemote.connect.mockResolvedValueOnce({
+        uri: 'wc:new-topic@2?symKey=key',
+        approval: () => Promise.reject(failure)
+      })
+      const warn = vi.spyOn(Logger.prototype, 'warn')
+      const instance = client()
+      instance.eventHandlers.set(event, async () => {
+        throw new Error('notification failed')
+      })
+      await instance.init()
+      await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(context, 'notification failed'))
+      expect(instance.currentSession()).toBeUndefined()
+    }
+  )
+
+  it.each([
     { failure: null, diagnostic: null },
     { failure: new Error('relay unavailable'), diagnostic: 'relay unavailable' }
   ])(
