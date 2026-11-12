@@ -1,0 +1,186 @@
+{
+  "packages/beacon-blockchain-tezos-sapling/src/blockchain.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 4,
+    "@typescript-eslint/no-unused-vars": 2
+  },
+  "packages/beacon-blockchain-tezos/src/blockchain.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 4,
+    "@typescript-eslint/no-unused-vars": 1
+  },
+  "packages/beacon-core/src/MockWindow.ts": {
+    "@typescript-eslint/no-unused-vars": 1,
+    "no-console": 2
+  },
+  "packages/beacon-core/src/clients/beacon-client/BeaconClient.ts": {
+    "no-console": 4
+  },
+  "packages/beacon-core/src/errors/get-error.ts": {
+    "import/no-default-export": 1
+  },
+  "packages/beacon-core/src/managers/AccountManager.ts": {
+    "no-shadow": 1,
+    "padding-line-between-statements": 1
+  },
+  "packages/beacon-core/src/migrations/migrations.ts": {
+    "no-console": 1
+  },
+  "packages/beacon-core/src/storage/ChromeStorage.ts": {
+    "@typescript-eslint/no-empty-object-type": 1,
+    "@typescript-eslint/no-unused-vars": 1
+  },
+  "packages/beacon-core/src/storage/IndexedDBStorage.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 2,
+    "@typescript-eslint/no-empty-object-type": 1,
+    "padding-line-between-statements": 1
+  },
+  "packages/beacon-core/src/storage/LocalStorage.ts": {
+    "@typescript-eslint/no-empty-object-type": 1
+  },
+  "packages/beacon-core/src/storage/StorageValidator.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 1
+  },
+  "packages/beacon-core/src/transports/Transport.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 2,
+    "@typescript-eslint/no-unsafe-function-type": 1
+  },
+  "packages/beacon-core/src/transports/clients/CommunicationClient.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 2,
+    "@typescript-eslint/no-non-null-assertion": 1,
+    "@typescript-eslint/no-unsafe-function-type": 1
+  },
+  "packages/beacon-core/src/transports/clients/MessageBasedClient.ts": {
+    "@typescript-eslint/no-non-null-assertion": 2,
+    "@typescript-eslint/no-unused-vars": 1,
+    "no-console": 1
+  },
+  "packages/beacon-core/src/utils/Logger.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 2,
+    "@typescript-eslint/no-empty-function": 1,
+    "@typescript-eslint/no-unused-expressions": 1,
+    "@typescript-eslint/no-use-before-define": 6,
+    "max-classes-per-file": 1
+  },
+  "packages/beacon-core/src/utils/get-sender-id.ts": {
+    "no-console": 1
+  },
+  "packages/beacon-core/src/utils/multi-tab-channel.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 4,
+    "@typescript-eslint/no-floating-promises": 1
+  },
+  "packages/beacon-dapp/src/dapp-client/DAppClient.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 2,
+    "@typescript-eslint/no-floating-promises": 3,
+    "complexity": 7,
+    "no-console": 3,
+    "no-duplicate-imports": 1,
+    "no-return-await": 1,
+    "no-shadow": 5
+  },
+  "packages/beacon-dapp/src/events.ts": {
+    "@typescript-eslint/await-thenable": 1
+  },
+  "packages/beacon-dapp/src/utils/get-instance.ts": {
+    "no-console": 1,
+    "no-underscore-dangle": 1
+  },
+  "packages/beacon-transport-matrix/src/communication-client/P2PCommunicationClient.ts": {
+    "@typescript-eslint/no-non-null-assertion": 1,
+    "complexity": 2,
+    "no-console": 1,
+    "padding-line-between-statements": 5
+  },
+  "packages/beacon-transport-matrix/src/matrix-client/models/MatrixRoom.ts": {
+    "@typescript-eslint/unbound-method": 3
+  },
+  "packages/beacon-transport-matrix/src/matrix-client/models/api/MatrixRoomJoin.ts": {
+    "@typescript-eslint/no-empty-interface": 1,
+    "@typescript-eslint/no-empty-object-type": 1
+  },
+  "packages/beacon-transport-matrix/src/matrix-client/services/MatrixEventService.ts": {
+    "@typescript-eslint/no-floating-promises": 1
+  },
+  "packages/beacon-transport-postmessage/src/PostMessageClient.ts": {
+    "@typescript-eslint/no-non-null-assertion": 2
+  },
+  "packages/beacon-transport-postmessage/src/PostMessageTransport.ts": {
+    "no-duplicate-imports": 1
+  },
+  "packages/beacon-transport-walletconnect/src/WalletConnectTransport.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 4,
+    "padding-line-between-statements": 1
+  },
+  "packages/beacon-transport-walletconnect/src/communication-client/WalletConnectCommunicationClient.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 7,
+    "@typescript-eslint/no-floating-promises": 2,
+    "@typescript-eslint/no-unused-expressions": 3,
+    "@typescript-eslint/no-unused-vars": 1,
+    "no-empty": 1,
+    "no-underscore-dangle": 2
+  },
+  "packages/beacon-transport-walletconnect/src/error.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 7,
+    "max-classes-per-file": 1
+  },
+  "packages/beacon-types/src/types/P2PPairingRequest.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 9,
+    "max-classes-per-file": 1
+  },
+  "packages/beacon-types/src/types/P2PPairingResponse.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 9,
+    "max-classes-per-file": 1
+  },
+  "packages/beacon-types/src/types/PostMessagePairingRequest.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 8,
+    "max-classes-per-file": 1
+  },
+  "packages/beacon-types/src/types/PostMessagePairingResponse.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 9,
+    "max-classes-per-file": 1
+  },
+  "packages/beacon-types/src/types/WalletConnectPairingRequest.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 9,
+    "max-classes-per-file": 1
+  },
+  "packages/beacon-types/src/types/WalletConnectPairingResponse.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 9,
+    "max-classes-per-file": 1
+  },
+  "packages/beacon-types/src/types/storage/Storage.ts": {
+    "@typescript-eslint/explicit-member-accessibility": 5,
+    "@typescript-eslint/no-empty-object-type": 1
+  },
+  "packages/beacon-ui/src/ui/alert/components/pairing-alert/components/mobile-pairing/utils/suffix-map.ts": {
+    "import/no-default-export": 1
+  },
+  "packages/beacon-ui/src/ui/alert/getDefautlLogo.ts": {
+    "import/no-default-export": 1
+  },
+  "packages/beacon-ui/src/utils/qr.ts": {
+    "no-console": 1
+  },
+  "packages/beacon-ui/src/utils/wallets.ts": {
+    "no-console": 1
+  },
+  "packages/beacon-utils/src/utils/crypto.ts": {
+    "@typescript-eslint/no-unused-vars": 1,
+    "no-duplicate-imports": 1,
+    "no-shadow": 2
+  },
+  "packages/beacon-utils/src/utils/generate-uuid.ts": {
+    "prefer-arrow-callback": 1
+  },
+  "packages/beacon-wallet/src/client/WalletClient.ts": {
+    "import/order": 1,
+    "padding-line-between-statements": 1
+  },
+  "packages/beacon-wallet/src/interceptors/IncomingRequestInterceptor.ts": {
+    "@typescript-eslint/no-unused-vars": 1,
+    "@typescript-eslint/no-use-before-define": 1
+  },
+  "packages/beacon-wallet/src/interceptors/OutgoingResponseInterceptor.ts": {
+    "@typescript-eslint/no-non-null-assertion": 1,
+    "@typescript-eslint/no-unused-vars": 1,
+    "@typescript-eslint/no-use-before-define": 1,
+    "complexity": 1
+  }
+}

@@ -52,7 +52,8 @@
     "typedoc": "typedoc",
     "publish:packages": "node scripts/publish-workspaces.mjs",
     "build:ui": "cd packages/beacon-ui && npm run tsc && cd ../.. && npm run webpack:sdk",
-    "test:node-consumers": "node scripts/test-node-consumers.mjs"
+    "test:node-consumers": "node scripts/test-node-consumers.mjs",
+    "lint:baseline": "node scripts/lint-new-findings.mjs --update-baseline"
   },
   "author": "ECAD Labs",
   "dependencies": {

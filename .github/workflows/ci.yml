@@ -51,10 +51,12 @@ jobs:
       # Type-aware lint needs the workspace declarations produced by the build.
       - name: Gate new lint findings
         env:
-          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          LINT_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
         run: |
-          if [ -n "$PR_BASE_REF" ]; then
-            export LINT_BASE_REF="origin/$PR_BASE_REF"
+          # A newly created branch has no previous commit. Full-source counts
+          # still run when the touched-line comparison starts at HEAD.
+          if [ "$LINT_BASE_REF" = "0000000000000000000000000000000000000000" ]; then
+            export LINT_BASE_REF=HEAD
           fi
           ./scripts/npm11.sh run lint:new
 
