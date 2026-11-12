@@ -211,8 +211,7 @@ vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
         return Promise.resolve()
       }
       postMessage(_msg: any) {}
-    },
-    getError: (_t: any, _d: any) => new Error('beacon error')
+    }
   }
 })
 

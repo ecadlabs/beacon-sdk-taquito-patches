@@ -233,14 +233,14 @@ describe('Request response ownership', () => {
   }
 
   function expectedError(id: string, errorType: BeaconErrorType) {
-    return {
+    return expect.objectContaining({
       id,
       type: BeaconMessageType.Error,
       errorType,
       senderId: '',
       version: '2',
       errorOrigin: 'local'
-    }
+    })
   }
 
   function control(version: '2' | '3', id: string, type: BeaconMessageType.Acknowledge) {

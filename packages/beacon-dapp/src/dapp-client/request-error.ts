@@ -7,35 +7,36 @@ import {
   BlockchainMessage,
   ConnectionContext,
   ErrorResponse,
-  WalletInfo
+  WalletInfo,
+  ErrorOrigin,
+  RequestErrorResponse,
+  TezosRpcError,
+  isErrorOrigin,
+  isErrorResponse,
+  isRequestErrorResponse,
+  isTezosRpcError,
+  BeaconError,
+  isBeaconError,
+  getError
 } from '@ecadlabs/beacon-types'
 
-/**
- * Where a request error came from.
- *
- * - `wallet`: the error arrived on the response path. Usually the wallet sent it. Over
- *   WalletConnect it can also be a failure the WalletConnect adapter reported for the request,
- *   such as a lost session or a failed publish.
- * - `local`: the dApp produced it, for example when its request deadline fired, when the dApp
- *   aborted the request, or when WalletConnect's own request expiry passed. The wallet was not
- *   told and may still complete the request.
- *
- * @category DApp
- */
-export type ErrorOrigin = 'wallet' | 'local'
-
-/**
- * A request error as the dApp reports it to callers and events.
- *
- * DAppClient sets `errorOrigin` on every rejection it builds from an error message. Rejections
- * that are plain `Error` objects (rate limit, missing permissions, a send that failed before
- * the request left the dApp) do not carry it. A missing origin is treated as `wallet`.
- *
- * @category DApp
- */
-export interface RequestErrorResponse extends ErrorResponse {
-  errorOrigin?: ErrorOrigin
+export type { ErrorOrigin, RequestErrorResponse, TezosRpcError }
+export {
+  isErrorOrigin,
+  isErrorResponse,
+  isRequestErrorResponse,
+  isTezosRpcError,
+  BeaconError,
+  isBeaconError
 }
+
+export const toBeaconError = (error: RequestErrorResponse): BeaconError =>
+  getError(error.errorType, error.errorData, {
+    id: error.id,
+    version: error.version,
+    senderId: error.senderId,
+    errorOrigin: error.errorOrigin
+  })
 
 /**
  * An error as a wallet may put it on the wire. Responses are not validated before routing, and
@@ -132,17 +133,6 @@ export type LateResponseInfo = LateSuccessResponseInfo | LateErrorResponseInfo
 export type LateResponseClassification =
   | Pick<LateSuccessResponseInfo, 'kind' | 'message' | 'output' | 'transactionHash'>
   | Pick<LateErrorResponseInfo, 'kind' | 'message' | 'error'>
-
-export const isErrorOrigin = (value: unknown): value is ErrorOrigin =>
-  value === 'wallet' || value === 'local'
-
-export const isErrorResponse = (value: unknown): value is ErrorResponse =>
-  typeof value === 'object' &&
-  value !== null &&
-  'type' in value &&
-  value.type === BeaconMessageType.Error &&
-  'errorType' in value &&
-  typeof value.errorType === 'string'
 
 /** Routing keys on the message type alone; wallets do not always fill `errorType`. */
 const isErrorMessage = (value: unknown): value is { type: BeaconMessageType.Error } =>

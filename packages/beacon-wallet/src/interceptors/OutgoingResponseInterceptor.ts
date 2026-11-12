@@ -20,7 +20,8 @@ import {
   BeaconMessageEnvelopeV3,
   type BlockchainMessage,
   ProofOfEventChallengeResponse,
-  SimulatedProofOfEventChallengeResponse
+  SimulatedProofOfEventChallengeResponse,
+  isTezosRpcError
   // EncryptPayloadResponse
 } from '@ecadlabs/beacon-types'
 import { getAddressFromPublicKey, CONTRACT_PREFIX, isValidAddress } from '@ecadlabs/beacon-utils'
@@ -131,29 +132,7 @@ export class OutgoingResponseInterceptor {
         if (message.errorType === BeaconErrorType.TRANSACTION_INVALID_ERROR && message.errorData) {
           const errorData = message.errorData
           // Check only the RPC identifiers required for forwarding; preserve all other fields.
-          if (
-            Array.isArray(errorData) &&
-            errorData.every((item: unknown) => {
-              if (
-                typeof item !== 'object' ||
-                item === null ||
-                !('kind' in item) ||
-                !('id' in item)
-              ) {
-                return false
-              }
-
-              const kind = item.kind
-              const id = item.id
-
-              return (
-                typeof kind === 'string' &&
-                kind.length > 0 &&
-                typeof id === 'string' &&
-                id.length > 0
-              )
-            })
-          ) {
+          if (Array.isArray(errorData) && errorData.every((item: unknown) => isTezosRpcError(item))) {
             response.errorData = errorData
           } else {
             logger.warn(

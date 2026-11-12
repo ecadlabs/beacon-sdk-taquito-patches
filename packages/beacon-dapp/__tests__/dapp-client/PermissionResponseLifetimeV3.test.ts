@@ -312,7 +312,7 @@ describe('V3 permission response lifetime', () => {
       const callbacksBeforeDisconnect = callback.mock.calls.length
       const disconnect = dapp.disconnect({ notifyPeers: false })
       await vi.advanceTimersByTimeAsync(0)
-      expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+      expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
       expect
         .soft(failed)
         .toHaveBeenCalledExactlyOnceWith(
@@ -324,7 +324,7 @@ describe('V3 permission response lifetime', () => {
       release.resolve()
       await disconnect
       await vi.advanceTimersByTimeAsync(0)
-      expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+      expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
       expect.soft(succeeded).not.toHaveBeenCalled()
       expect
         .soft(failed)
@@ -346,12 +346,12 @@ describe('V3 permission response lifetime', () => {
       expect(reached).toBe(true)
       const disconnect = dapp.disconnect({ notifyPeers: false })
       await vi.advanceTimersByTimeAsync(0)
-      expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+      expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
       resumeFailure = true
       release.resolve()
       await disconnect
       await vi.advanceTimersByTimeAsync(0)
-      expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+      expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
       expect
         .soft(failed)
         .toHaveBeenCalledExactlyOnceWith(
@@ -373,7 +373,7 @@ describe('V3 permission response lifetime', () => {
     await selection
     await vi.advanceTimersByTimeAsync(0)
     expect.soft(await dapp.getAccounts()).toEqual([previous])
-    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
     expect(succeeded).not.toHaveBeenCalled()
   })
 
@@ -385,12 +385,12 @@ describe('V3 permission response lifetime', () => {
     const disconnect = dapp.disconnect({ notifyPeers: false })
     const removal = dapp.removeAccount(previous.accountIdentifier)
     await vi.advanceTimersByTimeAsync(0)
-    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
     release.resolve()
     await Promise.all([disconnect, removal])
     await vi.advanceTimersByTimeAsync(0)
     expect.soft(await dapp.getAccounts()).toEqual([])
-    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
     expect(succeeded).not.toHaveBeenCalled()
   })
 
@@ -404,7 +404,7 @@ describe('V3 permission response lifetime', () => {
     await disconnect
     await vi.advanceTimersByTimeAsync(0)
     expect.soft(await dapp.getAccounts()).toEqual([])
-    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
     expect(succeeded).not.toHaveBeenCalled()
   })
 
@@ -415,13 +415,13 @@ describe('V3 permission response lifetime', () => {
     expect(reached).toBe(true)
     await dapp.setActiveAccount(previous)
     await vi.advanceTimersByTimeAsync(0)
-    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
     changed.mockClear()
     release.resolve()
     await vi.advanceTimersByTimeAsync(0)
     expect.soft(await dapp.getAccounts()).toEqual([previous])
     expect.soft(await dapp.getActiveAccount()).toEqual(previous)
-    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
     expect.soft(changed).not.toHaveBeenCalled()
     expect.soft(callback).not.toHaveBeenCalled()
     expect(succeeded).not.toHaveBeenCalled()
@@ -571,7 +571,7 @@ describe('V3 permission response lifetime', () => {
     expect(reached).toBe(true)
     const removal = dapp.removeAllAccounts()
     await vi.advanceTimersByTimeAsync(0)
-    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
     expect
       .soft(failed)
       .toHaveBeenCalledExactlyOnceWith(
@@ -581,7 +581,7 @@ describe('V3 permission response lifetime', () => {
     release.resolve()
     await removal
     await vi.advanceTimersByTimeAsync(0)
-    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
     expect
       .soft(failed)
       .toHaveBeenCalledExactlyOnceWith(
@@ -651,7 +651,7 @@ describe('V3 permission response lifetime', () => {
     })
     await vi.advanceTimersByTimeAsync(0)
     await expect(first).resolves.toEqual({ value: message })
-    await expect(second).resolves.toEqual({ error: aborted(other.id) })
+    await expect(second).resolves.toEqual({ error: expect.objectContaining(aborted(other.id)) })
     expect(await dapp.getActiveAccount()).toEqual(expect.objectContaining({ accountIdentifier }))
     expect(succeeded).toHaveBeenCalledTimes(1)
     expect(failed).toHaveBeenCalledExactlyOnceWith(

@@ -91,7 +91,12 @@ import {
   MultiTabChannel,
   observeMultiTabChannel,
   getError,
-  getPairingPeerOwnership
+  getPairingPeerOwnership,
+  AbortedBeaconError,
+  NoAddressBeaconError,
+  NotGrantedBeaconError,
+  ParametersInvalidBeaconError,
+  UnknownBeaconError
 } from '@ecadlabs/beacon-core'
 import {
   getAddressFromPublicKey,
@@ -147,13 +152,17 @@ import { DAppClientOptions } from './DAppClientOptions'
 import { RequestTracker, RequestKey, RequestRoute } from './RequestTracker'
 import {
   classifyLateResponse,
+  isBeaconError,
+  isErrorOrigin,
   isErrorResponse,
   LateResponseInfo,
   localError,
+  RequestErrorResponse,
   ResponseMessage,
   responseOutput,
   stampErrorOrigin,
-  toRequestError
+  toRequestError,
+  toBeaconError
 } from './request-error'
 import { PermissionRequestOwner } from './PermissionRequestOwner'
 import { TabLifecycle } from './TabLifecycle'
@@ -1161,9 +1170,19 @@ export class DAppClient extends Client {
     }
   }
 
-  private buildDelegatedRequestError(id: string, error: unknown): ErrorResponse {
+  private buildDelegatedRequestError(id: string, error: unknown): RequestErrorResponse {
     if (isErrorResponse(error)) {
-      return { ...localError(error), ...error, id }
+      const origin = 'errorOrigin' in error && isErrorOrigin(error.errorOrigin) ? error.errorOrigin : 'local'
+
+      return {
+        id,
+        type: BeaconMessageType.Error,
+        errorType: error.errorType,
+        senderId: error.senderId ?? '',
+        version: error.version ?? '2',
+        errorOrigin: origin,
+        ...(error.errorData !== undefined ? { errorData: error.errorData } : {})
+      }
     }
 
     return localError({
@@ -1472,7 +1491,7 @@ export class DAppClient extends Client {
     this._requestPermissionsKey = undefined
   }
 
-  private createAbortedError(id: string = ''): ErrorResponse {
+  private createAbortedError(id: string = ''): RequestErrorResponse {
     return localError({
       type: BeaconMessageType.Error,
       id,
@@ -1491,43 +1510,53 @@ export class DAppClient extends Client {
 
   private assertNotDestroyed(): void {
     if (this.destroyed) {
-      throw new Error('DAppClient has been destroyed and cannot be used again.')
+      throw new AbortedBeaconError({
+        description: 'DAppClient has been destroyed and cannot be used again.',
+        errorOrigin: 'local',
+        id: '',
+        senderId: '',
+        version: '2'
+      })
     }
   }
 
   public async init(transport?: ClientTransport): Promise<TransportType> {
-    this.assertNotDestroyed()
-    if (this._transport.promiseResult?.type === TransportType.WALLETCONNECT) {
-      await this.waitForTabConnection()
+    try {
       this.assertNotDestroyed()
-    }
-    if (this.initialization.tearingDown) {
-      await this.initialization.waitForTeardown()
+      if (this._transport.promiseResult?.type === TransportType.WALLETCONNECT) {
+        await this.waitForTabConnection()
+        this.assertNotDestroyed()
+      }
+      if (this.initialization.tearingDown) {
+        await this.initialization.waitForTeardown()
+        this.assertNotDestroyed()
+      }
+      if (this._initPromise) {
+        return await this._initPromise
+      }
+
+      const transition = this.accountTransition.signal
+      if (!this.startupTransition.aborted) {
+        await this.waitForAccountRestoration(transition)
+      }
+      await this.initialization.waitForSelection(transition)
       this.assertNotDestroyed()
-    }
-    if (this._initPromise) {
-      return this._initPromise
-    }
+      if (!this.isCurrentAccountTransition(transition)) {
+        throw this.createAbortedError()
+      }
 
-    const transition = this.accountTransition.signal
-    if (!this.startupTransition.aborted) {
-      await this.waitForAccountRestoration(transition)
+      return await this.initialization.start(
+        transition,
+        () => {
+          this.walletConnectTransport
+            ?.stopListeningForNewPeers()
+            .catch((error: unknown) => logger.error('stopListeningForNewPeers', error))
+        },
+        (attempt) => this.initializeTransport(transport, transition, attempt)
+      )
+    } catch (error: unknown) {
+      throw this.toPublicError(error)
     }
-    await this.initialization.waitForSelection(transition)
-    this.assertNotDestroyed()
-    if (!this.isCurrentAccountTransition(transition)) {
-      throw this.createAbortedError()
-    }
-
-    return this.initialization.start(
-      transition,
-      () => {
-        this.walletConnectTransport
-          ?.stopListeningForNewPeers()
-          .catch((error: unknown) => logger.error('stopListeningForNewPeers', error))
-      },
-      (attempt) => this.initializeTransport(transport, transition, attempt)
-    )
   }
 
   private async initializeTransport(
@@ -2923,7 +2952,7 @@ export class DAppClient extends Client {
       resolved = await res
     } catch (requestError) {
       await this.runRequestErrorSideEffects(request, requestError, logId)
-      throw requestError
+      throw this.toPublicError(requestError)
     }
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
@@ -3105,7 +3134,7 @@ export class DAppClient extends Client {
       resolved = await res
     } catch (requestError) {
       await this.runRequestErrorSideEffects(request, requestError, logId)
-      throw requestError
+      throw this.toPublicError(requestError)
     }
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
@@ -3184,7 +3213,7 @@ export class DAppClient extends Client {
       resolved = await res
     } catch (requestError) {
       await this.runRequestErrorSideEffects(request, requestError, logId)
-      throw requestError
+      throw this.toPublicError(requestError)
     }
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
@@ -3241,18 +3270,26 @@ export class DAppClient extends Client {
       switch (input.signingType) {
         case SigningType.OPERATION:
           if (!payload.startsWith('03')) {
-            throw new Error(
-              'When using signing type "OPERATION", the payload must start with prefix "03"'
-            )
+            throw new ParametersInvalidBeaconError({
+              description: 'When using signing type "OPERATION", the payload must start with prefix "03"',
+              errorOrigin: 'local',
+              id: '',
+              senderId: '',
+              version: '2'
+            })
           }
 
           return SigningType.OPERATION
 
         case SigningType.MICHELINE:
           if (!payload.startsWith('05')) {
-            throw new Error(
-              'When using signing type "MICHELINE", the payload must start with prefix "05"'
-            )
+            throw new ParametersInvalidBeaconError({
+              description: 'When using signing type "MICHELINE", the payload must start with prefix "05"',
+              errorOrigin: 'local',
+              id: '',
+              senderId: '',
+              version: '2'
+            })
           }
 
           return SigningType.MICHELINE
@@ -3282,7 +3319,7 @@ export class DAppClient extends Client {
       resolved = await res
     } catch (requestError) {
       await this.runRequestErrorSideEffects(request, requestError, logId)
-      throw requestError
+      throw this.toPublicError(requestError)
     }
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
@@ -3401,7 +3438,7 @@ export class DAppClient extends Client {
       resolved = await res
     } catch (requestError) {
       await this.runRequestErrorSideEffects(request, requestError, logId)
-      throw requestError
+      throw this.toPublicError(requestError)
     }
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
@@ -3464,7 +3501,7 @@ export class DAppClient extends Client {
       resolved = await res
     } catch (requestError) {
       await this.runRequestErrorSideEffects(request, requestError, logId)
-      throw requestError
+      throw this.toPublicError(requestError)
     }
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
@@ -3564,7 +3601,35 @@ export class DAppClient extends Client {
    */
   private async sendInternalError(errorMessage: string): Promise<void> {
     await this.events.emit(BeaconEvent.INTERNAL_ERROR, { text: errorMessage })
-    throw new Error(errorMessage)
+    if (errorMessage === 'No active account!' || errorMessage === 'No active account set!') {
+      throw new NoAddressBeaconError({
+        description: errorMessage,
+        errorOrigin: 'local',
+        id: '',
+        senderId: '',
+        version: '2'
+      })
+    }
+    if (
+      errorMessage === 'Operation details must be provided' ||
+      errorMessage === 'Signed transaction must be provided' ||
+      errorMessage === 'Payload must be provided'
+    ) {
+      throw new ParametersInvalidBeaconError({
+        description: errorMessage,
+        errorOrigin: 'local',
+        id: '',
+        senderId: '',
+        version: '2'
+      })
+    }
+    throw new UnknownBeaconError({
+      description: errorMessage,
+      errorOrigin: 'local',
+      id: '',
+      senderId: '',
+      version: '2'
+    })
   }
 
   /**
@@ -3641,6 +3706,43 @@ export class DAppClient extends Client {
     )
   }
 
+  private toPublicError(error: unknown): unknown {
+    if (isBeaconError(error)) {
+      return error
+    }
+    if (isErrorResponse(error)) {
+      const origin =
+        'errorOrigin' in error && isErrorOrigin(error.errorOrigin) ? error.errorOrigin : undefined
+
+      return toBeaconError({
+        ...error,
+        ...(origin ? { errorOrigin: origin } : {})
+      })
+    }
+    if (error instanceof Error) {
+      if (error.message === 'rate limit reached') {
+        return new UnknownBeaconError({
+          description: error.message,
+          errorOrigin: 'local',
+          id: '',
+          senderId: '',
+          version: '2'
+        })
+      }
+      if (error.message === 'No permissions to send this request to wallet!') {
+        return new NotGrantedBeaconError({
+          description: error.message,
+          errorOrigin: 'local',
+          id: '',
+          senderId: '',
+          version: '2'
+        })
+      }
+    }
+
+    return error
+  }
+
   /**
    * This message handles errors that we receive from the wallet.
    *
@@ -3654,7 +3756,23 @@ export class DAppClient extends Client {
   ): Promise<void> {
     const receivedAt = this.responseReceivedAt.get(beaconError) ?? Date.now()
     logger.error('handleRequestError', 'error response', beaconError)
-    if (beaconError.errorType) {
+    const isPreconditionError =
+      beaconError instanceof NoAddressBeaconError ||
+      beaconError instanceof ParametersInvalidBeaconError ||
+      (beaconError instanceof UnknownBeaconError &&
+        beaconError.description === 'BeaconID not defined')
+    if (beaconError.errorType && !isPreconditionError) {
+      const errorResponse: ErrorResponse = isBeaconError(beaconError)
+        ? {
+            id: beaconError.id,
+            type: BeaconMessageType.Error,
+            errorType: beaconError.errorType,
+            version: beaconError.version,
+            senderId: beaconError.senderId,
+            ...(beaconError.errorOrigin ? { errorOrigin: beaconError.errorOrigin } : {}),
+            ...(beaconError.errorData !== undefined ? { errorData: beaconError.errorData } : {})
+          }
+        : beaconError
       const buttons: AlertButton[] = []
       if (beaconError.errorType === BeaconErrorType.NO_PRIVATE_KEY_FOUND_ERROR) {
         const actionCallback = async (): Promise<void> => {
@@ -3709,9 +3827,9 @@ export class DAppClient extends Client {
         .emit(
           messageEvents[request.type].error,
           {
-            requestId: beaconError.id,
+            requestId: errorResponse.id,
             receivedAt,
-            errorResponse: beaconError,
+            errorResponse,
             walletInfo: this.destroyed
               ? { name: peer?.name ?? '' }
               : await this.getWalletInfo(peer, activeAccount),
@@ -4631,7 +4749,7 @@ export class DAppClient extends Client {
     } catch (error: unknown) {
       // Local revocation leaves selection cleanup to the transition that replaced this owner.
       await this.runRequestErrorSideEffects(request, error, logId, !owner.wasRevoked())
-      throw error
+      throw this.toPublicError(error)
     }
   }
 

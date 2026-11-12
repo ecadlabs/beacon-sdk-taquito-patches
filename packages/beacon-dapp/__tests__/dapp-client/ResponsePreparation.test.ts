@@ -323,14 +323,14 @@ describe('Response metadata preparation', () => {
   })
 
   function expectedError(id: string, errorType: BeaconErrorType) {
-    return {
+    return expect.objectContaining({
       id,
       type: BeaconMessageType.Error,
       errorType,
       senderId: '',
       version: '2',
       errorOrigin: 'local'
-    }
+    })
   }
 
   it.each(['2', '3'] as const)(

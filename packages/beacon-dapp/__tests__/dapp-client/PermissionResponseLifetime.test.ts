@@ -271,7 +271,9 @@ describe('Permission response lifetime', () => {
   }
 
   function expectAborted(pending: Awaited<ReturnType<typeof request>>) {
-    expect.soft(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+    expect
+      .soft(pending.settled)
+      .toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
     expect
       .soft(failed)
       .toHaveBeenCalledExactlyOnceWith(
@@ -448,14 +450,14 @@ describe('Permission response lifetime', () => {
     const disconnect = dapp.disconnect({ notifyPeers: false })
     await vi.advanceTimersByTimeAsync(0)
     expectAborted(pending)
-    expect.soft(second.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+    expect.soft(second.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
     expect(send).toHaveBeenCalledTimes(1)
 
     wait.released.resolve()
     await disconnect
     await vi.advanceTimersByTimeAsync(0)
     expectAborted(pending)
-    expect.soft(second.settled).toHaveBeenCalledExactlyOnceWith({ error: aborted(pending.id) })
+    expect.soft(second.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(aborted(pending.id)) })
   })
 
   it('orders the prior account rollback before peer removal while the caller is aborted', async () => {

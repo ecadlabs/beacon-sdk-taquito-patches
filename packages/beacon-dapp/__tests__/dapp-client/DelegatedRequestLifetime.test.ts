@@ -98,7 +98,7 @@ function observe(promise: Promise<unknown>) {
   return { settled, outcome }
 }
 
-function localError(
+function localWireError(
   id: string,
   errorType: BeaconErrorType
 ): ErrorResponse & { errorOrigin: 'wallet' | 'local' } {
@@ -110,6 +110,20 @@ function localError(
     version: '2',
     errorOrigin: 'local'
   }
+}
+
+function localError(
+  id: string,
+  errorType: BeaconErrorType
+): any {
+  return expect.objectContaining({
+    id,
+    type: BeaconMessageType.Error,
+    errorType,
+    senderId: '',
+    version: '2',
+    errorOrigin: 'local'
+  })
 }
 
 function walletSuccess(version: '2' | '3', id: string) {
@@ -401,7 +415,7 @@ describe('Delegated request lifetime', () => {
       await receiveWallet(error)
       // The leader marks the wallet's error before forwarding; the follower keeps that mark.
       const forwarded = { ...error, errorOrigin: 'wallet' }
-      expect(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: forwarded })
+      expect(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expect.objectContaining(forwarded) })
       expect(bus.endpoints[0].sent).toEqual([
         { type: 'RESPONSE', id: pending.id, data: { message: forwarded, connectionInfo } }
       ])
@@ -516,7 +530,7 @@ describe('Delegated request lifetime', () => {
   ] as const)('forwards a V%s %s initialization failure before sending', async (version, kind) => {
     const error =
       kind === 'typed'
-        ? localError('initialization', BeaconErrorType.ABORTED_ERROR)
+        ? localWireError('initialization', BeaconErrorType.ABORTED_ERROR)
         : new Error('Initialization failed')
     vi.mocked(leader.init).mockRejectedValueOnce(error)
     const pending = await begin(version)
@@ -532,7 +546,7 @@ describe('Delegated request lifetime', () => {
         type: 'RESPONSE',
         id: pending.id,
         data: {
-          message: localError(pending.id, errorType),
+          message: localWireError(pending.id, errorType),
           connectionInfo: { origin: Origin.WALLETCONNECT, id: '' }
         }
       }
@@ -582,7 +596,7 @@ describe('Delegated request lifetime', () => {
       }
       await receiveWallet(spoofed)
       expect(pending.settled).toHaveBeenCalledExactlyOnceWith({
-        error: { ...spoofed, errorOrigin: 'wallet' }
+        error: expect.objectContaining({ ...spoofed, errorOrigin: 'wallet' })
       })
       expect(bus.endpoints[0].sent).toEqual([
         {

@@ -354,6 +354,10 @@ export {
 
 // Errors
 export { BeaconErrorType, ErrorResponse }
+export * from './types/ErrorOrigin'
+export * from './types/RequestErrorResponse'
+export * from './types/TezosRpcError'
+export * from './errors'
 
 // Transport
 export { TransportStatus, TransportType }

@@ -49,9 +49,18 @@ export type {
   RequestErrorResponse,
   ResponseMessage,
   ResponseOutput,
+  TezosRpcError,
   V3ResponsePayload,
   WireErrorMessage,
   WireErrorPayload
+} from './dapp-client/request-error'
+export {
+  isBeaconError,
+  isErrorOrigin,
+  isErrorResponse,
+  isRequestErrorResponse,
+  isTezosRpcError,
+  toBeaconError
 } from './dapp-client/request-error'
 
 // BlockExplorer

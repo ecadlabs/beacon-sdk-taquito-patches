@@ -7,6 +7,7 @@ import { WalletClient } from './client/WalletClient'
 import { WalletClientOptions } from './client/WalletClientOptions'
 
 export { WalletClient, WalletClientOptions }
+export { createErrorResponseInput } from './interceptors/createErrorResponseInput'
 
 export type { WalletRequestOutputMessage } from './types/WalletRequestOutputMessage'
 

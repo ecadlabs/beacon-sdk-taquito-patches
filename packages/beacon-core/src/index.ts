@@ -3,17 +3,6 @@
  * @module public
  */
 import { Client } from './clients/client/Client'
-import { BeaconError } from './errors/BeaconError'
-import { BroadcastBeaconError } from './errors/BroadcastBeaconError'
-import { NetworkNotSupportedBeaconError } from './errors/NetworkNotSupportedBeaconError'
-import { NoAddressBeaconError } from './errors/NoAddressBeaconError'
-import { NoPrivateKeyBeaconError } from './errors/NoPrivateKeyBeaconError'
-import { NotGrantedBeaconError } from './errors/NotGrantedBeaconError'
-import { ParametersInvalidBeaconError } from './errors/ParametersInvalidBeaconError'
-import { TooManyOperationsBeaconError } from './errors/TooManyOperationsBeaconError'
-import { TransactionInvalidBeaconError } from './errors/TransactionInvalidBeaconError'
-import { UnknownBeaconError } from './errors/UnknownBeaconError'
-import { PeerUnreachableBeaconError } from './errors/PeerUnreachableBeaconError'
 import { Transport, getPairingPeerOwnership } from './transports/Transport'
 import { ChromeStorage } from './storage/ChromeStorage'
 import { LocalStorage } from './storage/LocalStorage'
@@ -28,15 +17,12 @@ import { PermissionManager } from './managers/PermissionManager'
 import { BeaconClient } from './clients/beacon-client/BeaconClient'
 import { BeaconClientOptions } from './clients/beacon-client/BeaconClientOptions'
 import { getAccountIdentifier } from './utils/get-account-identifier'
-import { AbortedBeaconError } from './errors/AbortedBeaconError'
 import { getSenderId } from './utils/get-sender-id'
 import { PeerManager } from './managers/PeerManager'
 import { MessageBasedClient } from './transports/clients/MessageBasedClient'
 import { setDebugEnabled, getDebugEnabled } from './debug'
 // import { EncryptPayloadRequest } from './types/beacon/messages/EncryptPayloadRequest'
 // import { EncryptPayloadResponse } from './types/beacon/messages/EncryptPayloadResponse'
-// import { EncryptionTypeNotSupportedBeaconError } from './errors/EncryptionTypeNotSupportedBeaconError'
-import { SignatureTypeNotSupportedBeaconError } from './errors/SignatureTypeNotSupportedBeaconError'
 import { getLogger, Logger, setLogger } from './utils/Logger'
 import { windowRef } from './MockWindow'
 import { CommunicationClient } from './transports/clients/CommunicationClient'
@@ -45,7 +31,6 @@ import { WCStorage } from './storage/WCStorage'
 import { IndexedDBStorage } from './storage/IndexedDBStorage'
 import { StorageValidator } from './storage/StorageValidator'
 import { MultiTabChannel, observeMultiTabChannel } from './utils/multi-tab-channel'
-import getError from './errors/get-error'
 // import { EncryptionType } from './types/EncryptionType'
 // import { EncryptionOperation } from './types/EncryptionOperation'
 
@@ -56,6 +41,7 @@ export { BeaconClient, BeaconClientOptions, Client, ClientOptions, ClientEvents 
 export {
   getError,
   BeaconError,
+  BeaconErrorOptions,
   AbortedBeaconError,
   BroadcastBeaconError,
   NetworkNotSupportedBeaconError,
@@ -68,8 +54,16 @@ export {
   SignatureTypeNotSupportedBeaconError,
   PeerUnreachableBeaconError,
   // EncryptionTypeNotSupportedBeaconError,
-  UnknownBeaconError
-}
+  UnknownBeaconError,
+  isBeaconError,
+  isErrorOrigin,
+  isErrorResponse,
+  isRequestErrorResponse,
+  isTezosRpcError,
+  ErrorOrigin,
+  RequestErrorResponse,
+  TezosRpcError
+} from '@ecadlabs/beacon-types'
 
 // Transport
 export { Transport, getPairingPeerOwnership, MessageBasedClient, CommunicationClient }
