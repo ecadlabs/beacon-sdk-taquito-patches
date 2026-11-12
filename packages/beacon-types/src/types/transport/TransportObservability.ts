@@ -1,4 +1,8 @@
 import { BeaconMessageType } from '../beacon/BeaconMessageType'
+import { BeaconRequestMessage } from '../beacon/BeaconRequestMessage'
+import { BeaconMessageEnvelopeV3 } from '../beaconV3/PermissionRequest'
+import { ConnectionContext } from '../ConnectionContext'
+import { ExtendedPeerInfo } from '../PeerInfo'
 import { TransportStatus } from './TransportStatus'
 import { TransportType } from './TransportType'
 
@@ -49,3 +53,34 @@ export interface PendingRequestInfo {
   deadline?: number
   acknowledged: boolean | undefined
 }
+
+export type WalletPendingRequestRemovalReason = 'responded' | 'dismissed' | 'peer_disconnected'
+
+export interface WalletPendingRequestInfo {
+  id: string
+  type: BeaconMessageType
+  version: string
+  transport: TransportType
+  senderId: string
+  receivedAt: number
+  connectionContext: ConnectionContext
+  request: BeaconRequestMessage | BeaconMessageEnvelopeV3
+}
+
+export type WalletPendingRequestEvent =
+  | {
+      type: 'request_received'
+      request: WalletPendingRequestInfo
+    }
+  | {
+      type: 'request_removed'
+      request: WalletPendingRequestInfo
+      reason: WalletPendingRequestRemovalReason
+    }
+
+export interface WalletPeerEvent {
+  type: 'peer_added' | 'peer_removed'
+  peer: ExtendedPeerInfo
+  source: 'local' | 'storage'
+}
+

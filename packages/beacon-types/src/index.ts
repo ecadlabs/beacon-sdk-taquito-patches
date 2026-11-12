@@ -165,6 +165,7 @@ import { Extension, isExtension } from './types/Extension'
 import { PermissionEntity } from './types/PermissionEntity'
 import { WalletInfo } from './types/WalletInfo'
 import { ChangeAccountRequest } from './types/beacon/messages/ChangeAccountRequest'
+import { ChangeAccountInput } from './types/beacon/messages/ChangeAccountInput'
 import { TezosAttestationOperation } from './types/tezos/operations/Attestation'
 import { TezosAttestationWithDalOperation } from './types/tezos/operations/AttestationWithDal'
 import { TezosDoubleAttestationEvidenceOperation } from './types/tezos/operations/DoubleAttestationEvidence'
@@ -288,6 +289,7 @@ export {
   BroadcastRequest,
   BroadcastResponse,
   ChangeAccountRequest,
+  ChangeAccountInput,
   AcknowledgeResponse,
   DisconnectMessage,
   BeaconBaseMessage,

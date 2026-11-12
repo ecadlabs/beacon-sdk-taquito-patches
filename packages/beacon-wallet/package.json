@@ -37,8 +37,10 @@
     "@ecadlabs/beacon-core": "4.9.0-ecad-beta.0",
     "@ecadlabs/beacon-transport-matrix": "4.9.0-ecad-beta.0",
     "@ecadlabs/beacon-transport-postmessage": "4.9.0-ecad-beta.0",
+    "@ecadlabs/beacon-transport-walletconnect": "4.9.0-ecad-beta.0",
     "@ecadlabs/beacon-types": "4.9.0-ecad-beta.0",
-    "@ecadlabs/beacon-utils": "4.9.0-ecad-beta.0"
+    "@ecadlabs/beacon-utils": "4.9.0-ecad-beta.0",
+    "@walletconnect/types": "2.18.0"
   },
   "publishConfig": {
     "access": "public"

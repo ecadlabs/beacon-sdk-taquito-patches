@@ -1,4 +1,5 @@
 import { NodeDistributions, Storage } from '@ecadlabs/beacon-types'
+import { SignClientTypes } from '@walletconnect/types'
 
 /**
  * @category Wallet
@@ -31,4 +32,9 @@ export interface WalletClientOptions {
    * Only provide the hostname, no https:// prefix. Eg. { [Regions.EU1]: ['matrix.example.com'] }
    */
   matrixNodes?: NodeDistributions
+
+  /**
+   * WalletConnect v2 SignClient options. When provided, WalletClient initializes WalletWalletConnectTransport.
+   */
+  walletConnectOptions?: SignClientTypes.Options
 }

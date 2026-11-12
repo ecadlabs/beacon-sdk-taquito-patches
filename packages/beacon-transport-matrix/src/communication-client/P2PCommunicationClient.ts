@@ -132,6 +132,7 @@ export class P2PCommunicationClient extends CommunicationClient {
 
   private selectedRegion?: Regions
   private readonly ENABLED_RELAY_SERVERS: NodeDistributions
+  private readonly customMatrixNodes?: NodeDistributions
   public relayServer:
     ExposedPromise<{ server: string; timestamp: number; localTimestamp: number }> | undefined
   private activeRelayServer: string | undefined
@@ -182,6 +183,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     logger.log('constructor', 'P2PCommunicationClient created')
 
     this.ENABLED_RELAY_SERVERS = REGIONS_AND_SERVERS
+    this.customMatrixNodes = matrixNodes
 
     if (matrixNodes) {
       this.ENABLED_RELAY_SERVERS = {
@@ -387,33 +389,49 @@ export class P2PCommunicationClient extends CommunicationClient {
       const node = await this.storage.get(StorageKey.MATRIX_SELECTED_NODE)
       this.assertRelaySession(session)
       if (node && node.length > 0) {
-        try {
-          const info = await this.getBeaconInfo(node)
-          this.assertRelaySession(session)
-          if (!this.selectedRegion) {
-            const isRegionKey = (key: string): key is Regions =>
-              Object.values<string>(Regions).includes(key)
-            const matchingRegion = Object.entries(this.ENABLED_RELAY_SERVERS).find(
-              ([key, servers]) => isRegionKey(key) && servers?.includes(node)
-            )?.[0]
-            const fallbackRegion = Object.keys(this.ENABLED_RELAY_SERVERS).find(isRegionKey)
-            const candidate = matchingRegion ?? fallbackRegion
-            if (candidate && isRegionKey(candidate)) {
-              this.selectedRegion = candidate
-            }
-          }
-          discovery.resolve({ server: node, timestamp: info.timestamp, localTimestamp: Date.now() })
-          this.recordRelayServer(node)
-          return { server: node, timestamp: info.timestamp }
-        } catch (error) {
-          this.assertRelaySession(session)
-          logger.log('getRelayServer', `stored node ${node} is unreachable`, error)
+        const customServers = this.customMatrixNodes
+          ? Object.values(this.customMatrixNodes).flatMap((servers) => servers ?? [])
+          : []
+        const hasCustomServers = customServers.length > 0
+        const isNodeAllowed = !hasCustomServers || customServers.includes(node)
+
+        if (!isNodeAllowed) {
           await this.writeSessionState(owner, () =>
             this.storage
               .delete(StorageKey.MATRIX_SELECTED_NODE)
               .catch((failure) => logger.log(failure))
           )
           this.assertRelaySession(session)
+        } else {
+          try {
+            const info = await this.getBeaconInfo(node)
+            this.assertRelaySession(session)
+            if (!this.selectedRegion) {
+              const isRegionKey = (key: string): key is Regions =>
+                Object.values<string>(Regions).includes(key)
+              const matchingRegion = Object.entries(this.ENABLED_RELAY_SERVERS).find(
+                ([key, servers]) => isRegionKey(key) && servers?.includes(node)
+              )?.[0]
+              const fallbackRegion = Object.keys(this.ENABLED_RELAY_SERVERS).find(isRegionKey)
+              const candidate = matchingRegion ?? fallbackRegion
+              if (candidate && isRegionKey(candidate)) {
+                this.selectedRegion = candidate
+              }
+            }
+            discovery.resolve({ server: node, timestamp: info.timestamp, localTimestamp: Date.now() })
+            this.recordRelayServer(node)
+
+            return { server: node, timestamp: info.timestamp }
+          } catch (error) {
+            this.assertRelaySession(session)
+            logger.log('getRelayServer', `stored node ${node} is unreachable`, error)
+            await this.writeSessionState(owner, () =>
+              this.storage
+                .delete(StorageKey.MATRIX_SELECTED_NODE)
+                .catch((failure) => logger.log(failure))
+            )
+            this.assertRelaySession(session)
+          }
         }
       }
       const server = await this.findBestRegionAndGetServer(session)

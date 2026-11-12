@@ -5,8 +5,12 @@ export * from '@ecadlabs/beacon-utils'
 
 import { WalletClient } from './client/WalletClient'
 import { WalletClientOptions } from './client/WalletClientOptions'
+import {
+  WalletWalletConnectTransport,
+  type WalletConnectAccountEntry
+} from './transports/WalletWalletConnectTransport'
 
-export { WalletClient, WalletClientOptions }
+export { WalletClient, WalletClientOptions, WalletWalletConnectTransport, type WalletConnectAccountEntry }
 export { createErrorResponseInput } from './interceptors/createErrorResponseInput'
 export {
   buildPermissionResponse,

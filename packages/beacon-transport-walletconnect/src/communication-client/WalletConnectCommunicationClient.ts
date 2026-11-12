@@ -49,6 +49,7 @@ import {
   MissingRequiredScope,
   NotConnected
 } from '../error'
+import { parseJsonRpcErrorToBeaconError } from '../error-wire-mapping'
 import { WalletConnectStorageOwner } from './WalletConnectStorageOwner'
 import { classifyRequestFailure } from './request-failure'
 
@@ -297,10 +298,19 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
         return
       }
-      response =
-        failure === 'expired'
-          ? expiredResponse(id)
-          : { id, type: BeaconMessageType.Error, errorType: BeaconErrorType.ABORTED_ERROR }
+      if (failure === 'expired') {
+        response = expiredResponse(id)
+      } else if (failure === 'wallet') {
+        const parsed = parseJsonRpcErrorToBeaconError(error)
+        response = {
+          id,
+          type: BeaconMessageType.Error,
+          errorType: parsed.errorType,
+          ...(parsed.errorData !== undefined ? { errorData: parsed.errorData } : {})
+        }
+      } else {
+        response = { id, type: BeaconMessageType.Error, errorType: BeaconErrorType.ABORTED_ERROR }
+      }
     }
     if (!this.ownsRequest(request)) {
       return

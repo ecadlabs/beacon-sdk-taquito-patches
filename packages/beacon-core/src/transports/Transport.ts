@@ -20,6 +20,7 @@ type PeerStorageKey =
   | StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
   | StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET
   | StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP
+  | StorageKey.TRANSPORT_WALLETCONNECT_PEERS_WALLET
 
 const logger = new Logger('Transport')
 
