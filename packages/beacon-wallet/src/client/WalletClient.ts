@@ -14,6 +14,7 @@ import { ExposedPromise, toHex } from '@ecadlabs/beacon-utils'
 import {
   ConnectionContext,
   BeaconRequestMessage,
+  BeaconRequestOutputMessage,
   BeaconMessageType,
   AcknowledgeResponseInput,
   ExtendedPeerInfo,
@@ -30,8 +31,23 @@ import {
   ExtendedPostMessagePairingRequest,
   P2PPairingRequest,
   ExtendedP2PPairingRequest,
-  ExtendedWalletConnectPairingRequest
+  ExtendedWalletConnectPairingRequest,
+  ResponseInputForRequest,
+  PermissionRequestOutput,
+  OperationRequestOutput,
+  SignPayloadRequestOutput,
+  BroadcastRequestOutput,
+  SigningType,
+  BeaconErrorType
 } from '@ecadlabs/beacon-types'
+import {
+  buildPermissionResponse,
+  buildOperationResponse,
+  buildSignPayloadResponse,
+  buildBroadcastResponse,
+  buildErrorResponse,
+  type PermissionResponseBuilderOptions
+} from '../interceptors/buildResponseInput'
 import { WalletP2PTransport } from '../transports/WalletP2PTransport'
 import { IncomingRequestInterceptor } from '../interceptors/IncomingRequestInterceptor'
 import { OutgoingResponseInterceptor } from '../interceptors/OutgoingResponseInterceptor'
@@ -384,13 +400,25 @@ export class WalletClient extends Client {
    * This method sends a response for a specific request back to the DApp
    *
    * @param message The response value to send back to the DApp
+   * @param request Optional request to correlate and validate against
    */
-  public async respond(message: WalletResponseInputMessage): Promise<void> {
+  public async respond<T extends BeaconRequestOutputMessage>(
+    message: ResponseInputForRequest<T>,
+    request?: T
+  ): Promise<void>
+  public async respond(message: WalletResponseInputMessage): Promise<void>
+  public async respond(
+    message: WalletResponseInputMessage,
+    request?: BeaconRequestOutputMessage
+  ): Promise<void> {
+    if (request && message.id !== request.id) {
+      throw new Error('Response ID does not match request ID')
+    }
     logger.log('RESPONSE', message)
-    const request = this.pendingRequests.find(
+    const matchedRequest = this.pendingRequests.find(
       (pendingRequest) => pendingRequest[0].id === message.id
     )
-    if (!request) {
+    if (!matchedRequest) {
       throw new Error('No matching request found!')
     }
 
@@ -400,15 +428,52 @@ export class WalletClient extends Client {
 
     await OutgoingResponseInterceptor.intercept({
       senderId: await getSenderId(await this.beaconId),
-      request: request[0],
+      request: matchedRequest[0],
       message,
       ownAppMetadata: await this.getOwnAppMetadata(),
       permissionManager: this.permissionManager,
       appMetadataManager: this.appMetadataManager,
       interceptorCallback: async (response: WalletResponseOutputMessage): Promise<void> => {
-        await this.respondToMessage(response, request[1])
+        await this.respondToMessage(response, matchedRequest[1])
       }
     })
+  }
+
+  public async respondPermission(
+    request: Pick<PermissionRequestOutput, 'id' | 'network' | 'scopes'>,
+    options: PermissionResponseBuilderOptions
+  ): Promise<void> {
+    return this.respond(buildPermissionResponse(request, options))
+  }
+
+  public async respondOperation(
+    request: Pick<OperationRequestOutput, 'id'>,
+    transactionHash: string
+  ): Promise<void> {
+    return this.respond(buildOperationResponse(request, transactionHash))
+  }
+
+  public async respondSignPayload(
+    request: Pick<SignPayloadRequestOutput, 'id' | 'signingType'>,
+    signature: string,
+    signingType?: SigningType
+  ): Promise<void> {
+    return this.respond(buildSignPayloadResponse(request, signature, signingType))
+  }
+
+  public async respondBroadcast(
+    request: Pick<BroadcastRequestOutput, 'id'>,
+    transactionHash: string
+  ): Promise<void> {
+    return this.respond(buildBroadcastResponse(request, transactionHash))
+  }
+
+  public async respondError(
+    request: { id: string } | string,
+    errorType: BeaconErrorType,
+    errorData?: unknown
+  ): Promise<void> {
+    return this.respond(buildErrorResponse(request, errorType, errorData))
   }
 
   public async getAppMetadataList(): Promise<AppMetadata[]> {

@@ -12,6 +12,7 @@ import KeyValueStorage from '@walletconnect/keyvaluestorage'
 import { ProposalTypes, SessionTypes, SignClientTypes } from '@walletconnect/types'
 import { getSdkError } from '@walletconnect/utils'
 import {
+  AppMetadata,
   BeaconBaseMessage,
   BeaconErrorType,
   BeaconMessageType,
@@ -22,6 +23,7 @@ import {
   ExtendedWalletConnectPairingRequest,
   ExtendedWalletConnectPairingResponse,
   IgnoredResponseInputProperties,
+  ImplicitPermissionResponseInput,
   Network,
   NetworkType,
   OperationRequest,
@@ -929,7 +931,10 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       throw new Error('Public Key in `tezos_getAccounts` is empty!')
     }
 
-    const permissionResponse: Omit<PermissionResponse, IgnoredResponseInputProperties> = {
+    const permissionResponse: ImplicitPermissionResponseInput & {
+      appMetadata: AppMetadata
+      walletType: 'implicit'
+    } = {
       type: BeaconMessageType.PermissionResponse,
       appMetadata: {
         senderId: this.getTopicFromSession(session),

@@ -7,6 +7,15 @@ import { SignPayloadResponse } from './SignPayloadResponse'
 import { BroadcastResponse } from './BroadcastResponse'
 import { AcknowledgeResponse } from './AcknowledgeResponse'
 import { ErrorResponse } from './ErrorResponse'
+import type {
+  BeaconRequestOutputMessage,
+  PermissionRequestOutput,
+  OperationRequestOutput,
+  SignPayloadRequestOutput,
+  BroadcastRequestOutput,
+  ProofOfEventChallengeRequestOutput,
+  SimulatedProofOfEventChallengeRequestOutput
+} from './BeaconRequestOutputMessage'
 // EncryptPayloadResponse,
 
 /**
@@ -17,10 +26,35 @@ export type IgnoredResponseInputProperties = 'senderId' | 'version'
 /**
  * @category Wallet
  */
-export type PermissionResponseInput = Optional<
-  PermissionResponse,
-  IgnoredResponseInputProperties | 'appMetadata'
+export type PermissionResponseBaseInput = Omit<
+  Optional<PermissionResponse, IgnoredResponseInputProperties | 'appMetadata'>,
+  'walletType' | 'publicKey' | 'address'
 >
+
+/**
+ * @category Wallet
+ */
+export type ImplicitPermissionResponseInput = PermissionResponseBaseInput & {
+  walletType?: 'implicit'
+  publicKey: string
+  address?: string
+}
+
+/**
+ * @category Wallet
+ */
+export type AbstractedPermissionResponseInput = PermissionResponseBaseInput & {
+  walletType: 'abstracted_account'
+  address: string
+  publicKey?: undefined
+}
+
+/**
+ * @category Wallet
+ */
+export type PermissionResponseInput =
+  | ImplicitPermissionResponseInput
+  | AbstractedPermissionResponseInput
 /**
  * @category Wallet
  */
@@ -62,6 +96,25 @@ export type AcknowledgeResponseInput = Optional<AcknowledgeResponse, IgnoredResp
  * @category Wallet
  */
 export type ErrorResponseInput = Optional<ErrorResponse, IgnoredResponseInputProperties>
+
+/**
+ * @category Wallet
+ */
+export type ResponseInputForRequest<
+  T extends BeaconRequestOutputMessage = BeaconRequestOutputMessage
+> = T extends PermissionRequestOutput
+  ? PermissionResponseInput | ErrorResponseInput
+  : T extends OperationRequestOutput
+    ? OperationResponseInput | ErrorResponseInput
+    : T extends SignPayloadRequestOutput
+      ? SignPayloadResponseInput | ErrorResponseInput
+      : T extends BroadcastRequestOutput
+        ? BroadcastResponseInput | ErrorResponseInput
+        : T extends ProofOfEventChallengeRequestOutput
+          ? ProofOfEventChallengeResponseInput | ErrorResponseInput
+          : T extends SimulatedProofOfEventChallengeRequestOutput
+            ? SimulatedProofOfEventChallengeResponseInput | ErrorResponseInput
+            : never
 
 /**
  * @internalapi

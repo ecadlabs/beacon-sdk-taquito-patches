@@ -204,13 +204,17 @@ it.each([
     error: 'Invalid abstracted account address'
   }
 ])('rejects invalid permission input: $error', async ({ error, ...fields }) => {
-  const config = setup({ ...permission, ...fields })
+  const config = setup({ ...permission, ...fields } as unknown as BeaconResponseInputMessage)
   await expect(OutgoingResponseInterceptor['handleV2Message'](config)).rejects.toThrow(error)
   expect(config.interceptorCallback).not.toHaveBeenCalled()
   expect(await config.permissionManager.getPermissions()).toEqual([])
 })
 it('accepts an explicit address without a public key', async () => {
-  const config = setup({ ...permission, publicKey: undefined, address })
+  const config = setup({
+    ...permission,
+    publicKey: undefined,
+    address
+  } as unknown as BeaconResponseInputMessage)
   await config.appMetadataManager.addAppMetadata(metadata)
   await OutgoingResponseInterceptor['handleV2Message'](config)
   await vi.waitFor(async () =>

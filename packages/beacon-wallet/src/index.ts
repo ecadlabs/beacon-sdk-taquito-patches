@@ -8,6 +8,17 @@ import { WalletClientOptions } from './client/WalletClientOptions'
 
 export { WalletClient, WalletClientOptions }
 export { createErrorResponseInput } from './interceptors/createErrorResponseInput'
+export {
+  buildPermissionResponse,
+  buildOperationResponse,
+  buildSignPayloadResponse,
+  buildBroadcastResponse,
+  buildErrorResponse,
+  type BasePermissionResponseBuilderOptions,
+  type PermissionResponseBuilderOptions,
+  type ImplicitPermissionResponseBuilderOptions,
+  type AbstractedPermissionResponseBuilderOptions
+} from './interceptors/buildResponseInput'
 
 export type { WalletRequestOutputMessage } from './types/WalletRequestOutputMessage'
 

@@ -154,11 +154,13 @@ export class OutgoingResponseInterceptor {
         break
       }
       case BeaconMessageType.PermissionResponse: {
+        const walletType = message.walletType ?? 'implicit'
         const response: PermissionResponse = {
           senderId,
           version: '2',
           appMetadata: ownAppMetadata,
-          ...message
+          ...message,
+          walletType
         }
 
         if (!response.address && !response.publicKey) {
@@ -174,7 +176,7 @@ export class OutgoingResponseInterceptor {
         }
 
         if (
-          message.walletType === 'abstracted_account' &&
+          walletType === 'abstracted_account' &&
           address.substring(0, 3) !== CONTRACT_PREFIX
         ) {
           throw new Error(

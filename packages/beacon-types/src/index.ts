@@ -66,6 +66,9 @@ import { RequestOperationInput } from './types/RequestOperationInput'
 import { RequestBroadcastInput } from './types/RequestBroadcastInput'
 import {
   PermissionResponseInput,
+  PermissionResponseBaseInput,
+  ImplicitPermissionResponseInput,
+  AbstractedPermissionResponseInput,
   SignPayloadResponseInput,
   // EncryptPayloadResponseInput,
   OperationResponseInput,
@@ -73,6 +76,9 @@ import {
   BeaconResponseInputMessage,
   AcknowledgeResponseInput,
   ErrorResponseInput,
+  ProofOfEventChallengeResponseInput,
+  SimulatedProofOfEventChallengeResponseInput,
+  ResponseInputForRequest,
   IgnoredResponseInputProperties
 } from './types/beacon/messages/BeaconResponseInputMessage'
 import {
@@ -317,12 +323,18 @@ export {
 
 export {
   PermissionResponseInput,
+  PermissionResponseBaseInput,
+  ImplicitPermissionResponseInput,
+  AbstractedPermissionResponseInput,
   SignPayloadResponseInput,
   // EncryptPayloadResponseInput,
   OperationResponseInput,
   BroadcastResponseInput,
   AcknowledgeResponseInput,
   ErrorResponseInput,
+  ProofOfEventChallengeResponseInput,
+  SimulatedProofOfEventChallengeResponseInput,
+  ResponseInputForRequest,
   PermissionResponseOutput,
   ProofOfEventChallengeResponseOutput,
   SimulatedProofOfEventChallengeResponseOutput,
@@ -392,6 +404,7 @@ export { IgnoredResponseInputProperties, IgnoredRequestInputProperties, defaultV
 export { ConnectionContext, ColorMode, WalletInfo }
 
 export { PushToken } from './types/PushToken'
+export { Notification } from './types/Notification'
 
 // TS helpers
 
