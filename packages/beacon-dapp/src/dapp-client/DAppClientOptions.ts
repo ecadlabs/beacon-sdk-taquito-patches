@@ -76,7 +76,11 @@ export interface DAppClientOptions {
   }
 
   /**
-   * A list of matrix nodes to connect to. If a non-empty array is passed, the default options will be overwritten.
+   * A list of Matrix relay nodes used for TZIP-10 P2P wallet pairings (for
+   * example, Kukai web). Browser extensions communicate via `postMessage`, and
+   * WalletConnect-based wallets use `walletConnectOptions` instead.
+   *
+   * If a non-empty array is passed, the default options will be overwritten.
    * One node will be randomly selected based on the local keypair and the other nodes will be used as a fallback in case the primary node goes down.
    *
    * Only provide the hostname, no https:// prefix. Eg. { [Regions.EU1]: ['matrix.example.com'] }
@@ -116,13 +120,20 @@ export interface DAppClientOptions {
   errorMessages?: Record<string, Record<string | number, string>>
 
   /**
-   * Configuration that is passed to the WalletConnect transport.
+   * Configuration that is passed to the WalletConnect v2 transport.
+   *
+   * Beacon selects a transport per wallet: browser extensions use `postMessage`,
+   * TZIP-10 P2P wallets (such as Kukai web) use Matrix relays (`matrixNodes`),
+   * and WalletConnect-enabled wallets (such as Kukai iOS and WalletConnect
+   * QR/mobile flows) use WalletConnect v2. `walletConnectOptions` does not
+   * replace Matrix or extension transports.
    *
    * Recommended for WalletConnect connections. If `projectId` is omitted, the SDK
    * currently falls back to a built-in demo `projectId` (for testing/demo only).
    * Using the default in production may put your project in breach of the
    * WalletConnect/Reown Terms of Service, and this default will be removed in the
-   * next minor release.
+   * next minor release (after which omitting `projectId` will disable
+   * WalletConnect pairings while extension and Matrix wallets continue to work).
    */
   walletConnectOptions?: RequireAtLeastOne<{
     /**
