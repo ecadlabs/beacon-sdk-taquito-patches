@@ -517,7 +517,15 @@ export class DAppClient extends Client {
       ...config
     })
     this.description = config.description
-    this.wcProjectId = config.walletConnectOptions?.projectId || '24469fd0a06df227b6e5f7dc7de0ff4f'
+    if (config.walletConnectOptions?.projectId) {
+      this.wcProjectId = config.walletConnectOptions.projectId
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[BEACON] No WalletConnect projectId was provided in walletConnectOptions. Falling back to a built-in demo projectId for testing/demo purposes only; using the default in production may put your project in breach of the WalletConnect/Reown Terms of Service, and this default will be removed in the next minor release. Register your own projectId at https://dashboard.reown.com/ (with an allowed origins list) and pass it via walletConnectOptions: { projectId }.'
+      )
+      this.wcProjectId = '24469fd0a06df227b6e5f7dc7de0ff4f'
+    }
     this.wcRelayUrl = config.walletConnectOptions?.relayUrl
 
     this.featuredWallets = config.featuredWallets

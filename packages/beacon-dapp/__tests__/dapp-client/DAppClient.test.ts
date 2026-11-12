@@ -4817,3 +4817,50 @@ describe('DAppClient toast configuration', () => {
     }
   })
 })
+
+describe('DAppClient WalletConnect projectId deprecation warning', () => {
+  it('warns when walletConnectOptions.projectId is omitted and falls back to the demo projectId', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const clientWithoutProjectId = new DAppClient({ name: 'Demo Fallback dApp' })
+    try {
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('demo')
+      )
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('https://dashboard.reown.com/')
+      )
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Terms of Service')
+      )
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('next minor release')
+      )
+      expect((clientWithoutProjectId as unknown as { wcProjectId?: string }).wcProjectId).toBe(
+        '24469fd0a06df227b6e5f7dc7de0ff4f'
+      )
+    } finally {
+      warnSpy.mockRestore()
+      await clientWithoutProjectId.destroy()
+    }
+  })
+
+  it('does not warn when walletConnectOptions.projectId is provided', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const clientWithProjectId = new DAppClient({
+      name: 'Configured dApp',
+      walletConnectOptions: { projectId: 'custom-project-id' }
+    })
+    try {
+      const wcWarnings = warnSpy.mock.calls.filter(([msg]) =>
+        typeof msg === 'string' && msg.includes('WalletConnect projectId')
+      )
+      expect(wcWarnings).toHaveLength(0)
+      expect((clientWithProjectId as unknown as { wcProjectId?: string }).wcProjectId).toBe(
+        'custom-project-id'
+      )
+    } finally {
+      warnSpy.mockRestore()
+      await clientWithProjectId.destroy()
+    }
+  })
+})

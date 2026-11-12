@@ -118,11 +118,18 @@ export interface DAppClientOptions {
   /**
    * Configuration that is passed to the WalletConnect transport.
    *
-   * This is required to enable WalletConnect connections.
+   * Recommended for WalletConnect connections. If `projectId` is omitted, the SDK
+   * currently falls back to a built-in demo `projectId` (for testing/demo only).
+   * Using the default in production may put your project in breach of the
+   * WalletConnect/Reown Terms of Service, and this default will be removed in the
+   * next minor release.
    */
   walletConnectOptions?: RequireAtLeastOne<{
     /**
-     * The projectId of the application. Has to be obtained from https://cloud.walletconnect.com/
+     * The public projectId of the application, obtained from https://dashboard.reown.com/
+     * (with an allowed origins list configured for your app). In web dApps, this is
+     * typically injected via a frontend build-time environment variable (for example
+     * `VITE_*` or `NEXT_PUBLIC_*`).
      */
     projectId?: string
 

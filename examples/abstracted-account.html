@@ -271,10 +271,11 @@
         name: 'Example DApp', // Name of the DApp,
         disclaimerText: 'This is an optional <b>disclaimer</b>.',
         appUrl: 'http://localhost:8080',
-        walletConnectOptions: {
-          projectId: '97f804b46f0db632c52af0556586a5f3',
-          relayUrl: 'wss://relay.walletconnect.com'
-        },
+        // Register your own WalletConnect projectId at https://dashboard.reown.com/:
+        // walletConnectOptions: {
+        //   projectId: 'YOUR_PROJECT_ID',
+        //   relayUrl: 'wss://relay.walletconnect.com'
+        // },
         storage: new beacon.LocalStorage('DAPP'),
         preferredNetwork: beacon.NetworkType.GHOSTNET
       })
