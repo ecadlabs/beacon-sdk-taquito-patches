@@ -791,4 +791,42 @@ describe('useConnect persisted wallet display names', () => {
       })
     }
   )
+
+  it.each(['{bad json', 'null', 'undefined', '[1,2]'])(
+    'does not throw when LAST_SELECTED_WALLET contains %s during deep-link URL update',
+    async (corruptValue) => {
+      const mobileWallet: MergedWallet = {
+        ...wallet,
+        links: {
+          ios: 'https://wallet.test/app'
+        }
+      }
+      const getItemSpy = vi
+        .spyOn(Object.getPrototypeOf(localStorage), 'getItem')
+        .mockImplementation((key: string) =>
+          key === StorageKey.LAST_SELECTED_WALLET ? corruptValue : null
+        )
+
+      try {
+        const { result } = renderHook(() =>
+          useConnect(
+            false,
+            Promise.resolve('wc-payload'),
+            Promise.resolve('p2p-payload'),
+            Promise.resolve('post-payload'),
+            new Map([[mobileWallet.id, mobileWallet]]),
+            vi.fn()
+          )
+        )
+
+        await expect(
+          act(async () => {
+            await result.current[9](mobileWallet)
+          })
+        ).resolves.not.toThrow()
+      } finally {
+        getItemSpy.mockRestore()
+      }
+    }
+  )
 })

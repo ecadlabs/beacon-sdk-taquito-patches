@@ -6,7 +6,8 @@ import {
   BeaconMessageType,
   SignPayloadRequest,
   NetworkType,
-  SigningType
+  SigningType,
+  StorageKey
 } from '@ecadlabs/beacon-types'
 import SignClient from '@walletconnect/sign-client'
 import { WalletConnectCommunicationClient } from '../../src/communication-client/WalletConnectCommunicationClient'
@@ -871,4 +872,28 @@ describe('String message dispatching', () => {
       ;(client as any).pingInterval = undefined
     }
   })
+
+  it.each(['{bad json', 'null', 'undefined', '[1,2]'])(
+    'does not throw in updateStorageWallet when LAST_SELECTED_WALLET contains %s',
+    (corruptValue) => {
+      localStorage.setItem(StorageKey.LAST_SELECTED_WALLET, corruptValue)
+      const client = new WalletConnectCommunicationClient(
+        'Test App',
+        { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) },
+        'wc-project-id'
+      )
+      const session = {
+        peer: { metadata: {} }
+      } as unknown as SessionTypes.Struct
+
+      try {
+        expect(() => (client as any).updateStorageWallet(session)).not.toThrow()
+        expect(localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)).toBe(corruptValue)
+      } finally {
+        clearInterval((client as any).pingInterval)
+        ;(client as any).pingInterval = undefined
+        localStorage.removeItem(StorageKey.LAST_SELECTED_WALLET)
+      }
+    }
+  )
 })
