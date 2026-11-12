@@ -575,7 +575,8 @@ export class WalletWalletConnectTransport extends Transport<
   ): Promise<void> {
     const generation = this.generation
     const { id: wcRequestId, topic, params } = event
-    if (this.closedTopics.has(topic)) {
+    const isCurrent = () => generation === this.generation && !this.closedTopics.has(topic)
+    if (!isCurrent()) {
       return
     }
     const dedupeKey = `${topic}:${wcRequestId}`
@@ -591,7 +592,7 @@ export class WalletWalletConnectTransport extends Transport<
     }
 
     const signClient = await this.ensureSignClient()
-    if (generation !== this.generation || this.closedTopics.has(topic)) {
+    if (!isCurrent()) {
       return
     }
     const session = signClient.session.get(topic)
@@ -605,7 +606,7 @@ export class WalletWalletConnectTransport extends Transport<
     const networkType = parseNetworkType(params.chainId)
     const beaconId = await generateGUID()
 
-    if (generation !== this.generation || this.closedTopics.has(topic)) {
+    if (!isCurrent()) {
       return
     }
     this.pendingByBeaconId.set(beaconId, {
@@ -672,7 +673,7 @@ export class WalletWalletConnectTransport extends Transport<
       id: meta.peerPublicKey
     }
     const serialized = await this.serializer.serialize(beaconMessage)
-    if (generation === this.generation && this.pendingByBeaconId.has(beaconId)) {
+    if (isCurrent() && this.pendingByBeaconId.has(beaconId)) {
       await this.notifyListeners(serialized, context)
     }
   }
