@@ -47,6 +47,7 @@ export interface WalletConnectAccountEntry {
 
 interface PendingProposal {
   kind: 'proposal'
+  approval: { kind: 'pending' } | { kind: 'approved'; topic: string; completion: Promise<void> }
   proposalId: number
   proposerPublicKey: string
   senderId: string
@@ -186,6 +187,9 @@ export class WalletWalletConnectTransport extends Transport<
 
   private signClient?: SignClientInstance
   private initPromise?: Promise<SignClientInstance>
+  private generation = 0
+  private readonly closedTopics = new Set<string>()
+  private readonly responsesInFlight = new WeakMap<PendingWcEntry, Promise<void>>()
   private listenersAttached = false
   private readonly serializer = new Serializer()
   private readonly pendingByBeaconId = new Map<string, PendingWcEntry>()
@@ -247,18 +251,30 @@ export class WalletWalletConnectTransport extends Transport<
     if (this._isConnected === TransportStatus.CONNECTED) {
       return
     }
+    const generation = this.generation
     this._isConnected = TransportStatus.CONNECTING
     try {
       const signClient = await this.ensureSignClient()
+      if (generation !== this.generation) {
+        return
+      }
       this.attachSignClientListeners(signClient)
       this._isConnected = TransportStatus.CONNECTED
     } catch (error) {
-      this._isConnected = TransportStatus.NOT_CONNECTED
+      if (generation === this.generation) {
+        this._isConnected = TransportStatus.NOT_CONNECTED
+      }
       throw error
     }
   }
 
   public async disconnect(): Promise<void> {
+    this.disconnectClient()
+  }
+
+  private disconnectClient(): void {
+    this.generation++
+    this.pendingByBeaconId.clear()
     if (this.signClient && this.listenersAttached) {
       this.detachSignClientListeners(this.signClient)
     }
@@ -266,43 +282,67 @@ export class WalletWalletConnectTransport extends Transport<
   }
 
   public async doClientCleanup(): Promise<void> {
-    await this.disconnect()
+    this.disconnectClient()
     this.pendingByBeaconId.clear()
     this.seenSessionRequests.clear()
     this.sessionMetaByTopic.clear()
     this.topicByPeerPublicKey.clear()
+    this.closedTopics.clear()
     this.signClient = undefined
     this.initPromise = undefined
   }
 
   public override async addPeer(newPeer: ExtendedWalletConnectPairingRequest): Promise<void> {
-    await super.addPeer(newPeer)
+    const generation = this.generation
+    await this.addPairingPeer(
+      newPeer,
+      () => generation === this.generation,
+      () => true
+    )
+    if (generation !== this.generation) {
+      return
+    }
     if (newPeer.uri) {
       const signClient = await this.ensureSignClient()
-      await signClient.pair({ uri: newPeer.uri })
+      if (generation === this.generation) {
+        await signClient.pair({ uri: newPeer.uri })
+      }
     }
   }
 
   public override async listen(): Promise<void> {
+    const generation = this.generation
     const signClient = await this.ensureSignClient()
-    this.attachSignClientListeners(signClient)
+    if (generation === this.generation) {
+      this.attachSignClientListeners(signClient)
+    }
   }
 
   public override async send(
     serializedMessage: string,
     peer?: ExtendedWalletConnectPairingRequest
   ): Promise<void> {
+    const generation = this.generation
     const deserialized = await this.serializer.deserialize(serializedMessage)
-    if (!isRecord(deserialized) || typeof deserialized.type !== 'string') {
+    if (
+      generation !== this.generation ||
+      !isRecord(deserialized) ||
+      typeof deserialized.type !== 'string'
+    ) {
       return
     }
 
     const signClient = await this.ensureSignClient()
 
+    if (generation !== this.generation) {
+      return
+    }
+
     if (deserialized.type === BeaconMessageType.Disconnect) {
       if (peer) {
         const topic = this.topicByPeerPublicKey.get(peer.publicKey)
         if (topic) {
+          this.clearTopic(topic)
           await signClient.disconnect({ topic, reason: WC_USER_DISCONNECTED })
           this.sessionMetaByTopic.delete(topic)
           this.topicByPeerPublicKey.delete(peer.publicKey)
@@ -334,23 +374,50 @@ export class WalletWalletConnectTransport extends Transport<
       return
     }
 
-    this.pendingByBeaconId.delete(deserialized.id)
-
-    if (pending.kind === 'proposal') {
-      await this.respondToProposal(signClient, pending, deserialized)
-
+    const existing = this.responsesInFlight.get(pending)
+    if (existing) {
+      return existing
+    }
+    const supported =
+      deserialized.type === BeaconMessageType.Error ||
+      deserialized.type === BeaconMessageType.PermissionResponse ||
+      (pending.kind === 'request' &&
+        (deserialized.type === BeaconMessageType.OperationResponse ||
+          deserialized.type === BeaconMessageType.SignPayloadResponse))
+    if (!supported) {
       return
     }
-
-    await this.respondToSessionRequest(signClient, pending, deserialized)
+    const beaconId = deserialized.id
+    const isCurrent = () =>
+      generation === this.generation && this.pendingByBeaconId.get(beaconId) === pending
+    const delivery =
+      pending.kind === 'proposal'
+        ? this.respondToProposal(signClient, pending, deserialized, isCurrent)
+        : this.respondToSessionRequest(signClient, pending, deserialized, isCurrent)
+    this.responsesInFlight.set(pending, delivery)
+    try {
+      await delivery
+      if (isCurrent()) {
+        this.pendingByBeaconId.delete(deserialized.id)
+      }
+    } finally {
+      this.responsesInFlight.delete(pending)
+    }
   }
 
   public async updateSessionAccounts(
     topic: string,
     accounts: readonly WalletConnectAccountEntry[]
   ): Promise<void> {
+    const generation = this.generation
     const signClient = await this.ensureSignClient()
+    if (generation !== this.generation) {
+      return
+    }
     const meta = await this.getOrBuildSessionMeta(signClient, topic)
+    if (generation !== this.generation || this.closedTopics.has(topic)) {
+      return
+    }
     const formattedAccounts = formatNamespaceAccounts(accounts, meta.hasBeaconSdkVersion)
 
     const { acknowledged } = await signClient.update({
@@ -380,16 +447,21 @@ export class WalletWalletConnectTransport extends Transport<
           icons: this.iconUrl ? [this.iconUrl] : []
         }
       }
-      this.initPromise = initWalletConnectSignClient(options)
+      const initialization = initWalletConnectSignClient(options)
         .then((client) => {
-          this.signClient = client
+          if (this.initPromise === initialization) {
+            this.signClient = client
+          }
 
           return client
         })
         .catch((error: unknown) => {
-          this.initPromise = undefined
+          if (this.initPromise === initialization) {
+            this.initPromise = undefined
+          }
           throw error
         })
+      this.initPromise = initialization
     }
 
     return this.initPromise
@@ -417,9 +489,13 @@ export class WalletWalletConnectTransport extends Transport<
   private async handleSessionProposal(
     event: SignClientTypes.EventArguments['session_proposal']
   ): Promise<void> {
+    const generation = this.generation
     const { id: proposalId, params } = event
     const proposer = params.proposer
     const senderId = await getSenderId(proposer.publicKey)
+    if (generation !== this.generation) {
+      return
+    }
     const beaconId = `wc-proposal-${proposalId}`
 
     const requiredTezos = params.requiredNamespaces?.[TEZOS_NAMESPACE]
@@ -428,6 +504,7 @@ export class WalletWalletConnectTransport extends Transport<
 
     this.pendingByBeaconId.set(beaconId, {
       kind: 'proposal',
+      approval: { kind: 'pending' },
       proposalId,
       proposerPublicKey: proposer.publicKey,
       senderId,
@@ -436,7 +513,7 @@ export class WalletWalletConnectTransport extends Transport<
       hasBeaconSdkVersion
     })
 
-    await super.addPeer(
+    await this.addPairingPeer(
       new ExtendedWalletConnectPairingRequest(
         beaconId,
         proposer.metadata.name,
@@ -446,7 +523,9 @@ export class WalletWalletConnectTransport extends Transport<
         '',
         proposer.metadata.icons?.[0],
         proposer.metadata.url
-      )
+      ),
+      () => generation === this.generation,
+      () => true
     )
 
     const chains = uniqueStrings([
@@ -477,13 +556,20 @@ export class WalletWalletConnectTransport extends Transport<
       origin: Origin.WALLETCONNECT,
       id: proposer.publicKey
     }
-    await this.notifyListeners(await this.serializer.serialize(permissionRequest), context)
+    const serialized = await this.serializer.serialize(permissionRequest)
+    if (generation === this.generation && this.pendingByBeaconId.has(beaconId)) {
+      await this.notifyListeners(serialized, context)
+    }
   }
 
   private async handleSessionRequest(
     event: SignClientTypes.EventArguments['session_request']
   ): Promise<void> {
+    const generation = this.generation
     const { id: wcRequestId, topic, params } = event
+    if (this.closedTopics.has(topic)) {
+      return
+    }
     const dedupeKey = `${topic}:${wcRequestId}`
     if (this.seenSessionRequests.has(dedupeKey)) {
       return
@@ -497,6 +583,9 @@ export class WalletWalletConnectTransport extends Transport<
     }
 
     const signClient = await this.ensureSignClient()
+    if (generation !== this.generation || this.closedTopics.has(topic)) {
+      return
+    }
     const session = signClient.session.get(topic)
     if (!session) {
       return
@@ -508,6 +597,9 @@ export class WalletWalletConnectTransport extends Transport<
     const networkType = parseNetworkType(params.chainId)
     const beaconId = await generateGUID()
 
+    if (generation !== this.generation || this.closedTopics.has(topic)) {
+      return
+    }
     this.pendingByBeaconId.set(beaconId, {
       kind: 'request',
       wcRequestId,
@@ -534,8 +626,7 @@ export class WalletWalletConnectTransport extends Transport<
         scopes: extractScopesFromMethods(meta.methods)
       }
     } else if (method === 'tezos_send') {
-      const sourceAddress =
-        typeof requestParams.account === 'string' ? requestParams.account : ''
+      const sourceAddress = typeof requestParams.account === 'string' ? requestParams.account : ''
       const operationDetails = Array.isArray(requestParams.operations)
         ? (requestParams.operations as TezosOperation[])
         : []
@@ -549,8 +640,7 @@ export class WalletWalletConnectTransport extends Transport<
         sourceAddress
       }
     } else if (method === 'tezos_sign') {
-      const sourceAddress =
-        typeof requestParams.account === 'string' ? requestParams.account : ''
+      const sourceAddress = typeof requestParams.account === 'string' ? requestParams.account : ''
       const payload = typeof requestParams.payload === 'string' ? requestParams.payload : ''
       beaconMessage = {
         id: beaconId,
@@ -573,14 +663,21 @@ export class WalletWalletConnectTransport extends Transport<
       origin: Origin.WALLETCONNECT,
       id: meta.peerPublicKey
     }
-    await this.notifyListeners(await this.serializer.serialize(beaconMessage), context)
+    const serialized = await this.serializer.serialize(beaconMessage)
+    if (generation === this.generation && this.pendingByBeaconId.has(beaconId)) {
+      await this.notifyListeners(serialized, context)
+    }
   }
 
   private async respondToProposal(
     signClient: SignClientInstance,
     pending: PendingProposal,
-    deserialized: Record<string, unknown>
+    deserialized: Record<string, unknown>,
+    isCurrent: () => boolean
   ): Promise<void> {
+    if (pending.approval.kind === 'approved') {
+      return pending.approval.completion
+    }
     if (deserialized.type === BeaconMessageType.Error) {
       const errorResponse = deserialized as unknown as ErrorResponse
       await signClient.reject({
@@ -601,6 +698,9 @@ export class WalletWalletConnectTransport extends Transport<
       permResponse
     )
 
+    if (!isCurrent()) {
+      return
+    }
     const { topic, acknowledged } = await signClient.approve({
       id: pending.proposalId,
       namespaces: {
@@ -612,23 +712,34 @@ export class WalletWalletConnectTransport extends Transport<
       },
       ...(sessionProperties ? { sessionProperties } : {})
     })
-    await acknowledged()
-
-    this.sessionMetaByTopic.set(topic, {
-      topic,
-      peerPublicKey: pending.proposerPublicKey,
-      senderId: pending.senderId,
-      hasBeaconSdkVersion: pending.hasBeaconSdkVersion,
-      methods,
-      events
-    })
-    this.topicByPeerPublicKey.set(pending.proposerPublicKey, topic)
+    const completion = (async () => {
+      await acknowledged()
+      if (!isCurrent() || this.closedTopics.has(topic)) {
+        return
+      }
+      this.sessionMetaByTopic.set(topic, {
+        topic,
+        peerPublicKey: pending.proposerPublicKey,
+        senderId: pending.senderId,
+        hasBeaconSdkVersion: pending.hasBeaconSdkVersion,
+        methods,
+        events
+      })
+      this.topicByPeerPublicKey.set(pending.proposerPublicKey, topic)
+    })()
+    // Approval is committed. An acknowledgement failure must never approve again.
+    pending.approval = { kind: 'approved', topic, completion }
+    if (this.closedTopics.has(topic)) {
+      this.clearTopic(topic)
+    }
+    await completion
   }
 
   private async respondToSessionRequest(
     signClient: SignClientInstance,
     pending: PendingSessionRequest,
-    deserialized: Record<string, unknown>
+    deserialized: Record<string, unknown>,
+    isCurrent: () => boolean
   ): Promise<void> {
     if (deserialized.type === BeaconMessageType.Error) {
       const errorResponse = deserialized as unknown as ErrorResponse
@@ -657,6 +768,9 @@ export class WalletWalletConnectTransport extends Transport<
             ? await getAddressFromPublicKey(publicKey)
             : ''
 
+      if (!isCurrent()) {
+        return
+      }
       await signClient.respond({
         topic: pending.topic,
         response: {
@@ -696,7 +810,23 @@ export class WalletWalletConnectTransport extends Transport<
     }
   }
 
+  private clearTopic(topic: string): void {
+    this.closedTopics.add(topic)
+    for (const [id, pending] of this.pendingByBeaconId) {
+      if (
+        (pending.kind === 'request' && pending.topic === topic) ||
+        (pending.kind === 'proposal' &&
+          pending.approval.kind === 'approved' &&
+          pending.approval.topic === topic)
+      ) {
+        this.pendingByBeaconId.delete(id)
+      }
+    }
+  }
+
   private async handleSessionClosed(topic: string): Promise<void> {
+    this.clearTopic(topic)
+    const generation = this.generation
     const meta = this.sessionMetaByTopic.get(topic)
     let senderId = meta?.senderId
     let peerPublicKey = meta?.peerPublicKey
@@ -709,6 +839,9 @@ export class WalletWalletConnectTransport extends Transport<
       }
     }
 
+    if (generation !== this.generation) {
+      return
+    }
     this.sessionMetaByTopic.delete(topic)
     if (peerPublicKey) {
       this.topicByPeerPublicKey.delete(peerPublicKey)
@@ -725,10 +858,13 @@ export class WalletWalletConnectTransport extends Transport<
       type: BeaconMessageType.Disconnect
     }
 
-    await this.notifyListeners(await this.serializer.serialize(disconnectMessage), {
-      origin: Origin.WALLETCONNECT,
-      id: peerPublicKey ?? senderId
-    })
+    const serialized = await this.serializer.serialize(disconnectMessage)
+    if (generation === this.generation) {
+      await this.notifyListeners(serialized, {
+        origin: Origin.WALLETCONNECT,
+        id: peerPublicKey ?? senderId
+      })
+    }
   }
 
   private async getOrBuildSessionMeta(
@@ -736,6 +872,7 @@ export class WalletWalletConnectTransport extends Transport<
     topic: string,
     sessionOverride?: SessionTypes.Struct
   ): Promise<SessionPeerMetadata> {
+    const generation = this.generation
     const existing = this.sessionMetaByTopic.get(topic)
     if (existing) {
       return existing
@@ -753,8 +890,10 @@ export class WalletWalletConnectTransport extends Transport<
       methods: tezosNamespace?.methods ?? DEFAULT_METHODS,
       events: tezosNamespace?.events ?? DEFAULT_EVENTS
     }
-    this.sessionMetaByTopic.set(topic, meta)
-    this.topicByPeerPublicKey.set(peerPublicKey, topic)
+    if (generation === this.generation && !this.closedTopics.has(topic)) {
+      this.sessionMetaByTopic.set(topic, meta)
+      this.topicByPeerPublicKey.set(peerPublicKey, topic)
+    }
 
     return meta
   }

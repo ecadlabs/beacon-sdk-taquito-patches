@@ -21,7 +21,10 @@ import {
   TransportType
 } from '@ecadlabs/beacon-types'
 import { getKeypairFromSeed } from '@ecadlabs/beacon-utils'
-import { serializeBeaconErrorToJsonRpcError } from '@ecadlabs/beacon-transport-walletconnect'
+import {
+  initWalletConnectSignClient,
+  serializeBeaconErrorToJsonRpcError
+} from '@ecadlabs/beacon-transport-walletconnect'
 import { WalletWalletConnectTransport } from '../../src/transports/WalletWalletConnectTransport'
 import { WalletWalletConnectTransport as ExportedTransport } from '../../src/index'
 
@@ -128,6 +131,265 @@ describe('WalletWalletConnectTransport', () => {
     )
   }
 
+  it('bounds initialization ownership across every old/new completion order', async () => {
+    // Two generations, both init results and settlement orders, connect/listen/account update.
+    for (const start of ['connect', 'listen', 'update'] as const) {
+      for (const oldFails of [false, true]) {
+        for (const newFails of [false, true]) {
+          for (const order of ['old-first', 'new-first']) {
+            const transport = await createTransport()
+            const oldClient = createMockSignClient()
+            const newClient = createMockSignClient()
+            const oldGate = Promise.withResolvers<void>()
+            const newGate = Promise.withResolvers<void>()
+            vi.mocked(initWalletConnectSignClient)
+              .mockImplementationOnce(async () => {
+                await oldGate.promise
+                if (oldFails) throw new Error('old init failed')
+                return oldClient as never
+              })
+              .mockImplementationOnce(async () => {
+                await newGate.promise
+                if (newFails) throw new Error('new init failed')
+                return newClient as never
+              })
+            const oldAttempt = (
+              start === 'update'
+                ? transport.updateSessionAccounts('old-topic', [])
+                : transport[start]()
+            ).catch(() => undefined)
+            await transport.doClientCleanup()
+            const newAttempt = transport.connect().catch(() => undefined)
+            if (order === 'old-first') {
+              oldGate.resolve()
+              await oldAttempt
+              newGate.resolve()
+            } else {
+              newGate.resolve()
+              await newAttempt
+              oldGate.resolve()
+            }
+            await Promise.all([oldAttempt, newAttempt])
+            expect(transport.connectionStatus).toBe(
+              newFails ? TransportStatus.NOT_CONNECTED : TransportStatus.CONNECTED
+            )
+            expect(oldClient.on).not.toHaveBeenCalled()
+            expect(oldClient.session.get).not.toHaveBeenCalled()
+            expect(newClient.on).toHaveBeenCalledTimes(newFails ? 0 : 4)
+            if (!newFails) {
+              const peer = new ExtendedWalletConnectPairingRequest(
+                'peer',
+                'dApp',
+                hexPk('b'),
+                '2',
+                'sender',
+                'wc:new-session'
+              )
+              await transport.addPeer(peer)
+              expect(newClient.pair).toHaveBeenCalledTimes(1)
+              expect(oldClient.pair).not.toHaveBeenCalled()
+            }
+            await transport.doClientCleanup()
+          }
+        }
+      }
+    }
+  })
+
+  it('bounds request ownership across close and delivery schedules', async () => {
+    for (const close of ['session_delete', 'session_expire', 'cleanup', 'outbound']) {
+      for (const phase of ['receiving', 'ready', 'sending']) {
+        if (close === 'outbound' && phase === 'receiving') continue
+        const transport = await createTransport()
+        currentSignClient = createMockSignClient()
+        const messages: string[] = []
+        await transport.addListener((message) => {
+          messages.push(message)
+        })
+        await transport.connect()
+        currentSignClient.seedSession('owned-topic', {
+          topic: 'owned-topic',
+          namespaces: { tezos: { accounts: [], methods: ['tezos_send'], events: [] } },
+          peer: { publicKey: hexPk('e'), metadata: { name: 'dApp', url: '', icons: [] } }
+        })
+        const disconnectGate = Promise.withResolvers<void>()
+        let disconnecting: Promise<void> | undefined
+        const disconnectMessage = await serializer.serialize({
+          id: 'local-disconnect',
+          version: '2',
+          senderId: 'wallet',
+          type: BeaconMessageType.Disconnect
+        })
+        if (close === 'outbound') {
+          await transport.updateSessionAccounts('owned-topic', [])
+          currentSignClient.disconnect.mockImplementationOnce(() => disconnectGate.promise)
+        }
+        const receiving = currentSignClient.trigger('session_request', {
+          id: 401,
+          topic: 'owned-topic',
+          params: {
+            chainId: 'tezos:mainnet',
+            request: { method: 'tezos_send', params: {} }
+          }
+        })
+        const terminate = async () => {
+          if (close === 'outbound') {
+            disconnecting = transport.send(disconnectMessage, {
+              id: 'peer',
+              name: 'dApp',
+              publicKey: hexPk('e'),
+              version: '2'
+            })
+            await vi.waitFor(() => expect(currentSignClient.disconnect).toHaveBeenCalledTimes(1))
+          } else if (close === 'cleanup') {
+            await transport.doClientCleanup()
+          } else {
+            await currentSignClient.trigger(close, { topic: 'owned-topic' })
+          }
+        }
+        if (phase === 'receiving') {
+          await terminate()
+          await receiving
+          const requests = await Promise.all(
+            messages.map((message) => serializer.deserialize(message))
+          )
+          expect(
+            requests.filter((message) => message.type === BeaconMessageType.OperationRequest)
+          ).toHaveLength(0)
+        } else {
+          await receiving
+          const request = await serializer.deserialize(messages[0])
+          const response = await serializer.serialize({
+            id: request.id,
+            version: '2',
+            senderId: 'wallet',
+            type: BeaconMessageType.Error,
+            errorType: BeaconErrorType.ABORTED_ERROR
+          })
+          if (phase === 'ready') {
+            await terminate()
+            await transport.send(response)
+            expect(currentSignClient.respond).not.toHaveBeenCalled()
+          } else {
+            const delivery = Promise.withResolvers<void>()
+            currentSignClient.respond.mockImplementationOnce(() => delivery.promise)
+            const first = transport.send(response)
+            const second = transport.send(response)
+            await vi.waitFor(() => expect(currentSignClient.respond).toHaveBeenCalledTimes(1))
+            await terminate()
+            delivery.reject(new Error('relay failed'))
+            await Promise.all([
+              expect(first).rejects.toThrow('relay failed'),
+              expect(second).rejects.toThrow('relay failed')
+            ])
+            await transport.send(response)
+            expect(currentSignClient.respond).toHaveBeenCalledTimes(1)
+          }
+        }
+        disconnectGate.resolve()
+        await disconnecting
+        await transport.doClientCleanup()
+      }
+    }
+  })
+
+  it('does not initialize a client from work that cleanup already invalidated', async () => {
+    for (const operation of ['send', 'addPeer']) {
+      const transport = await createTransport()
+      const response = await serializer.serialize({
+        id: 'old-response',
+        version: '2',
+        senderId: 'wallet',
+        type: BeaconMessageType.Disconnect
+      })
+      const initializations = vi.mocked(initWalletConnectSignClient).mock.calls.length
+      const pending =
+        operation === 'send'
+          ? transport.send(response)
+          : transport.addPeer(
+              new ExtendedWalletConnectPairingRequest(
+                'peer',
+                'dApp',
+                hexPk('b'),
+                '2',
+                'sender',
+                'wc:old'
+              )
+            )
+      await transport.doClientCleanup()
+      await pending
+      expect(vi.mocked(initWalletConnectSignClient)).toHaveBeenCalledTimes(initializations)
+    }
+  })
+
+  it('failed proposal rejection retains correlation for retry', async () => {
+    const transport = await createTransport()
+    const received: unknown[] = []
+    await transport.addListener((message) => {
+      received.push(message)
+    })
+    await transport.connect()
+    await currentSignClient.trigger('session_proposal', {
+      id: 901,
+      params: {
+        id: 901,
+        proposer: {
+          publicKey: hexPk('d'),
+          metadata: { name: 'dApp', url: 'https://dapp.example', icons: [] }
+        },
+        requiredNamespaces: {
+          tezos: { chains: ['tezos:mainnet'], methods: ['tezos_getAccounts'], events: [] }
+        }
+      }
+    })
+    const request = (await serializer.deserialize(received[0] as string)) as PermissionRequest
+    const response = await serializer.serialize({
+      id: request.id,
+      version: '2',
+      senderId: 'wallet',
+      type: BeaconMessageType.Error,
+      errorType: BeaconErrorType.NETWORK_NOT_SUPPORTED
+    })
+    currentSignClient.reject.mockRejectedValueOnce(new Error('temporary relay failure'))
+    await expect(transport.send(response)).rejects.toThrow('temporary relay failure')
+    await transport.send(response)
+    const calls = currentSignClient.reject.mock.calls.length
+    await transport.doClientCleanup()
+    expect(calls).toBe(2)
+  })
+
+  it('retains the acknowledgement failure without approving twice', async () => {
+    const transport = await createTransport()
+    await transport.connect()
+    await currentSignClient.trigger('session_proposal', {
+      id: 902,
+      params: {
+        id: 902,
+        proposer: { publicKey: hexPk('d'), metadata: { name: 'dApp', url: '', icons: [] } },
+        requiredNamespaces: { tezos: { chains: ['tezos:mainnet'], methods: [], events: [] } }
+      }
+    })
+    const failure = new Error('acknowledgement failed')
+    currentSignClient.approve.mockResolvedValueOnce({
+      topic: 'approved-topic',
+      acknowledged: vi.fn().mockRejectedValue(failure)
+    })
+    const response = await serializer.serialize({
+      id: 'wc-proposal-902',
+      version: '2',
+      senderId: 'wallet',
+      type: BeaconMessageType.PermissionResponse,
+      publicKey: pk,
+      address: pkh,
+      network: { type: NetworkType.MAINNET },
+      scopes: []
+    })
+    await expect(transport.send(response)).rejects.toBe(failure)
+    await expect(transport.send(response)).rejects.toBe(failure)
+    expect(currentSignClient.approve).toHaveBeenCalledTimes(1)
+    await transport.doClientCleanup()
+  })
+
   it('is exported from @ecadlabs/beacon-wallet and reports WALLETCONNECT type', async () => {
     expect(ExportedTransport).toBe(WalletWalletConnectTransport)
     const transport = await createTransport()
@@ -195,7 +457,9 @@ describe('WalletWalletConnectTransport', () => {
     })
 
     expect(received).toHaveLength(1)
-    const permReq = (await serializer.deserialize(received[0].message as string)) as PermissionRequest
+    const permReq = (await serializer.deserialize(
+      received[0].message as string
+    )) as PermissionRequest
     expect(permReq.type).toBe(BeaconMessageType.PermissionRequest)
     expect(permReq.network.type).toBe(NetworkType.MAINNET)
     expect(permReq.appMetadata.name).toBe('Example dApp')
@@ -266,7 +530,9 @@ describe('WalletWalletConnectTransport', () => {
       }
     })
 
-    const permReq = (await serializer.deserialize(received[0].message as string)) as PermissionRequest
+    const permReq = (await serializer.deserialize(
+      received[0].message as string
+    )) as PermissionRequest
     const permResp: PermissionResponse = {
       id: permReq.id,
       version: '2',
@@ -314,7 +580,9 @@ describe('WalletWalletConnectTransport', () => {
       }
     })
 
-    const permReq = (await serializer.deserialize(received[0].message as string)) as PermissionRequest
+    const permReq = (await serializer.deserialize(
+      received[0].message as string
+    )) as PermissionRequest
     const errResp: ErrorResponse = {
       id: permReq.id,
       version: '2',
@@ -371,9 +639,7 @@ describe('WalletWalletConnectTransport', () => {
           method: 'tezos_send',
           params: {
             account: pkh,
-            operations: [
-              { kind: TezosOperationType.TRANSACTION, amount: '1000', destination: pkh }
-            ]
+            operations: [{ kind: TezosOperationType.TRANSACTION, amount: '1000', destination: pkh }]
           }
         }
       }
