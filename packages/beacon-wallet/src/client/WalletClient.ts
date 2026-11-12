@@ -40,6 +40,7 @@ import {
   SigningType,
   BeaconErrorType
 } from '@ecadlabs/beacon-types'
+import type { SignClientTypes } from '@walletconnect/types'
 import {
   buildPermissionResponse,
   buildOperationResponse,
@@ -49,6 +50,7 @@ import {
   type PermissionResponseBuilderOptions
 } from '../interceptors/buildResponseInput'
 import { WalletP2PTransport } from '../transports/WalletP2PTransport'
+import { WalletWalletConnectTransport } from '../transports/WalletWalletConnectTransport'
 import { IncomingRequestInterceptor } from '../interceptors/IncomingRequestInterceptor'
 import { OutgoingResponseInterceptor } from '../interceptors/OutgoingResponseInterceptor'
 import { WalletClientOptions } from './WalletClientOptions'
@@ -83,6 +85,7 @@ export class WalletClient extends Client {
 
   private readonly permissionManager: PermissionManager
   private readonly appMetadataManager: AppMetadataManager
+  private readonly walletConnectOptions?: SignClientTypes.Options
   private connectionAttempt: Promise<void> | undefined
   private deliveryGeneration = Symbol('Wallet connection')
   private destroyed = false
@@ -98,12 +101,26 @@ export class WalletClient extends Client {
       storage: config && config.storage ? config.storage : new LocalStorage(),
       ...config
     })
+    this.walletConnectOptions = config.walletConnectOptions
     this.permissionManager = new PermissionManager(this.storage)
     this.appMetadataManager = new AppMetadataManager(this.storage)
   }
 
   public async init(): Promise<TransportType> {
     const keyPair = await this.keyPair // We wait for keypair here so the P2P Transport creation is not delayed and causing issues
+    if (this.walletConnectOptions) {
+      const wcTransport = new WalletWalletConnectTransport(
+        this.name,
+        keyPair,
+        this.storage,
+        this.walletConnectOptions,
+        this.iconUrl,
+        this.appUrl
+      )
+
+      return super.init(wcTransport)
+    }
+
     const p2pTransport = new WalletP2PTransport(
       this.name,
       keyPair,
@@ -553,12 +570,13 @@ export class WalletClient extends Client {
       return (await this.transport).getPeers()
     }
 
-    const [p2pPeers, postMessagePeers] = await Promise.all([
+    const [p2pPeers, postMessagePeers, walletConnectPeers] = await Promise.all([
       this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_WALLET),
-      this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET)
+      this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET),
+      this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_WALLET)
     ])
 
-    return [...(p2pPeers ?? []), ...(postMessagePeers ?? [])]
+    return [...(p2pPeers ?? []), ...(postMessagePeers ?? []), ...(walletConnectPeers ?? [])]
   }
 
   /**

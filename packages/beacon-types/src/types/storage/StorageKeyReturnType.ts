@@ -5,6 +5,7 @@ import {
   ExtendedP2PPairingRequest,
   AppMetadata,
   PermissionInfo,
+  ExtendedWalletConnectPairingRequest,
   ExtendedWalletConnectPairingResponse,
   RequestProofOfEventChallengeInput
 } from '../..'
@@ -23,6 +24,7 @@ export interface StorageKeyReturnType {
   [StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP]: ExtendedPostMessagePairingResponse[]
   [StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET]: ExtendedPostMessagePairingRequest[]
   [StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP]: ExtendedWalletConnectPairingResponse[]
+  [StorageKey.TRANSPORT_WALLETCONNECT_PEERS_WALLET]: ExtendedWalletConnectPairingRequest[]
   [StorageKey.LAST_SELECTED_WALLET]:
     | {
         key: string
