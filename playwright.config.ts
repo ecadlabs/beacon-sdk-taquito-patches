@@ -46,8 +46,23 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: /ui-viewport-rendering\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome']
+      }
+    },
+    {
+      name: 'chromium-ui',
+      testMatch: /ui-viewport-rendering\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome']
+      }
+    },
+    {
+      name: 'webkit-ui',
+      testMatch: /ui-viewport-rendering\.spec\.ts/,
+      use: {
+        ...devices['Desktop Safari']
       }
     }
     // {
@@ -55,27 +70,7 @@ export default defineConfig({
     //   use: {
     //     ...devices['Desktop Firefox']
     //   }
-    // },
-    // {
-    //   name: 'webkit',
-    //   use: {
-    //     ...devices['Desktop Safari']
-    //   }
     // }
-
-    // TODO: add a mobile-emulation project
-    // {
-    //   name: 'Mobile Chrome',
-    //   use: {
-    //     ...devices['Pixel 7']
-    //   }
-    // }
-    // {
-    //   name: 'Mobile Safari',
-    //   use: {
-    //     ...devices['iPhone 12'],
-    //   },
-    // },
   ],
 
   webServer: [

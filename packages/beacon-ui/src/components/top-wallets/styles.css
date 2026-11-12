@@ -119,3 +119,19 @@
     transform: scale(0.8);
   }
 }
+
+@media only screen and (max-height: 500px) {
+  .top-wallets-wrapper {
+    margin-bottom: 0.4em;
+  }
+
+  .top-wallets-wallets-main {
+    margin-top: 0.5em;
+    gap: 0.5em;
+  }
+
+  .top-wallets-other-wallets {
+    padding: 0.6em;
+    gap: 0.5em;
+  }
+}

@@ -1,12 +1,25 @@
+:host {
+  all: initial;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
 .toast-wrapper-show {
+  box-sizing: border-box;
   user-select: none;
   cursor: move;
+  width: calc(100vw - 24px);
   max-width: 460px;
   overflow: hidden;
   background-color: white;
   position: fixed;
-  top: 12px;
-  right: 12px;
+  top: max(12px, env(safe-area-inset-top, 12px));
+  right: max(12px, env(safe-area-inset-right, 12px));
   border-radius: 6px;
   z-index: 1000000;
   -webkit-box-shadow: 0px 4px 11px -4px rgba(0, 0, 0, 0.45);
@@ -17,14 +30,16 @@
 }
 
 .toast-wrapper-hide {
+  box-sizing: border-box;
   user-select: none;
   cursor: move;
+  width: calc(100vw - 24px);
   max-width: 460px;
   overflow: hidden;
   background-color: white;
   position: fixed;
-  top: 12px;
-  right: 12px;
+  top: max(12px, env(safe-area-inset-top, 12px));
+  right: max(12px, env(safe-area-inset-right, 12px));
   border-radius: 6px;
   z-index: 1000000;
   -webkit-box-shadow: 0px 4px 11px -4px rgba(0, 0, 0, 0.45);
@@ -58,6 +73,7 @@
 }
 
 .toast-header {
+  box-sizing: border-box;
   padding: 0px 0.6em 0px 1.2em;
   display: flex;
   align-items: center;
@@ -68,6 +84,7 @@
 
 .toast-header img {
   width: 24px;
+  flex-shrink: 0;
 }
 
 .toast-header h3 {
@@ -75,19 +92,25 @@
   color: #334155;
   font-size: 0.8em;
   margin: 14px auto 13px 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .toast-label {
   margin: 1em 0em 1em 0em;
   color: #334155;
   font-size: 0.9em;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .toast-button-icon {
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .toast-body {
+  box-sizing: border-box;
   padding: 0.6em 1.2em;
 }
 
@@ -95,12 +118,16 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .toast-action-label {
   margin: 0.8em 0em;
   font-size: 0.8em;
   color: #64748b;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .toast-action-bold {
@@ -116,6 +143,7 @@
   transition: all ease 0.2s;
   border-radius: 6px;
   padding: 0.4em 0.8em;
+  flex-shrink: 0;
 }
 
 .toast-action-button:hover {

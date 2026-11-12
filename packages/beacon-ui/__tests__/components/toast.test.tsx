@@ -4,14 +4,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import Toast from '../../src/components/toast/index'
 
 // --- Mock external dependencies ---
-// Mock useDrag to return a function that, when called, returns an empty object.
-vi.mock('../../src/components/toast/hooks/useDrag', () => ({
-  __esModule: true,
-  default: () => {
-    return () => ({})
-  }
-}))
-
+// Use the real useDrag hook so drag state and reset behavior are tested end-to-end with Toast.
 // Mock isMobileOS so that by default it returns false (non-mobile).
 vi.mock('../../src/utils/platform', () => ({
   isMobileOS: vi.fn(() => false)
@@ -172,5 +165,90 @@ describe('Toast Component', () => {
     // the initial position remains [0, 0] so the transform should be translate3d(0px, 0px, 0)
     const { container } = render(<Toast label="Test Toast" open={true} onClickClose={vi.fn()} />)
     expect(container.firstChild).toHaveStyle('transform: translate3d(0px, 0px, 0)')
+  })
+
+  test('does not set inline position: absolute or minWidth: 460 so CSS position: fixed and responsive width govern layout', () => {
+    const { container } = render(<Toast label="Test Toast" open={true} onClickClose={vi.fn()} />)
+    const wrapper = container.firstChild as HTMLElement
+    expect(wrapper.style.position).not.toBe('absolute')
+    expect(wrapper.style.minWidth).toBe('')
+  })
+
+  test('immediately restores actions and clears the 3000ms timer when transitioning from "Request sent to" to another label', () => {
+    const actions = [
+      {
+        text: 'Action 1',
+        actionText: 'Reset Connection',
+        actionCallback: vi.fn()
+      }
+    ]
+    const { rerender } = render(
+      <Toast label="Request sent to user" open={true} onClickClose={vi.fn()} actions={actions} />
+    )
+
+    expect(screen.queryByText('Action 1')).not.toBeInTheDocument()
+    expect(vi.getTimerCount()).toBe(1)
+
+    // Before 3000ms elapses, the toast transitions to "Awaiting confirmation in Wallet"
+    act(() => {
+      vi.advanceTimersByTime(200)
+      rerender(
+        <Toast
+          label="Awaiting confirmation in Wallet"
+          open={true}
+          onClickClose={vi.fn()}
+          actions={actions}
+        />
+      )
+    })
+
+    // Actions should immediately be visible and the 3000ms timer must be cleaned up
+    expect(screen.getByText('Action 1')).toBeInTheDocument()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('resets both Toast drag position and useDrag internal offset when toast closes and reopens', () => {
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1280 })
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 720 })
+
+    const { container, rerender } = render(
+      <Toast label="Test Toast" open={true} onClickClose={vi.fn()} />
+    )
+    const wrapper = container.firstChild as HTMLElement
+
+    // Stub bounding rect at top-right (width 460, height 60, right 12, top 12 -> left 808)
+    vi.spyOn(wrapper, 'getBoundingClientRect').mockReturnValue({
+      x: 808,
+      y: 12,
+      left: 808,
+      top: 12,
+      right: 1268,
+      bottom: 72,
+      width: 460,
+      height: 60,
+      toJSON: () => ({})
+    })
+
+    // Drag left by 100px and down by 80px
+    fireEvent.mouseDown(wrapper, { clientX: 900, clientY: 30 })
+    fireEvent.mouseMove(document, { clientX: 800, clientY: 110 })
+    fireEvent.mouseUp(document)
+    expect(wrapper).toHaveStyle('transform: translate3d(-100px, 80px, 0)')
+
+    // Close and reopen the toast
+    act(() => {
+      rerender(<Toast label="Test Toast" open={false} onClickClose={vi.fn()} />)
+    })
+    act(() => {
+      rerender(<Toast label="Test Toast" open={true} onClickClose={vi.fn()} />)
+    })
+
+    expect(wrapper).toHaveStyle('transform: translate3d(0px, 0px, 0)')
+
+    // Start a new drag by (-10px, +15px): must start from [0, 0] rather than snapping back to [-100, 80]
+    fireEvent.mouseDown(wrapper, { clientX: 900, clientY: 30 })
+    fireEvent.mouseMove(document, { clientX: 890, clientY: 45 })
+    fireEvent.mouseUp(document)
+    expect(wrapper).toHaveStyle('transform: translate3d(-10px, 15px, 0)')
   })
 })

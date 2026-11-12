@@ -11,7 +11,8 @@ import { getColorMode } from '../../utils/colorMode'
 let initDone: boolean = false
 const config$ = new Subject<ToastConfig | undefined>()
 const show$ = new Subject<boolean>()
-let lastTimer: NodeJS.Timeout | undefined
+let lastTimer: ReturnType<typeof setTimeout> | undefined
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>()
 
 // Track when openToast was last called and how many consecutive calls were made.
 let lastCallTimestamp = 0
@@ -19,6 +20,30 @@ let requestCount = 0
 const BASE_DELAY = 500
 const COOLDOWN = 2000
 const DELAY_INCREMENT = 100
+
+const clearPendingTimers = () => {
+  pendingTimers.forEach((timerId) => clearTimeout(timerId))
+  pendingTimers.clear()
+}
+
+const clearAutoCloseTimer = () => {
+  if (lastTimer !== undefined) {
+    clearTimeout(lastTimer)
+    lastTimer = undefined
+  }
+}
+
+const applyToastConfig = (config: ToastConfig) => {
+  clearAutoCloseTimer()
+  config$.next(config)
+  show$.next(true)
+  if (config.timer) {
+    lastTimer = setTimeout(() => {
+      lastTimer = undefined
+      closeToast()
+    }, config.timer)
+  }
+}
 
 const createToast = (config: ToastConfig) => {
   // Create the host element
@@ -36,9 +61,9 @@ const createToast = (config: ToastConfig) => {
   const container = document.createElement('div')
   shadowRoot.appendChild(container)
 
-  // Render the Toast into the container within the Shadow DOM
-  setTimeout(() => createRoot(container).render(<ToastRoot {...config} />), 50)
   initDone = true
+  // Render the Toast synchronously into the container within the Shadow DOM
+  createRoot(container).render(<ToastRoot {...config} />)
 }
 
 const openToast = (config: ToastConfig) => {
@@ -56,39 +81,49 @@ const openToast = (config: ToastConfig) => {
   // subsequent requests add DELAY_INCREMENT ms for each additional call.
   const timeoutDelay = requestCount === 1 ? 0 : BASE_DELAY + (requestCount - 2) * DELAY_INCREMENT
 
-  // If the toast hasn't been initialized, create it immediately.
   if (!initDone) {
+    clearPendingTimers()
+    applyToastConfig(config)
     createToast(config)
+  } else if (timeoutDelay === 0) {
+    clearPendingTimers()
+    applyToastConfig(config)
   } else {
-    setTimeout(() => config$.next(config), timeoutDelay)
+    const timerId = setTimeout(() => {
+      pendingTimers.delete(timerId)
+      applyToastConfig(config)
+    }, timeoutDelay)
+    pendingTimers.add(timerId)
   }
-
-  // Clear any existing timer for auto-hiding the toast.
-  if (lastTimer) {
-    clearTimeout(lastTimer)
-    lastTimer = undefined
-  }
-
-  lastTimer = config.timer ? setTimeout(() => closeToast(), config.timer) : undefined
-
-  show$.next(true)
 }
 
 const closeToast = () => {
+  clearPendingTimers()
+  clearAutoCloseTimer()
+  requestCount = 0
+  lastCallTimestamp = 0
   config$.next(undefined)
   show$.next(false)
 }
 
 const ToastRoot = (props: ToastConfig) => {
-  const [config, setConfig] = useState<ToastConfig | undefined>(props)
-  const [isOpen, setIsOpen] = useState(true)
-  const [mount, setMount] = useState(false)
+  const [config, setConfig] = useState<ToastConfig | undefined>(() =>
+    config$.hasEmitted() ? config$.getValue() : props
+  )
+  const [isOpen, setIsOpen] = useState<boolean>(() =>
+    show$.hasEmitted() ? Boolean(show$.getValue()) : true
+  )
+  const [mount, setMount] = useState<boolean>(() => {
+    const initialConfig = config$.hasEmitted() ? config$.getValue() : props
+    const initialOpen = show$.hasEmitted() ? Boolean(show$.getValue()) : true
+    return Boolean(initialConfig && initialOpen)
+  })
 
   useEffect(() => {
     const subs: Subscription[] = []
     subs.push(
-      config$.subscribe((config) => {
-        setConfig(config)
+      config$.subscribe((nextConfig) => {
+        setConfig(nextConfig)
       })
     )
     subs.push(
@@ -101,14 +136,11 @@ const ToastRoot = (props: ToastConfig) => {
 
   useEffect(() => {
     // Unmount immediately if the toast is closed.
-    if (!config) {
+    if (!config || !isOpen) {
       setMount(false)
       return
     }
-    if (isOpen) {
-      setMount(true)
-      return
-    }
+    setMount(true)
   }, [isOpen, config])
 
   return (

@@ -30,14 +30,17 @@ const createAlert = (config: AlertConfig) => {
   const container = document.createElement('div')
   shadowRoot.appendChild(container)
 
-  // Render the Alert into the Shadow DOM
-  setTimeout(() => createRoot(container).render(<AlertRoot {...config} />), 50)
   initDone = true
+  // Render the Alert synchronously into the Shadow DOM
+  createRoot(container).render(<AlertRoot {...config} />)
 }
 
 const openAlert = (config: AlertConfig) => {
-  initDone ? config$.next(config) : createAlert(config)
+  config$.next(config)
   show$.next(true)
+  if (!initDone) {
+    createAlert(config)
+  }
 }
 
 const closeAlert = () => {
@@ -52,9 +55,15 @@ const closeAlerts = () => {
 }
 
 const AlertRoot = (props: AlertConfig) => {
-  const [isOpen, setIsOpen] = useState(true)
-  const [mount, setMount] = useState(false)
-  const [config, setConfig] = useState<AlertConfig>(props)
+  const [isOpen, setIsOpen] = useState<boolean>(() =>
+    show$.hasEmitted() ? Boolean(show$.getValue()) : true
+  )
+  const [mount, setMount] = useState<boolean>(() =>
+    show$.hasEmitted() ? Boolean(show$.getValue()) : true
+  )
+  const [config, setConfig] = useState<AlertConfig>(() =>
+    config$.hasEmitted() ? (config$.getValue() as AlertConfig) : props
+  )
 
   useEffect(() => {
     const subs: Subscription[] = []
@@ -64,10 +73,14 @@ const AlertRoot = (props: AlertConfig) => {
   }, [])
 
   useEffect(() => {
-    // we need to wait a little before unmounting the component
-    // because otherwise the "fade-out" animation
-    // won't have enough time to play
-    isOpen ? setMount(true) : setTimeout(() => setMount(false), 300)
+    // Wait before unmounting so the fade-out animation can complete,
+    // and cancel the timer if the alert is reopened before 300ms.
+    if (isOpen) {
+      setMount(true)
+      return
+    }
+    const timer = setTimeout(() => setMount(false), 300)
+    return () => clearTimeout(timer)
   }, [isOpen])
 
   const onCloseHandler = () => {
@@ -82,15 +95,16 @@ const AlertRoot = (props: AlertConfig) => {
     closeOnBackdropClick: true
   }
 
-  const Alert = () => {
-    return config.pairingPayload ? (
-      <PairingAlert {...filteredProps} />
-    ) : (
-      <InfoAlert {...filteredProps} />
-    )
-  }
-
-  return <div className={`theme__${getColorMode()}`}>{mount && <Alert />} </div>
+  return (
+    <div className={`theme__${getColorMode()}`}>
+      {mount &&
+        (config.pairingPayload ? (
+          <PairingAlert {...filteredProps} />
+        ) : (
+          <InfoAlert {...filteredProps} />
+        ))}
+    </div>
+  )
 }
 
 export { openAlert, closeAlert, closeAlerts }

@@ -1,4 +1,5 @@
 .qr-wrapper {
+  box-sizing: border-box;
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -6,7 +7,8 @@
   border: 1px solid #aaaaaa42;
   border-radius: 10px;
   padding: 30px;
-  height: 200px;
+  min-height: 200px;
+  height: auto;
 }
 
 .qr-left {
@@ -100,7 +102,9 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 340px;
+    min-height: 280px;
+    height: auto;
+    padding: 1.2em;
   }
 
   .qr-left {

@@ -1,4 +1,6 @@
 .info-wrapper {
+  box-sizing: border-box;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -53,28 +55,39 @@
 }
 
 .info-data {
+  box-sizing: border-box;
   font-size: 12.8px;
   font-weight: 300;
   color: #7c828b;
   line-height: 1.25rem;
-  margin: 6px 0px 12px 0px;
   margin: 0px;
-  overflow: scroll;
-  max-height: 300px;
+  width: 100%;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  overflow-x: auto;
+  max-height: 240px;
 }
 .info-buttons {
+  box-sizing: border-box;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 0.6rem;
+  width: 100%;
 }
 
 .info-button {
+  box-sizing: border-box;
   border-radius: 6px;
   background-color: #3880ff;
   border: 1px solid #3880ff;
   color: white;
   padding: 0.6rem 1.2rem;
   width: 180px;
+  max-width: 100%;
   transition: all ease 0.2s;
   cursor: pointer;
   margin-top: 1rem;
@@ -85,12 +98,14 @@
   background-color: #166afc;
 }
 .info-button-secondary {
+  box-sizing: border-box;
   border-radius: 6px;
   background-color: transparent;
   border: 1px solid #3880ff;
   color: #3880ff;
   padding: 0.6em 1.2rem;
   width: 180px;
+  max-width: 100%;
   transition: all ease 0.2s;
   cursor: pointer;
   margin-top: 1rem;
@@ -141,7 +156,6 @@ button#qr-code-icon svg {
   }
 
   .info-wrapper {
-    max-height: 180px;
     padding: 1.2em;
     position: relative;
   }

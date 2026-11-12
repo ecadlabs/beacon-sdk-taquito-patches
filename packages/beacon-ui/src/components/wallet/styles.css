@@ -164,3 +164,16 @@
     padding: 1.25em;
   }
 }
+
+@media only screen and (max-height: 500px) {
+  .wallet-main,
+  .wallet-main-mobile {
+    padding: 0.5em 10px;
+    gap: 0.4em;
+  }
+
+  .wallet-main-right img {
+    width: 2.2em;
+    height: 2.2em;
+  }
+}

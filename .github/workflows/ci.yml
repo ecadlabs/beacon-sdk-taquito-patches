@@ -80,6 +80,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:
@@ -100,3 +102,30 @@ jobs:
 
       - name: Run end-to-end tests
         run: ./scripts/npm11.sh run e2e:smoke
+
+      - name: Run UI viewport rendering tests (when UI-related files change)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            echo "Push event: running UI viewport suite."
+            ./scripts/npm11.sh run e2e:ui
+            exit 0
+          fi
+          BASE_REF="origin/${PR_BASE_REF:-taquito-patches}"
+          CHANGED=$(git diff --name-only "$BASE_REF"...HEAD -- \
+            'packages/beacon-ui/**' \
+            'packages/beacon-dapp/src/events.ts' \
+            'e2e/ui-viewport-rendering.spec.ts' \
+            'playwright.config.ts' \
+            'webpack.config.js' \
+            'package.json' \
+            'package-lock.json')
+          if [ -n "$CHANGED" ]; then
+            echo "UI-related changes detected:"
+            echo "$CHANGED"
+            ./scripts/npm11.sh run e2e:ui
+          else
+            echo "No UI-related changes detected; skipping e2e:ui matrix."
+          fi

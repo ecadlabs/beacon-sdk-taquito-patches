@@ -48,21 +48,25 @@ const Toast: React.FC<ToastProps> = (props: ToastProps) => {
 
   const bindDrag = useDrag(({ offset: [mx, my] }) => {
     setPosition([mx, my])
-  })
+  }, props.open)
 
   const isMobile = isMobileOS(window)
 
   useEffect(() => {
-    if (isRequestSentToast) {
-      setShowMoreInfo(false)
-      setTimeout(() => {
-        setShowMoreInfo(true)
-      }, 3000)
+    if (!isRequestSentToast) {
+      setShowMoreInfo(true)
+      return
     }
+    setShowMoreInfo(false)
+    const timer = setTimeout(() => {
+      setShowMoreInfo(true)
+    }, 3000)
+    return () => clearTimeout(timer)
   }, [isRequestSentToast])
 
-  // Reset the animation state when the toast is reopened
+  // Reset the animation and drag state when the toast opens or closes
   useEffect(() => {
+    setPosition([0, 0])
     if (props.open) {
       setAnimationEnded(false)
     }
@@ -79,10 +83,8 @@ const Toast: React.FC<ToastProps> = (props: ToastProps) => {
     <div
       onAnimationEnd={handleAnimationEnd}
       style={{
-        position: 'absolute',
         transform: `translate3d(${x}px, ${y}px, 0)`,
         touchAction: 'none',
-        minWidth: !isMobile ? 460 : undefined,
         // If the toast is open and the entrance animation is complete, remove inline animation
         // so that drag transforms take effect. Otherwise (e.g. toast is closing) let CSS handle it.
         animation: props.open && animationEnded ? 'none' : undefined
