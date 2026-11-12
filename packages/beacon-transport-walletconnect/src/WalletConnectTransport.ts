@@ -132,14 +132,14 @@ export class WalletConnectTransport<
       if (this.released) {
         return
       }
-      await super.connect()
-      if (this.released) {
-        await super.disconnect()
+      if (isLeader) {
+        await super.connect()
+        if (this.released) {
+          await super.disconnect()
 
-        return
-      }
-
-      if (!isLeader) {
+          return
+        }
+      } else {
         this._isConnected = TransportStatus.SECONDARY_TAB_CONNECTED
       }
 

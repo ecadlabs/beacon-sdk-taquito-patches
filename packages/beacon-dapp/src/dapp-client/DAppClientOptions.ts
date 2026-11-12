@@ -181,4 +181,11 @@ export interface DAppClientOptions {
    * check chain state before retrying an operation.
    */
   requestTimeoutMs?: number
+
+  /**
+   * Time in milliseconds to wait for a correlated wallet acknowledge before emitting
+   * BeaconEvent.WAITING_FOR_WALLET_ACK. Defaults to 5_000. Set 0 or a negative value to disable.
+   * Does not fire over WalletConnect where correlated ACKs are not supported.
+   */
+  ackTimeoutMs?: number
 }

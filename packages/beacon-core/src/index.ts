@@ -68,6 +68,14 @@ export {
 // Transport
 export { Transport, getPairingPeerOwnership, MessageBasedClient, CommunicationClient }
 export type { ClientTransport } from './transports/ClientTransport'
+export type {
+  TransportHealth,
+  TransportStatusChangeReason,
+  TransportStatusChangedInfo,
+  ConnectionInfo,
+  WaitingForWalletAckInfo,
+  PendingRequestInfo
+} from '@ecadlabs/beacon-types'
 
 // Storage
 export { ChromeStorage, LocalStorage, WCStorage, IndexedDBStorage, StorageValidator, getStorage }

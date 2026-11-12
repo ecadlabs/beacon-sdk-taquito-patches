@@ -70,6 +70,10 @@ import {
   SimulatedProofOfEventChallengeResponse,
   RequestSimulatedProofOfEventChallengeInput,
   TransportStatus,
+  TransportHealth,
+  TransportStatusChangedInfo,
+  ConnectionInfo,
+  PendingRequestInfo,
   Storage
   // PermissionRequestV3
   // RequestEncryptPayloadInput,
@@ -187,6 +191,7 @@ const logger = new Logger('DAppClient')
 // Only permission requests get a default deadline. Beacon cannot cancel a request at the wallet,
 // so a timed-out operation or signature can still complete there, and a retry can pay twice.
 const DEFAULT_PERMISSION_TIMEOUT_MS = 60_000
+const DEFAULT_ACK_TIMEOUT_MS = 5_000
 // Timed-out request IDs kept so a late wallet response can still be reported.
 const LATE_RESPONSE_RETENTION = 100
 
@@ -339,6 +344,28 @@ export class DAppClient extends Client {
   })
 
   private readonly requestTimeoutMs: number | undefined
+
+  private readonly ackTimeoutMs: number
+
+  private readonly pendingRequestMetadata = new Map<
+    string,
+    {
+      key: RequestKey
+      type: BeaconMessageType
+      transport: TransportType
+      senderId?: string
+      sentAt: number
+      deadline?: number
+      acknowledged: boolean | undefined
+      ackTimer?: ReturnType<typeof setTimeout>
+    }
+  >()
+
+  private readonly observedTransports = new WeakMap<ClientTransport, () => void>()
+  private readonly transportStatusDisposers = new Set<() => void>()
+  private readonly lastEmittedTransportStatus = new WeakMap<ClientTransport, TransportStatus>()
+  private lastActiveTransport: ClientTransport | undefined
+  private isMultiTransportPairingActive: boolean = false
 
   // Insertion order is age order; the oldest entry is evicted first.
   private readonly timedOutRequests = new Map<string, TimedOutRequest>()
@@ -513,6 +540,7 @@ export class DAppClient extends Client {
     this.enableAppSwitching =
       config.enableAppSwitching === undefined ? true : Boolean(config.enableAppSwitching)
     this.requestTimeoutMs = config.requestTimeoutMs
+    this.ackTimeoutMs = config.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS
 
     // Subscribe to storage changes and update the active account if it changes on other tabs
     this.storage
@@ -635,8 +663,11 @@ export class DAppClient extends Client {
         request &&
         request.route !== 'LeaderProxy' &&
         typedMessage.type === BeaconMessageType.PermissionResponse
-      if (preparing && !this.requestTracker.beginPreparation(request.key)) {
-        return
+      if (preparing) {
+        if (!this.requestTracker.beginPreparation(request.key)) {
+          return
+        }
+        this.clearPendingRequestAckTimer(message.id, request.key)
       }
 
       let appMetadata = responseAppMetadata(message)
@@ -688,6 +719,7 @@ export class DAppClient extends Client {
       if (request.route === 'LeaderProxy') {
         if (typedMessage.type === BeaconMessageType.Acknowledge) {
           if (this.requestTracker.acknowledge(request.key)) {
+            this.markPendingRequestAcknowledged(message.id, request.key)
             this.multiTabChannel.postMessage({
               type: 'RESPONSE',
               id: message.id,
@@ -708,6 +740,7 @@ export class DAppClient extends Client {
         if (!this.requestTracker.acknowledge(request.key)) {
           return
         }
+        this.markPendingRequestAcknowledged(message.id, request.key)
         this.analytics.track('event', 'DAppClient', 'Acknowledge received from Wallet')
         const walletInfo = await this.getWalletInfo()
         if (!this.isRequestCurrent(request.key)) {
@@ -1303,6 +1336,13 @@ export class DAppClient extends Client {
     this.initEvents()
 
     transports.push(this.walletConnectTransport)
+    for (const candidate of [
+      this.postMessageTransport,
+      this.p2pTransport,
+      this.walletConnectTransport
+    ]) {
+      this.observeTransportStatus(candidate)
+    }
     await Promise.all(transports.map((transport) => this.addListener(transport)))
   }
 
@@ -1444,8 +1484,14 @@ export class DAppClient extends Client {
         await this.accountWrite
         await this.activeAccountWrite
       } finally {
-        await this.destroyInternalTransports()
-        await super.destroy()
+        try {
+          await this.destroyInternalTransports()
+          await super.destroy()
+        } finally {
+          for (const dispose of [...this.transportStatusDisposers]) {
+            dispose()
+          }
+        }
       }
     })
   }
@@ -1571,6 +1617,8 @@ export class DAppClient extends Client {
     const resolve = (type: TransportType) => attempt.resolve(type)
     const reject = (error: unknown) => attempt.reject(error)
     if (transport) {
+      this.observeTransportStatus(transport)
+      this.lastActiveTransport = transport
       await this.addListener(transport)
       if (!attempt.isCurrent()) {
         return
@@ -1581,6 +1629,8 @@ export class DAppClient extends Client {
       if (!attempt.isCurrent()) {
         return
       }
+      this.observeTransportStatus(selectedTransport)
+      this.lastActiveTransport = selectedTransport
       await selectedTransport.connect()
       if (!attempt.isCurrent()) {
         return
@@ -1592,11 +1642,19 @@ export class DAppClient extends Client {
         return
       }
 
+      const isMultiTransport = !(activeAccount && activeAccount.origin)
+      if (isMultiTransport) {
+        this.isMultiTransportPairingActive = true
+      }
+
       await this.initInternalTransports()
       if (!attempt.isCurrent()) {
+        this.isMultiTransportPairingActive = false
+
         return
       }
       if (!this.postMessageTransport || !this.p2pTransport || !this.walletConnectTransport) {
+        this.isMultiTransportPairingActive = false
         // Bare return here used to strand the promise forever -- no UI is
         // emitted, no peer ever pairs, no abort path fires. Reject explicitly
         // so callers see a deterministic error.
@@ -1616,6 +1674,7 @@ export class DAppClient extends Client {
       const postMessageTransport = this.postMessageTransport
       const walletConnectTransport = this.walletConnectTransport
       const stopListening = () => {
+        this.isMultiTransportPairingActive = false
         const onError = (err: unknown) => logger.error('stopListeningForNewPeers', err)
         postMessageTransport.stopListeningForNewPeers().catch(onError)
         p2pTransport.stopListeningForNewPeers().catch(onError)
@@ -1631,10 +1690,13 @@ export class DAppClient extends Client {
         const origin = activeAccount.origin.type
         // Select the transport that matches the active account
         if (origin === Origin.EXTENSION) {
+          this.lastActiveTransport = postMessageTransport
           resolve(await super.init(postMessageTransport))
         } else if (origin === Origin.P2P) {
+          this.lastActiveTransport = p2pTransport
           resolve(await super.init(p2pTransport))
         } else if (origin === Origin.WALLETCONNECT) {
+          this.lastActiveTransport = walletConnectTransport
           await walletConnectTransport.connect()
           if (!attempt.isCurrent()) {
             return
@@ -1755,63 +1817,69 @@ export class DAppClient extends Client {
 
         const abortHandler = async (): Promise<AbortSignal | undefined> => {
           if (!attempt.isCurrent() || !pairing.cancel()) {
+            this.isMultiTransportPairingActive = false
+
             return undefined
           }
 
-          return this.initialization.cleanup(async () => {
-            reject(this.createAbortedError())
-            const cleanupTransition = this.beginAccountTransition()
-            this._requestPermissionsPromise = undefined
-            this._requestPermissionsKey = undefined
-            let failure: unknown
-            try {
-              await Promise.all([
-                p2pTransport.stopListeningForNewPeers(),
-                postMessageTransport.stopListeningForNewPeers()
-              ])
-            } catch (error) {
-              failure = error
-              logger.error('init', 'pairing rollback failed', error)
-            }
-            const stopped = await Promise.allSettled([
-              postMessageTransport.disconnect(),
-              p2pTransport.disconnect(),
-              walletConnectTransport
-                .disconnect()
-                .finally(() => this.releaseWalletConnectTransport(walletConnectTransport))
-            ])
-            for (const result of stopped) {
-              if (result.status === 'rejected') {
-                failure ??= result.reason
-                logger.error('init', 'transport shutdown failed', result.reason)
+          try {
+            return await this.initialization.cleanup(async () => {
+              reject(this.createAbortedError())
+              const cleanupTransition = this.beginAccountTransition()
+              this._requestPermissionsPromise = undefined
+              this._requestPermissionsKey = undefined
+              let failure: unknown
+              try {
+                await Promise.all([
+                  p2pTransport.stopListeningForNewPeers(),
+                  postMessageTransport.stopListeningForNewPeers()
+                ])
+              } catch (error) {
+                failure = error
+                logger.error('init', 'pairing rollback failed', error)
               }
-            }
-            // Disposal owns captured adapters even when a newer account choice is waiting.
-            if (this.postMessageTransport === postMessageTransport) {
-              this.postMessageTransport = undefined
-            }
-            if (this.p2pTransport === p2pTransport) {
-              this.p2pTransport = undefined
-            }
-            if (this.walletConnectTransport === walletConnectTransport) {
-              this.walletConnectTransport = undefined
-            }
-            if (!this.isCurrentAccountTransition(cleanupTransition)) {
+              const stopped = await Promise.allSettled([
+                postMessageTransport.disconnect(),
+                p2pTransport.disconnect(),
+                walletConnectTransport
+                  .disconnect()
+                  .finally(() => this.releaseWalletConnectTransport(walletConnectTransport))
+              ])
+              for (const result of stopped) {
+                if (result.status === 'rejected') {
+                  failure ??= result.reason
+                  logger.error('init', 'transport shutdown failed', result.reason)
+                }
+              }
+              // Disposal owns captured adapters even when a newer account choice is waiting.
+              if (this.postMessageTransport === postMessageTransport) {
+                this.postMessageTransport = undefined
+              }
+              if (this.p2pTransport === p2pTransport) {
+                this.p2pTransport = undefined
+              }
+              if (this.walletConnectTransport === walletConnectTransport) {
+                this.walletConnectTransport = undefined
+              }
+              if (!this.isCurrentAccountTransition(cleanupTransition)) {
+                if (failure) {
+                  throw failure
+                }
+
+                return undefined
+              }
+              await this.applyActiveAccount(undefined, cleanupTransition, 'local')
               if (failure) {
                 throw failure
               }
 
-              return undefined
-            }
-            await this.applyActiveAccount(undefined, cleanupTransition, 'local')
-            if (failure) {
-              throw failure
-            }
-
-            return this.isCurrentAccountTransition(cleanupTransition)
-              ? cleanupTransition
-              : undefined
-          })
+              return this.isCurrentAccountTransition(cleanupTransition)
+                ? cleanupTransition
+                : undefined
+            })
+          } finally {
+            this.isMultiTransportPairingActive = false
+          }
         }
 
         // Empty pairing information closes the UI, so defer it until commit or cancellation settles.
@@ -1936,6 +2004,74 @@ export class DAppClient extends Client {
     const walletInfo = await this.getWalletInfo(undefined, account, true, { updateStorage: false })
 
     return walletInfo.name.trim() ? walletInfo : undefined
+  }
+
+  /**
+   * Returns a non-blocking snapshot of the current transport connection status and health.
+   */
+  public async getConnectionInfo(): Promise<ConnectionInfo> {
+    this.assertNotDestroyed()
+    const transport = this._transport.isResolved()
+      ? this._transport.promiseResult
+      : !this.isMultiTransportPairingActive &&
+          this.lastActiveTransport &&
+          this.lastActiveTransport.connectionStatus !== TransportStatus.NOT_CONNECTED
+        ? this.lastActiveTransport
+        : undefined
+    if (!transport) {
+      return {
+        status: TransportStatus.NOT_CONNECTED,
+        health: 'ok'
+      }
+    }
+
+    const status = transport.connectionStatus
+    const health: TransportHealth =
+      status === TransportStatus.NOT_CONNECTED ? 'ok' : (transport.health ?? 'ok')
+    const relayServer = transport.relayServer
+    const accountSenderId = this._activeAccount.isResolved()
+      ? this._activeAccount.promiseResult?.senderId
+      : undefined
+    const activePeer = this._activePeer.isResolved() ? this._activePeer.promiseResult : undefined
+    const peerSenderId =
+      activePeer && 'senderId' in activePeer && typeof activePeer.senderId === 'string'
+        ? activePeer.senderId
+        : undefined
+    const senderId = accountSenderId ?? peerSenderId
+
+    return {
+      transport: transport.type,
+      status,
+      health,
+      ...(relayServer !== undefined ? { relayServer } : {}),
+      ...(senderId !== undefined ? { senderId } : {})
+    }
+  }
+
+  /**
+   * Returns a read-only snapshot of currently open requests awaiting a wallet response.
+   */
+  public getPendingRequests(): readonly PendingRequestInfo[] {
+    const result: PendingRequestInfo[] = []
+    for (const [id, meta] of Array.from(this.pendingRequestMetadata.entries())) {
+      if (!this.isRequestCurrent(meta.key) || !this.requestTracker.get(id)) {
+        this.pendingRequestMetadata.delete(id)
+        continue
+      }
+      result.push(
+        Object.freeze({
+          id,
+          type: meta.type,
+          transport: meta.transport,
+          ...(meta.senderId !== undefined ? { senderId: meta.senderId } : {}),
+          sentAt: meta.sentAt,
+          deadline: meta.deadline,
+          acknowledged: meta.acknowledged
+        })
+      )
+    }
+
+    return Object.freeze(result)
   }
 
   private resolveActiveAccount(account: StoredAccountInfo | undefined): void {
@@ -2311,6 +2447,7 @@ export class DAppClient extends Client {
       this.resolveActivePeer(peer)
     }
     if (transport?.connectionStatus === TransportStatus.NOT_CONNECTED) {
+      this.lastActiveTransport = transport
       await transport.connect()
       if (!this.isCurrentAccountTransition(transition)) {
         return { kind: 'superseded' }
@@ -3632,11 +3769,35 @@ export class DAppClient extends Client {
   protected async setTransport(transport?: ClientTransport): Promise<void> {
     if (!transport) {
       this._initPromise = undefined
+    } else {
+      this.observeTransportStatus(transport)
+      this.lastActiveTransport = transport
     }
 
     const result = super.setTransport(transport)
     if (transport instanceof WalletConnectTransport) {
       this.startTabChannel()
+    }
+
+    if (transport) {
+      const previous = this.lastEmittedTransportStatus.get(transport) ?? TransportStatus.NOT_CONNECTED
+      const current = transport.connectionStatus
+      if (previous !== current) {
+        this.lastEmittedTransportStatus.set(transport, current)
+        const health: TransportHealth =
+          current === TransportStatus.NOT_CONNECTED ? 'ok' : (transport.health ?? 'ok')
+        const relayServer = transport.relayServer
+        const statusInfo: TransportStatusChangedInfo = {
+          transport: transport.type,
+          status: current,
+          previous,
+          health,
+          ...(relayServer !== undefined ? { relayServer } : {})
+        }
+        this.events
+          .emit(BeaconEvent.TRANSPORT_STATUS_CHANGED, statusInfo)
+          .catch((error: unknown) => logger.error('setTransport', error))
+      }
     }
 
     const event = transport
@@ -4252,6 +4413,19 @@ export class DAppClient extends Client {
           // Account replacement can cancel preparation, but not an operation already sent.
           this.finishProxyPreparation(proxyKey)
           const sentAt = Date.now()
+          const recipientSenderId =
+            peer && 'senderId' in peer && typeof peer.senderId === 'string'
+              ? peer.senderId
+              : account?.senderId
+          if (owned) {
+            this.recordPendingRequestDispatch(
+              owned.key,
+              request.type,
+              transport.type,
+              recipientSenderId,
+              sentAt
+            )
+          }
           try {
             await transport.send(payload, peer)
           } finally {
@@ -4426,6 +4600,21 @@ export class DAppClient extends Client {
           // Account replacement can cancel preparation, but not an operation already sent.
           this.finishProxyPreparation(proxyKey)
           const sentAt = Date.now()
+          const recipientSenderId =
+            peer && 'senderId' in peer && typeof peer.senderId === 'string'
+              ? peer.senderId
+              : account?.senderId
+          const v3RequestType =
+            requestInput.type === BeaconMessageType.PermissionRequest
+              ? BeaconMessageType.PermissionRequest
+              : BeaconMessageType.BlockchainRequest
+          this.recordPendingRequestDispatch(
+            owned.key,
+            v3RequestType,
+            transport.type,
+            recipientSenderId,
+            sentAt
+          )
           try {
             await transport.send(payload, peer)
           } finally {
@@ -4549,6 +4738,13 @@ export class DAppClient extends Client {
         }
         const senderId = this._activeAccount.promiseResult?.senderId
         const forwardedAt = Date.now()
+        this.recordPendingRequestDispatch(
+          owned.key,
+          request.type,
+          transport.type,
+          senderId,
+          forwardedAt
+        )
         this.multiTabChannel.postMessage({ type: request.type, data: request, id })
         if (!canDispatch()) {
           return
@@ -4683,6 +4879,7 @@ export class DAppClient extends Client {
     this.postMessageTransport = undefined
     this.p2pTransport = undefined
     this.walletConnectTransport = undefined
+    this.lastActiveTransport = undefined
   }
 
   private async removeAllPeersFromTransports(transports: DAppInternalTransport[]): Promise<void> {
@@ -4921,6 +5118,148 @@ export class DAppClient extends Client {
   private finishProxyPreparation(key: RequestKey | undefined): void {
     if (key) {
       this.proxyAccountPreparations.get(key)?.()
+    }
+  }
+
+  private observeTransportStatus(transport: ClientTransport | undefined): void {
+    if (
+      !transport ||
+      typeof transport.addStatusListener !== 'function' ||
+      this.observedTransports.has(transport)
+    ) {
+      return
+    }
+    this.lastEmittedTransportStatus.set(transport, transport.connectionStatus)
+    const dispose = transport.addStatusListener((transition) => {
+      if (this.destroyed) {
+        return
+      }
+      const activeTransport = this._transport.isResolved()
+        ? this._transport.promiseResult
+        : undefined
+      if (activeTransport) {
+        if (activeTransport !== transport) {
+          return
+        }
+      } else if (this.isMultiTransportPairingActive || this.lastActiveTransport !== transport) {
+        return
+      }
+
+      const previous =
+        this.lastEmittedTransportStatus.get(transport) ?? transition.previous
+      this.lastEmittedTransportStatus.set(transport, transition.status)
+      const payload: TransportStatusChangedInfo = {
+        transport: transition.transport,
+        status: transition.status,
+        previous,
+        health: transition.health,
+        ...(transition.reason !== undefined ? { reason: transition.reason } : {}),
+        ...(transition.relayServer !== undefined ? { relayServer: transition.relayServer } : {})
+      }
+      this.events
+        .emit(BeaconEvent.TRANSPORT_STATUS_CHANGED, payload)
+        .catch((error: unknown) => logger.error('observeTransportStatus', error))
+    })
+    const removeDispose = (): void => {
+      dispose()
+      this.observedTransports.delete(transport)
+      this.transportStatusDisposers.delete(removeDispose)
+    }
+    this.observedTransports.set(transport, removeDispose)
+    this.transportStatusDisposers.add(removeDispose)
+  }
+
+  private recordPendingRequestDispatch(
+    key: RequestKey,
+    requestType: BeaconMessageType,
+    transportType: TransportType,
+    senderId: string | undefined,
+    sentAt: number
+  ): void {
+    if (!this.isRequestCurrent(key)) {
+      return
+    }
+    const timeoutMs = this.requestDeadlineMs(requestType)
+    const deadline = Number.isFinite(timeoutMs) && timeoutMs > 0 ? sentAt + timeoutMs : undefined
+    const acknowledged = transportType === TransportType.WALLETCONNECT ? undefined : false
+    const metadata: {
+      key: RequestKey
+      type: BeaconMessageType
+      transport: TransportType
+      senderId?: string
+      sentAt: number
+      deadline?: number
+      acknowledged: boolean | undefined
+      ackTimer?: ReturnType<typeof setTimeout>
+    } = {
+      key,
+      type: requestType,
+      transport: transportType,
+      ...(senderId !== undefined ? { senderId } : {}),
+      sentAt,
+      ...(deadline !== undefined ? { deadline } : {}),
+      acknowledged
+    }
+
+    if (
+      transportType !== TransportType.WALLETCONNECT &&
+      Number.isFinite(this.ackTimeoutMs) &&
+      this.ackTimeoutMs > 0
+    ) {
+      metadata.ackTimer = setTimeout(() => {
+        metadata.ackTimer = undefined
+        if (this.destroyed || !this.isRequestCurrent(key)) {
+          return
+        }
+        const current = this.requestTracker.get(key.id)
+        if (
+          !current ||
+          metadata.acknowledged === true ||
+          current.state === 'Acknowledged' ||
+          current.state === 'ResponsePreparing'
+        ) {
+          return
+        }
+        this.events
+          .emit(BeaconEvent.WAITING_FOR_WALLET_ACK, {
+            requestId: key.id,
+            transport: transportType,
+            elapsedMs: Math.max(this.ackTimeoutMs, Date.now() - sentAt)
+          })
+          .catch((emitError: unknown) => logger.error('ackTimeout', emitError))
+      }, this.ackTimeoutMs)
+    }
+
+    this.pendingRequestMetadata.set(key.id, metadata)
+    this.requestTracker.attachCleanup(key, () => {
+      this.clearPendingRequestAckTimer(key.id, key)
+      const current = this.pendingRequestMetadata.get(key.id)
+      if (current && current.key.instance === key.instance) {
+        this.pendingRequestMetadata.delete(key.id)
+      }
+    })
+  }
+
+  private markPendingRequestAcknowledged(id: string, key: RequestKey): void {
+    const metadata = this.pendingRequestMetadata.get(id)
+    if (!metadata || metadata.key.instance !== key.instance) {
+      return
+    }
+    this.clearPendingRequestAckTimer(id, key)
+    metadata.deadline = undefined
+    if (metadata.transport !== TransportType.WALLETCONNECT) {
+      metadata.acknowledged = true
+    }
+  }
+
+  private clearPendingRequestAckTimer(id: string, key: RequestKey): void {
+    const metadata = this.pendingRequestMetadata.get(id)
+    if (!metadata || metadata.key.instance !== key.instance) {
+      return
+    }
+    if (metadata.ackTimer !== undefined) {
+      clearTimeout(metadata.ackTimer)
+      metadata.ackTimer = undefined
     }
   }
 

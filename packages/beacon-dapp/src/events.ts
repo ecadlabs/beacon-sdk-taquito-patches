@@ -32,7 +32,12 @@ import {
   ProofOfEventChallengeResponseOutput,
   SimulatedProofOfEventChallengeResponseOutput,
   BeaconMessageType,
-  TransportType
+  TransportType,
+  TransportStatus,
+  TransportHealth,
+  TransportStatusChangeReason,
+  TransportStatusChangedInfo,
+  WaitingForWalletAckInfo
 } from '@ecadlabs/beacon-types'
 import {
   UnknownBeaconError,
@@ -116,6 +121,7 @@ export enum BeaconEvent {
   BROADCAST_REQUEST_SUCCESS = 'BROADCAST_REQUEST_SUCCESS',
   BROADCAST_REQUEST_ERROR = 'BROADCAST_REQUEST_ERROR',
   ACKNOWLEDGE_RECEIVED = 'ACKNOWLEDGE_RECEIVED',
+  WAITING_FOR_WALLET_ACK = 'WAITING_FOR_WALLET_ACK',
   /** A wallet answered a request after its deadline fired and the caller got PEER_UNREACHABLE. */
   LATE_RESPONSE_RECEIVED = 'LATE_RESPONSE_RECEIVED',
 
@@ -126,6 +132,8 @@ export enum BeaconEvent {
   ACTIVE_ACCOUNT_SET = 'ACTIVE_ACCOUNT_SET',
 
   ACTIVE_TRANSPORT_SET = 'ACTIVE_TRANSPORT_SET',
+
+  TRANSPORT_STATUS_CHANGED = 'TRANSPORT_STATUS_CHANGED',
 
   SHOW_PREPARE = 'SHOW_PREPARE',
   HIDE_UI = 'HIDE_UI',
@@ -223,6 +231,14 @@ export type PermissionResponseInfo = {
       output: BeaconMessageWrapper<PermissionResponseV3>
     }
 )
+
+export type {
+  TransportHealth,
+  TransportStatus,
+  TransportStatusChangeReason,
+  TransportStatusChangedInfo,
+  WaitingForWalletAckInfo
+}
 
 /**
  * The payload types emitted by each BeaconEvent.
@@ -338,10 +354,12 @@ export interface BeaconEventType {
     walletInfo: WalletInfo
   }
   [BeaconEvent.ACKNOWLEDGE_RECEIVED]: AcknowledgeInfo
+  [BeaconEvent.WAITING_FOR_WALLET_ACK]: WaitingForWalletAckInfo
   [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: undefined
   [BeaconEvent.NO_PERMISSIONS]: undefined
   [BeaconEvent.ACTIVE_ACCOUNT_SET]: StoredAccountInfo | undefined
   [BeaconEvent.ACTIVE_TRANSPORT_SET]: ActiveTransportInfo | undefined
+  [BeaconEvent.TRANSPORT_STATUS_CHANGED]: TransportStatusChangedInfo
 
   [BeaconEvent.INVALID_ACTIVE_ACCOUNT_STATE]: undefined
   [BeaconEvent.GENERIC_ERROR]: string
@@ -992,11 +1010,13 @@ export const defaultEventCallbacks: {
   [BeaconEvent.BROADCAST_REQUEST_SUCCESS]: showBroadcastSuccessAlert,
   [BeaconEvent.BROADCAST_REQUEST_ERROR]: showErrorToast,
   [BeaconEvent.ACKNOWLEDGE_RECEIVED]: showAcknowledgedToast,
+  [BeaconEvent.WAITING_FOR_WALLET_ACK]: emptyHandler(),
   [BeaconEvent.LATE_RESPONSE_RECEIVED]: showLateResponseToast,
   [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: showRateLimitReached,
   [BeaconEvent.NO_PERMISSIONS]: showNoPermissionAlert,
   [BeaconEvent.ACTIVE_ACCOUNT_SET]: emptyHandler(),
   [BeaconEvent.ACTIVE_TRANSPORT_SET]: emptyHandler(),
+  [BeaconEvent.TRANSPORT_STATUS_CHANGED]: emptyHandler(),
   [BeaconEvent.INVALID_ACTIVE_ACCOUNT_STATE]: showInvalidActiveAccountState,
   [BeaconEvent.GENERIC_ERROR]: showGenericErrorAlert,
   [BeaconEvent.INVALID_ACCOUNT_DEACTIVATED]: showInvalidAccountDeactivated,
@@ -1087,11 +1107,13 @@ export class BeaconEventHandler {
     [BeaconEvent.BROADCAST_REQUEST_ERROR]: [defaultEventCallbacks.BROADCAST_REQUEST_ERROR],
     [BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]: [defaultEventCallbacks.BLOCKCHAIN_REQUEST_SUCCESS],
     [BeaconEvent.ACKNOWLEDGE_RECEIVED]: [defaultEventCallbacks.ACKNOWLEDGE_RECEIVED],
+    [BeaconEvent.WAITING_FOR_WALLET_ACK]: [defaultEventCallbacks.WAITING_FOR_WALLET_ACK],
     [BeaconEvent.LATE_RESPONSE_RECEIVED]: [defaultEventCallbacks.LATE_RESPONSE_RECEIVED],
     [BeaconEvent.LOCAL_RATE_LIMIT_REACHED]: [defaultEventCallbacks.LOCAL_RATE_LIMIT_REACHED],
     [BeaconEvent.NO_PERMISSIONS]: [defaultEventCallbacks.NO_PERMISSIONS],
     [BeaconEvent.ACTIVE_ACCOUNT_SET]: [defaultEventCallbacks.ACTIVE_ACCOUNT_SET],
     [BeaconEvent.ACTIVE_TRANSPORT_SET]: [defaultEventCallbacks.ACTIVE_TRANSPORT_SET],
+    [BeaconEvent.TRANSPORT_STATUS_CHANGED]: [defaultEventCallbacks.TRANSPORT_STATUS_CHANGED],
     [BeaconEvent.INVALID_ACTIVE_ACCOUNT_STATE]: [
       defaultEventCallbacks.INVALID_ACTIVE_ACCOUNT_STATE
     ],

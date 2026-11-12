@@ -1,6 +1,9 @@
 import {
   TransportType,
   TransportStatus,
+  TransportHealth,
+  TransportStatusChangeReason,
+  TransportStatusChangedInfo,
   PeerInfo,
   StorageKey,
   StorageKeyReturnType,
@@ -53,7 +56,21 @@ export abstract class Transport<
   /**
    * The status of the transport
    */
-  protected _isConnected: TransportStatus = TransportStatus.NOT_CONNECTED
+  private _connectionStatus: TransportStatus = TransportStatus.NOT_CONNECTED
+
+  private _health: TransportHealth = 'ok'
+
+  private statusListeners?: Set<(info: TransportStatusChangedInfo) => void | Promise<void>>
+
+  protected get _isConnected(): TransportStatus {
+    return this._connectionStatus ?? TransportStatus.NOT_CONNECTED
+  }
+
+  protected set _isConnected(status: TransportStatus) {
+    this.updateConnectionStatus({ status }).catch((error: unknown) =>
+      logger.warn('updateConnectionStatus', error)
+    )
+  }
 
   protected readonly peerManager: PeerManager<K>
 
@@ -100,13 +117,94 @@ export abstract class Transport<
    * Return the status of the connection
    */
   public get connectionStatus(): TransportStatus {
-    return this._isConnected
+    return this._connectionStatus ?? TransportStatus.NOT_CONNECTED
+  }
+
+  public get health(): TransportHealth {
+    return this._health ?? 'ok'
+  }
+
+  public get relayServer(): string | undefined {
+    return undefined
+  }
+
+  public addStatusListener(
+    listener: (info: TransportStatusChangedInfo) => void | Promise<void>
+  ): () => void {
+    const listeners = (this.statusListeners ??= new Set())
+    listeners.add(listener)
+
+    return () => {
+      listeners.delete(listener)
+    }
+  }
+
+  protected updateConnectionStatus(update: {
+    status?: TransportStatus
+    health?: TransportHealth
+    reason?: TransportStatusChangeReason
+    relayServer?: string
+  }): Promise<void> {
+    const previous = this._connectionStatus ?? TransportStatus.NOT_CONNECTED
+    const previousHealth = this._health ?? 'ok'
+    const nextStatus = update.status ?? previous
+    const nextHealth =
+      update.health ?? (nextStatus === TransportStatus.NOT_CONNECTED ? 'ok' : previousHealth)
+
+    this._connectionStatus = nextStatus
+    this._health = nextHealth
+
+    if (
+      nextStatus === previous &&
+      nextHealth === previousHealth &&
+      update.reason === undefined
+    ) {
+      return Promise.resolve()
+    }
+
+    const listeners = this.statusListeners
+    if (!listeners || listeners.size === 0) {
+      return Promise.resolve()
+    }
+
+    const relayServer = update.relayServer ?? this.relayServer
+    const info: TransportStatusChangedInfo = {
+      transport: this.type,
+      status: nextStatus,
+      previous,
+      health: nextHealth,
+      ...(update.reason !== undefined ? { reason: update.reason } : {}),
+      ...(relayServer !== undefined ? { relayServer } : {})
+    }
+
+    const deliveries = Array.from(listeners, (listener) => {
+      try {
+        return Promise.resolve(listener(info)).catch((error: unknown) =>
+          logger.warn('statusListener', error)
+        )
+      } catch (error: unknown) {
+        logger.warn('statusListener', error)
+
+        return Promise.resolve()
+      }
+    })
+
+    return Promise.all(deliveries).then(() => undefined)
   }
 
   constructor(name: string, client: S, peerManager: PeerManager<K>) {
     this.name = name
     this.client = client
     this.peerManager = peerManager
+    this.client?.eventHandlers?.set(
+      ClientEvents.TRANSPORT_STATUS,
+      (update: {
+        status?: TransportStatus
+        health?: TransportHealth
+        reason?: TransportStatusChangeReason
+        relayServer?: string
+      }): Promise<void> => this.updateConnectionStatus(update)
+    )
   }
 
   /**

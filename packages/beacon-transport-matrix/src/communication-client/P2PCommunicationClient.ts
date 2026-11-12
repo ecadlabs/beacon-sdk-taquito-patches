@@ -31,7 +31,8 @@ import {
   BEACON_VERSION,
   getSenderId,
   Logger,
-  CommunicationClient
+  CommunicationClient,
+  ClientEvents
 } from '@ecadlabs/beacon-core'
 import { hash } from '@stablelib/blake2b'
 import { encode } from '@stablelib/utf8'
@@ -133,6 +134,27 @@ export class P2PCommunicationClient extends CommunicationClient {
   private readonly ENABLED_RELAY_SERVERS: NodeDistributions
   public relayServer:
     ExposedPromise<{ server: string; timestamp: number; localTimestamp: number }> | undefined
+  private activeRelayServer: string | undefined
+
+  public get currentRelayServer(): string | undefined {
+    return this.activeRelayServer ?? this.relayServer?.promiseResult?.server
+  }
+
+  private recordRelayServer(server: string): void {
+    const previous = this.activeRelayServer
+    this.activeRelayServer = server
+    if (previous !== undefined && previous !== server) {
+      const onTransportStatus = this.eventHandlers.get(ClientEvents.TRANSPORT_STATUS)
+      if (onTransportStatus) {
+        Promise.resolve(
+          onTransportStatus({
+            reason: 'relay_changed',
+            relayServer: server
+          })
+        ).catch((error: unknown) => logger.warn('recordRelayServer', error))
+      }
+    }
+  }
 
   private readonly activeListeners: Map<
     string,
@@ -307,6 +329,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       const relayServer = await currentPromise.promise
       this.assertRelaySession(session)
       if (Date.now() - relayServer.localTimestamp < 60 * 1000) {
+        this.recordRelayServer(relayServer.server)
         return { server: relayServer.server, timestamp: relayServer.timestamp }
       }
       try {
@@ -319,6 +342,7 @@ export class P2PCommunicationClient extends CommunicationClient {
             localTimestamp: Date.now()
           })
         }
+        this.recordRelayServer(relayServer.server)
         return { server: relayServer.server, timestamp: info.timestamp }
       } catch (error) {
         this.assertRelaySession(session)
@@ -326,6 +350,7 @@ export class P2PCommunicationClient extends CommunicationClient {
         if (replacement && replacement !== currentPromise) {
           const latest = await replacement.promise
           this.assertRelaySession(session)
+          this.recordRelayServer(latest.server)
 
           return { server: latest.server, timestamp: latest.timestamp }
         }
@@ -346,6 +371,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     if (this.relayServer) {
       const relayServer = await this.relayServer.promise
       this.assertRelaySession(session)
+      this.recordRelayServer(relayServer.server)
       return { server: relayServer.server, timestamp: relayServer.timestamp }
     }
 
@@ -364,7 +390,20 @@ export class P2PCommunicationClient extends CommunicationClient {
         try {
           const info = await this.getBeaconInfo(node)
           this.assertRelaySession(session)
+          if (!this.selectedRegion) {
+            const isRegionKey = (key: string): key is Regions =>
+              Object.values<string>(Regions).includes(key)
+            const matchingRegion = Object.entries(this.ENABLED_RELAY_SERVERS).find(
+              ([key, servers]) => isRegionKey(key) && servers?.includes(node)
+            )?.[0]
+            const fallbackRegion = Object.keys(this.ENABLED_RELAY_SERVERS).find(isRegionKey)
+            const candidate = matchingRegion ?? fallbackRegion
+            if (candidate && isRegionKey(candidate)) {
+              this.selectedRegion = candidate
+            }
+          }
           discovery.resolve({ server: node, timestamp: info.timestamp, localTimestamp: Date.now() })
+          this.recordRelayServer(node)
           return { server: node, timestamp: info.timestamp }
         } catch (error) {
           this.assertRelaySession(session)
@@ -391,6 +430,7 @@ export class P2PCommunicationClient extends CommunicationClient {
         this.assertRelaySession(session)
       }
       discovery.resolve({ ...server, localTimestamp: Date.now() })
+      this.recordRelayServer(server.server)
 
       return server
     } catch (error) {
@@ -742,6 +782,18 @@ export class P2PCommunicationClient extends CommunicationClient {
     })
     this.startingClient = client
     this.matrixClient = client
+    client.onHealthTransition?.(async (event) => {
+      if (!this.isCurrentSession(owner) || this.matrixClient !== client) {
+        return
+      }
+      const onTransportStatus = this.eventHandlers.get(ClientEvents.TRANSPORT_STATUS)
+      if (onTransportStatus) {
+        await onTransportStatus({
+          ...event,
+          relayServer: this.currentRelayServer
+        })
+      }
+    })
 
     const replay = this.initialReplay
     this.initialListener = async (
@@ -943,6 +995,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     this.relayServer?.reject(new DOMException('Matrix discovery cancelled', 'AbortError'))
     this.disposeSubscriptions()
     this.selectedRegion = undefined
+    this.activeRelayServer = undefined
     this.loginCounter = 0
     const starting = this.startingClient
     const active = this.matrixClient

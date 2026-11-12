@@ -5,6 +5,7 @@ export * from '@ecadlabs/beacon-types'
 export * from '@ecadlabs/beacon-utils'
 export * from '@ecadlabs/beacon-ui'
 
+import type { ConnectionInfo, PendingRequestInfo } from '@ecadlabs/beacon-types'
 import {
   DAppClient,
   type DAppClientDisconnectOptions,
@@ -20,6 +21,8 @@ import {
   type RequestResponseInfo,
   type AcknowledgeInfo,
   type ActiveTransportInfo,
+  type TransportStatusChangedInfo,
+  type WaitingForWalletAckInfo,
   type InvalidAccountDeactivatedEvent,
   type InvalidAccountDeactivatedReason
 } from './events'
@@ -28,7 +31,12 @@ import { TzktBlockExplorer } from './utils/tzkt-blockexplorer'
 import { getDAppClientInstance } from './utils/get-instance'
 
 export { DAppClient, DAppClientOptions, getDAppClientInstance }
-export type { DAppClientDisconnectOptions, DAppClientRemoveAllPeersOptions }
+export type {
+  DAppClientDisconnectOptions,
+  DAppClientRemoveAllPeersOptions,
+  ConnectionInfo,
+  PendingRequestInfo
+}
 
 // Events
 export { BeaconEvent, BeaconEventHandler, defaultEventCallbacks }
@@ -38,6 +46,8 @@ export type {
   RequestResponseInfo,
   AcknowledgeInfo,
   ActiveTransportInfo,
+  TransportStatusChangedInfo,
+  WaitingForWalletAckInfo,
   InvalidAccountDeactivatedEvent,
   InvalidAccountDeactivatedReason
 }

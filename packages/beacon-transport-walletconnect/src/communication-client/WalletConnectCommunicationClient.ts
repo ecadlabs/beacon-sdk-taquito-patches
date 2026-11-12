@@ -33,6 +33,7 @@ import {
   SignPayloadRequest,
   SignPayloadResponseInput,
   StorageKey,
+  TransportStatus,
   TransportType
 } from '@ecadlabs/beacon-types'
 import { generateGUID, getAddressFromPublicKey, isPublicKeySC } from '@ecadlabs/beacon-utils'
@@ -1495,7 +1496,11 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         return
       }
       this.disconnectionEvents.add('session_delete')
-      this.disconnect(signClient, { type: 'session', topic: event.topic }).catch(
+      this.disconnect(signClient, {
+        type: 'session',
+        topic: event.topic,
+        reason: 'session_deleted'
+      }).catch(
         (error: unknown) => {
           logger.warn(
             'session_delete handler',
@@ -1514,7 +1519,11 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         return
       }
       this.disconnectionEvents.add('session_expire')
-      this.disconnect(signClient, { type: 'session', topic: event.topic }).catch(
+      this.disconnect(signClient, {
+        type: 'session',
+        topic: event.topic,
+        reason: 'session_expired'
+      }).catch(
         (error: unknown) => {
           logger.warn(
             'session_expire handler',
@@ -1630,7 +1639,10 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     } catch {}
   }
 
-  private async disconnect(signClient: Client, trigger: { type: 'session'; topic: string }) {
+  private async disconnect(
+    signClient: Client,
+    trigger: { type: 'session'; topic: string; reason?: 'session_deleted' | 'session_expired' }
+  ) {
     if (this.signClient !== signClient || this.session?.topic !== trigger.topic) {
       return
     }
@@ -1646,6 +1658,15 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     }
     const resetPairing = !this.activeAccountOrPbk
     this.clearState()
+    if (trigger.reason) {
+      const onTransportStatus = this.eventHandlers.get(ClientEvents.TRANSPORT_STATUS)
+      if (onTransportStatus) {
+        await onTransportStatus({
+          status: TransportStatus.NOT_CONNECTED,
+          reason: trigger.reason
+        })
+      }
+    }
     if (resetPairing) {
       const reset = this.eventHandlers.get(ClientEvents.RESET_STATE)
       if (reset) {

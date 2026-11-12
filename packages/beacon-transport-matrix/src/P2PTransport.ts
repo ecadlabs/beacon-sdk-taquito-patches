@@ -26,6 +26,10 @@ export class P2PTransport<
 > extends Transport<T, K, P2PCommunicationClient> {
   public readonly type: TransportType = TransportType.P2P
 
+  public override get relayServer(): string | undefined {
+    return this.client.currentRelayServer
+  }
+
   private connectionGeneration = Symbol('P2P connection')
   private cancelConnection: (() => void) | undefined
 
@@ -134,9 +138,14 @@ export class P2PTransport<
     this.connectionGeneration = Symbol('P2P connection')
     this.cancelConnection?.()
     this.cancelConnection = undefined
+    const relayServer = this.relayServer
     try {
       await this.client.stop()
     } finally {
+      await this.updateConnectionStatus({
+        status: TransportStatus.NOT_CONNECTED,
+        relayServer
+      })
       await super.disconnect()
     }
   }

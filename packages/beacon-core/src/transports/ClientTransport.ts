@@ -16,4 +16,5 @@ export type ClientTransport = Pick<
   | 'removePeer'
   | 'removeAllPeers'
   | 'listen'
->
+> &
+  Partial<Pick<Transport, 'health' | 'relayServer' | 'addStatusListener'>>

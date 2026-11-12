@@ -28,6 +28,11 @@ interface MatrixLoginConfig {
 const IMMEDIATE_POLLING_RETRIES = 3
 const RETRY_INTERVAL = 5000
 
+export type MatrixHealthTransition =
+  | { health: 'degraded'; reason: 'sync_failing' }
+  | { health: 'ok' }
+  | { reason: 'token_renewed' }
+
 /**
  * The matrix client used to connect to the matrix network
  */
@@ -38,6 +43,13 @@ export class MatrixClient {
   private pollingRetry: { timer: ReturnType<typeof setTimeout>; complete: () => void } | undefined
   private _isReady: ExposedPromise<void> = this.createReadiness()
   private txnIdLock: Promise<void> = Promise.resolve()
+  private healthListener?: (event: MatrixHealthTransition) => void | Promise<void>
+
+  public onHealthTransition(
+    listener: (event: MatrixHealthTransition) => void | Promise<void>
+  ): void {
+    this.healthListener = listener
+  }
 
   constructor(
     private readonly store: MatrixClientStore,
@@ -156,6 +168,7 @@ export class MatrixClient {
       }
 
       const initialize = async (): Promise<void> => {
+        let degraded = false
         await login()
         if (!isCurrent()) {
           return
@@ -168,6 +181,7 @@ export class MatrixClient {
             if (!isCurrent()) {
               return
             }
+            const wasSettled = settled
             await this.store.update({
               isRunning: true,
               syncToken: pollingResponse.next_batch,
@@ -185,17 +199,29 @@ export class MatrixClient {
               }
               ready.resolve()
               resolve()
+            } else if (wasSettled && degraded) {
+              degraded = false
+              await this.healthListener?.({ health: 'ok' })
             }
           },
           async (error) => {
             if (!isCurrent()) {
               return
             }
+            const wasSettled = settled
             rejectWithCancel(error)
+            const nextRetries = this.store.get('pollingRetries') + 1
             await this.store.update({
               isRunning: false,
-              pollingRetries: this.store.get('pollingRetries') + 1
+              pollingRetries: nextRetries
             })
+            if (!isCurrent()) {
+              return
+            }
+            if (wasSettled && !degraded && nextRetries >= IMMEDIATE_POLLING_RETRIES) {
+              degraded = true
+              await this.healthListener?.({ health: 'degraded', reason: 'sync_failing' })
+            }
           }
         ).catch(rejectWithCancel)
       }
@@ -414,6 +440,7 @@ export class MatrixClient {
           if (!this.isActive || session !== this.session) {
             return
           }
+          await this.healthListener?.({ reason: 'token_renewed' })
           response = await this.sync()
         }
         if (this.isActive && session === this.session) {

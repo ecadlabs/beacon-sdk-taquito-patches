@@ -3,10 +3,21 @@ import {
   StoredAccountInfo,
   AcknowledgeResponse,
   BeaconMessageType,
+  ConnectionInfo,
+  PendingRequestInfo,
+  TransportHealth,
+  TransportStatus,
+  TransportStatusChangeReason,
   TransportType
 } from '@ecadlabs/beacon-types'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
-import { BeaconEvent, BeaconEventHandler, BeaconEventType } from '../../src/events'
+import {
+  BeaconEvent,
+  BeaconEventHandler,
+  BeaconEventType,
+  TransportStatusChangedInfo,
+  WaitingForWalletAckInfo
+} from '../../src/events'
 
 export function configureToasts(): void {
   new DAppClient({ name: 'Custom notifications', uiOptions: { enableToasts: false } })
@@ -97,7 +108,6 @@ export function terminal(info: BeaconEventType[TerminalEvent]): void {
   void id
   void receivedAt
 }
-
 export function permission(info: BeaconEventType[BeaconEvent.PERMISSION_REQUEST_SUCCESS]): void {
   if (info.protocolVersion === '3') {
     const chain: string = info.output.message.blockchainIdentifier
@@ -114,4 +124,39 @@ export function permission(info: BeaconEventType[BeaconEvent.PERMISSION_REQUEST_
     // @ts-expect-error V2 output has its existing flat shape.
     void info.output.message
   }
+}
+
+export async function observability(client: DAppClient): Promise<void> {
+  void client.subscribeToEvent(BeaconEvent.TRANSPORT_STATUS_CHANGED, (info) => {
+    const typed: TransportStatusChangedInfo = info
+    const transport: TransportType = typed.transport
+    const status: TransportStatus = typed.status
+    const previous: TransportStatus = typed.previous
+    const health: TransportHealth = typed.health
+    const reason: TransportStatusChangeReason | undefined = typed.reason
+    const relayServer: string | undefined = typed.relayServer
+    void transport
+    void status
+    void previous
+    void health
+    void reason
+    void relayServer
+  })
+
+  void client.subscribeToEvent(BeaconEvent.WAITING_FOR_WALLET_ACK, (info) => {
+    const typed: WaitingForWalletAckInfo = info
+    const requestId: string = typed.requestId
+    const transport: TransportType = typed.transport
+    const elapsedMs: number = typed.elapsedMs
+    void requestId
+    void transport
+    void elapsedMs
+  })
+
+  const connectionInfo: ConnectionInfo = await client.getConnectionInfo()
+  const pending: ReadonlyArray<PendingRequestInfo> = client.getPendingRequests()
+  // @ts-expect-error Pending requests array is readonly
+  pending.push
+  void connectionInfo
+  void pending
 }

@@ -361,6 +361,7 @@ export * from './errors'
 
 // Transport
 export { TransportStatus, TransportType }
+export * from './types/transport/TransportObservability'
 
 // Storage
 export { Storage, StorageKey, StorageKeyReturnDefaults, StorageKeyReturnType }
