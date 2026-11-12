@@ -8,7 +8,6 @@ it('serves the newly advertised wallet account while session acknowledgement is 
   const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)]
     .map((match) => match[1])
     .join('\n')
-    .replace("const projectId = 'YOUR_PROJECT_ID'", "const projectId = 'test-project-id'")
   const handlers = new Map()
   const elements = new Map()
   let initialized
