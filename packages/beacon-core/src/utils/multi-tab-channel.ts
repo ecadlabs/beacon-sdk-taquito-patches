@@ -133,13 +133,21 @@ export class MultiTabChannel {
       await this.getLeadership()
 
       if (!this.closed && this.isLeader()) {
-        await this.onElectedLeaderHandler()
+        this.notifyCallback('leader callback', () => this.onElectedLeaderHandler())
       }
 
       return
     }
 
-    await this.onBCMessageHandler(message)
+    this.notifyCallback('message callback', () => this.onBCMessageHandler(message))
+  }
+
+  private notifyCallback(context: string, callback: () => unknown): void {
+    try {
+      Promise.resolve(callback()).catch((error: unknown) => logger.warn(context, error))
+    } catch (error: unknown) {
+      logger.warn(context, error)
+    }
   }
 
   isLeader(): boolean {

@@ -157,6 +157,7 @@ it('observes asynchronous message callback failures', async () => {
   await channel.init()
   await state.channel.onmessage?.({ type: 'RESPONSE' })
   expect(warn).toHaveBeenCalledWith('message callback', failure)
+  expect(warn).toHaveBeenCalledTimes(1)
   await channel.close()
 })
 
@@ -187,3 +188,33 @@ it('reports detached outbound failures', async () => {
   await vi.waitFor(() => expect(warn).toHaveBeenCalledWith('postMessage', failure))
   await channel.close()
 })
+
+
+it.each(['message', 'leader'] as const)(
+  'completes channel delivery while the %s callback is still pending',
+  async (callback) => {
+    let release: () => void = () => {}
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    const callbackStarted = vi.fn(() => pending)
+    const channel = new MultiTabChannel(
+      'detached-callback',
+      callback === 'message' ? callbackStarted : vi.fn(),
+      callback === 'leader' ? callbackStarted : vi.fn()
+    )
+    await channel.init()
+    let delivered = false
+    const delivery = state.channel.onmessage?.({
+      type: callback === 'leader' ? 'LEADER_DEAD' : 'RESPONSE'
+    })
+    delivery?.then(() => { delivered = true })
+    try {
+      for (let tick = 0; tick < 10; tick++) await Promise.resolve()
+      expect(callbackStarted).toHaveBeenCalledOnce()
+      expect(delivered).toBe(true)
+    } finally {
+      release()
+      await delivery
+      await channel.close()
+    }
+  }
+)
