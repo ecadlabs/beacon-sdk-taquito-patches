@@ -1067,14 +1067,32 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
     return !redirect.native.includes('http') && !redirect.native.includes('ws')
   }
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+  }
+
+  private readLastSelectedWallet(): Record<string, unknown> | undefined {
+    try {
+      const raw = localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)
+      if (!raw) {
+        return undefined
+      }
+      const parsed: unknown = JSON.parse(raw)
+
+      return this.isRecord(parsed) ? parsed : undefined
+    } catch {
+      return undefined
+    }
+  }
+
   /**
    * Function used to fix appSwitching with web wallets when pairing through 'Other wallet flow'
    * @param session the newly created session
    */
   private updateStorageWallet(session: SessionTypes.Struct): void {
-    const selectedWallet = JSON.parse(localStorage.getItem(StorageKey.LAST_SELECTED_WALLET) ?? '{}')
+    const selectedWallet = this.readLastSelectedWallet()
 
-    if (!selectedWallet.key) {
+    if (!selectedWallet || typeof selectedWallet.key !== 'string' || !selectedWallet.key) {
       return
     }
 

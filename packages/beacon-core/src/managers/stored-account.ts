@@ -11,9 +11,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const optionalString = (value: unknown): boolean => value === undefined || typeof value === 'string'
 
+const isNetworkType = (value: unknown): value is NetworkType =>
+  typeof value === 'string' && value.trim().length > 0
+
 const isNetwork = (value: unknown): value is Network =>
   isRecord(value) &&
-  Object.values(NetworkType).some((type) => type === value.type) &&
+  isNetworkType(value.type) &&
   optionalString(value.name) &&
   optionalString(value.rpcUrl)
 

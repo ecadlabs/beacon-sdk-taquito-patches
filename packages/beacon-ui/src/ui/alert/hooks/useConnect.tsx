@@ -123,19 +123,37 @@ const useConnect = (
     }
   }
 
-  const updateSelectedWalletWithURL = (url: string) => {
-    let wallet = JSON.parse(localStorage.getItem(StorageKey.LAST_SELECTED_WALLET) ?? '{}')
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 
-    if (!wallet.key) {
+  const readLastSelectedWallet = (): Record<string, unknown> | undefined => {
+    try {
+      const raw = localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)
+      if (!raw) {
+        return undefined
+      }
+      const parsed: unknown = JSON.parse(raw)
+
+      return isRecord(parsed) ? parsed : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  const updateSelectedWalletWithURL = (url: string) => {
+    const wallet = readLastSelectedWallet()
+
+    if (!wallet || typeof wallet.key !== 'string' || !wallet.key) {
       return
     }
 
-    wallet = {
-      ...wallet,
-      url
-    }
-
-    localStorage.setItem(StorageKey.LAST_SELECTED_WALLET, JSON.stringify(wallet))
+    localStorage.setItem(
+      StorageKey.LAST_SELECTED_WALLET,
+      JSON.stringify({
+        ...wallet,
+        url
+      })
+    )
   }
 
   const handleNewTab = async (config: AlertConfig, wallet: MergedWallet) => {

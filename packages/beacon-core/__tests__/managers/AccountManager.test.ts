@@ -44,6 +44,21 @@ describe('stored account variants', () => {
     expect(localStorage.getItem(storage.getPrefixedKey(StorageKey.ACCOUNTS))).toBe(original)
   })
 
+  it('restores legacy Tezos accounts with retired testnet network types without throwing', async () => {
+    const storage = new LocalStorage('retired-testnet-accounts')
+    const legacyOxford = { ...account, accountIdentifier: 'oxford-1', network: { type: 'oxfordnet' } }
+    const legacyTezlink = {
+      ...account,
+      accountIdentifier: 'tezlink-1',
+      network: { type: 'tezlink_shadownet' }
+    }
+    const original = JSON.stringify([legacyOxford, legacyTezlink])
+    localStorage.setItem(storage.getPrefixedKey(StorageKey.ACCOUNTS), original)
+    const manager = new AccountManager(storage)
+    await expect(manager.getAccounts()).resolves.toEqual([legacyOxford, legacyTezlink])
+    expect(localStorage.getItem(storage.getPrefixedKey(StorageKey.ACCOUNTS))).toBe(original)
+  })
+
   it('reports malformed records instead of silently dropping them or rewriting storage', async () => {
     const storage = new LocalStorage('invalid-account')
     const original = JSON.stringify([account, null])
