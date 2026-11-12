@@ -53,5 +53,3 @@ export const getError = (
       return new UnknownBeaconError(mergedOptions)
   }
 }
-
-export default getError

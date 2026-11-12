@@ -18,5 +18,6 @@ export const createErrorResponseInput = (
   if (errorData !== undefined) {
     result.errorData = errorData
   }
+
   return result
 }
