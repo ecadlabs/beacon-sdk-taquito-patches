@@ -1420,7 +1420,7 @@ export class DAppClient extends Client {
   private async onRelayerError() {
     await this.resetInvalidState(false)
 
-    this.events.emit(BeaconEvent.RELAYER_ERROR)
+    await this.events.emit(BeaconEvent.RELAYER_ERROR)
   }
 
   private async wcToastHandler(status: string) {
@@ -1435,7 +1435,7 @@ export class DAppClient extends Client {
 
     await this.events.emit(BeaconEvent.HIDE_UI, ['alert'])
     if (status === 'pending') {
-      this.events.emit(BeaconEvent.ACKNOWLEDGE_RECEIVED, {
+      await this.events.emit(BeaconEvent.ACKNOWLEDGE_RECEIVED, {
         correlated: false,
         receivedAt,
         extraInfo: {},
@@ -2958,17 +2958,29 @@ export class DAppClient extends Client {
 
   private readonly blockchains: Map<string, Blockchain> = new Map()
 
-  addBlockchain(chain: Blockchain) {
+  private readonly blockchainRegistrations = new Map<string, symbol>()
+
+  public addBlockchain(chain: Blockchain) {
     this.blockchains.set(chain.identifier, chain)
-    chain.getWalletLists().then((walletLists) => {
+    const registration = Symbol(chain.identifier)
+    this.blockchainRegistrations.set(chain.identifier, registration)
+    const publishWalletLists = async (): Promise<void> => {
+      const walletLists = await chain.getWalletLists()
+      if (this.blockchainRegistrations.get(chain.identifier) !== registration) {
+        return
+      }
       setDesktopList(walletLists.desktopList)
       setExtensionList(walletLists.extensionList)
       setWebList(walletLists.webList)
       setiOSList(walletLists.iOSList)
-    })
+    }
+    publishWalletLists().catch((error: unknown) =>
+      logger.warn('addBlockchain wallet lists', chain.identifier, error)
+    )
   }
 
-  removeBlockchain(chainIdentifier: string) {
+  public removeBlockchain(chainIdentifier: string) {
+    this.blockchainRegistrations.delete(chainIdentifier)
     this.blockchains.delete(chainIdentifier)
   }
 

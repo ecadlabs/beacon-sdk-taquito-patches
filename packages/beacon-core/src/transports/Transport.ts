@@ -12,7 +12,7 @@ import {
 import { Logger } from '../utils/Logger'
 import { PeerManager } from '../managers/PeerManager'
 import { CommunicationClient } from './clients/CommunicationClient'
-import { ClientEvents } from './clients/ClientEvents'
+import { ClientEvents, ClientEventHandlers } from './clients/ClientEvents'
 
 type PeerStorageKey =
   | StorageKey.TRANSPORT_P2P_PEERS_DAPP
@@ -102,7 +102,7 @@ export abstract class Transport<
    */
   protected newPeerListener?: (peer: T) => boolean | Promise<boolean>
 
-  setEventHandler(event: ClientEvents, fun: Function) {
+  public setEventHandler<E extends ClientEvents>(event: E, fun: ClientEventHandlers[E]) {
     this.client.eventHandlers.set(event, fun)
   }
 

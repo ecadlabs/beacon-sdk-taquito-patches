@@ -7,6 +7,7 @@ import {
   StorageKeyReturnDefaults,
   StorageKeyReturnType
 } from '@ecadlabs/beacon-types'
+import { Logger } from '@ecadlabs/beacon-core'
 import { MatrixClient } from '../src/matrix-client/MatrixClient'
 import { MatrixClientStore } from '../src/matrix-client/MatrixClientStore'
 import { MatrixClientEventEmitter } from '../src/matrix-client/MatrixClientEventEmitter'
@@ -147,6 +148,51 @@ describe('Matrix outbound text body contract', () => {
     )
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  it.each(['success', 'error'] as const)(
+    'reports rejected scheduled %s callbacks without invoking another outcome',
+    async (outcome) => {
+      const callbackFailure = new Error('consumer callback failed')
+      const networkFailure = new Error('network failed')
+      const fetchMock = vi.spyOn(globalThis, 'fetch')
+      if (outcome === 'success') fetchMock.mockResolvedValue(response())
+      else fetchMock.mockRejectedValue(networkFailure)
+      const warn = vi.spyOn(Logger.prototype, 'warn')
+      const { events } = createServices()
+      const onSuccess = vi.fn(async () => {
+        if (outcome === 'success') throw callbackFailure
+      })
+      const onError = vi.fn(async () => {
+        throw callbackFailure
+      })
+
+      events.scheduleEvent({
+        accessToken: 'token',
+        roomId: '!room:id',
+        type: 'm.room.message',
+        content: { msgtype: MatrixMessageType.TEXT, body: 'message' },
+        txnId: 'callback-txn',
+        onSuccess,
+        onError
+      })
+
+      await vi.waitFor(() =>
+        expect(warn).toHaveBeenCalledWith(
+          'scheduleEvent callback',
+          '!room:id',
+          'callback-txn',
+          callbackFailure
+        )
+      )
+      if (outcome === 'success') {
+        expect(onSuccess).toHaveBeenCalledWith({ event_id: '$event' })
+        expect(onError).not.toHaveBeenCalled()
+      } else {
+        expect(onSuccess).not.toHaveBeenCalled()
+        expect(onError).toHaveBeenCalledWith(networkFailure)
+      }
+    }
+  )
 
   it('preserves network error identity through the service', async () => {
     const failure = new Error('network failed')

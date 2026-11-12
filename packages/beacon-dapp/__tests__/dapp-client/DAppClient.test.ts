@@ -1,9 +1,10 @@
 import type { Mock } from 'vitest'
-import { openToast } from '@ecadlabs/beacon-ui'
+import { openToast, setDesktopList } from '@ecadlabs/beacon-ui'
 // __tests__/DAppClient.test.ts
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import {
   AccountInfo,
+  Blockchain,
   BeaconMessage,
   BeaconMessageWrapper,
   BeaconBaseMessage,
@@ -23,7 +24,7 @@ import {
   TransportType
 } from '@ecadlabs/beacon-types'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
-import { LocalStorage } from '@ecadlabs/beacon-core'
+import { LocalStorage, Logger } from '@ecadlabs/beacon-core'
 import { WalletConnectTransport } from '@ecadlabs/beacon-transport-walletconnect'
 import { BeaconEvent } from '../../src/events'
 import { DappPostMessageTransport } from '../../src/transports/DappPostMessageTransport'
@@ -337,6 +338,58 @@ describe('DAppClient: basic unit tests', () => {
 
     client.removeBlockchain('chain-1')
     expect((client as any).blockchains.has('chain-1')).toBe(false)
+  })
+
+  it.each(['remove', 'replace', 'register again', 'another chain'] as const)(
+    'publishes wallet lists only for current registrations after %s',
+    async (action) => {
+      type WalletLists = Awaited<ReturnType<Blockchain['getWalletLists']>>
+      const delayed = new ExposedPromise<WalletLists>()
+      const lists: WalletLists = { desktopList: [], extensionList: [], webList: [], iOSList: [] }
+      const chain: Blockchain = {
+        identifier: 'delayed-chain',
+        async validateRequest() {},
+        async handleResponse() {},
+        async getAccountInfosFromPermissionResponse() {
+          return []
+        },
+        getWalletLists: vi.fn().mockReturnValueOnce(delayed.promise).mockResolvedValue(lists)
+      }
+      vi.mocked(setDesktopList).mockClear()
+      client.addBlockchain(chain)
+      if (action === 'remove') client.removeBlockchain(chain.identifier)
+      else client.addBlockchain(
+        action === 'another chain' ? { ...chain, identifier: 'other-chain' } :
+        action === 'replace' ? { ...chain } : chain
+      )
+      await Promise.resolve()
+      if (action !== 'remove') expect(setDesktopList).toHaveBeenCalledOnce()
+      vi.mocked(setDesktopList).mockClear()
+      delayed.resolve(lists)
+      await delayed.promise
+      await Promise.resolve()
+      if (action === 'another chain') expect(setDesktopList).toHaveBeenCalledWith(lists.desktopList)
+      else expect(setDesktopList).not.toHaveBeenCalled()
+    }
+  )
+
+  it('reports wallet list loading failures for the registered blockchain', async () => {
+    const failure = new Error('wallet list unavailable')
+    const warn = vi.spyOn(Logger.prototype, 'warn')
+    client.addBlockchain({
+      identifier: 'failed-chain',
+      async validateRequest() {},
+      async handleResponse() {},
+      async getAccountInfosFromPermissionResponse() {
+        return []
+      },
+      async getWalletLists() {
+        throw failure
+      }
+    })
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith('addBlockchain wallet lists', 'failed-chain', failure)
+    )
   })
 
   it('handles raw v3 disconnect messages without a nested message wrapper', async () => {

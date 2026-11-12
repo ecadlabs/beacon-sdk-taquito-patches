@@ -1,4 +1,7 @@
 import { createLeaderElection, BroadcastChannel, LeaderElector } from 'broadcast-channel'
+import { Logger } from './Logger'
+
+const logger = new Logger('MultiTabChannel')
 
 const lifecycleObservers = new WeakMap<MultiTabChannel, () => void>()
 
@@ -20,8 +23,10 @@ export function observeMultiTabChannel(
 export class MultiTabChannel {
   private readonly channel: BroadcastChannel<unknown>
   private readonly elector: LeaderElector
-  private readonly beforeUnloadListener = () => this.onBeforeUnloadHandler()
-  private readonly messageListener = (message: unknown) => this.onMessageHandler(message)
+  private readonly beforeUnloadListener = () =>
+    this.onBeforeUnloadHandler().catch((error: unknown) => logger.warn('beforeunload', error))
+  private readonly messageListener = (message: unknown) =>
+    this.onMessageHandler(message).catch((error: unknown) => logger.warn('message callback', error))
   private readonly onBCMessageHandler: (message: unknown) => unknown
   private readonly onElectedLeaderHandler: () => unknown
   // Auxiliary variable needed for handling beforeUnload.
@@ -83,20 +88,23 @@ export class MultiTabChannel {
   public async close() {
     const wasLeader = this.wasLeader
     this.retireListeners()
-    await this.elector.die()
-    if (wasLeader) {
-      this.postMessage({ type: 'LEADER_DEAD' })
+    try {
+      await this.elector.die()
+      if (wasLeader) {
+        await this.channel.postMessage({ type: 'LEADER_DEAD' })
+      }
+    } finally {
+      await this.channel.close()
+      this.initialized = false
+      this.wasLeader = false
     }
-    await this.channel.close()
-    this.initialized = false
-    this.wasLeader = false
   }
 
   private async onBeforeUnloadHandler() {
     this.retireListeners()
     if (this.wasLeader) {
       await this.elector.die()
-      this.postMessage({ type: 'LEADER_DEAD' })
+      await this.channel.postMessage({ type: 'LEADER_DEAD' })
     }
   }
 
@@ -125,13 +133,13 @@ export class MultiTabChannel {
       await this.getLeadership()
 
       if (!this.closed && this.isLeader()) {
-        this.onElectedLeaderHandler()
+        await this.onElectedLeaderHandler()
       }
 
       return
     }
 
-    this.onBCMessageHandler(message)
+    await this.onBCMessageHandler(message)
   }
 
   isLeader(): boolean {
@@ -153,6 +161,6 @@ export class MultiTabChannel {
   }
 
   public postMessage(message: unknown): void {
-    this.channel.postMessage(message)
+    this.channel.postMessage(message).catch((error: unknown) => logger.warn('postMessage', error))
   }
 }

@@ -1,3 +1,4 @@
+import { Logger } from '../../src/utils/Logger'
 import { MultiTabChannel } from '../../src/utils/multi-tab-channel'
 
 const state = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ vi.mock('broadcast-channel', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
+  state.channel.postMessage.mockResolvedValue(undefined)
   state.elector.isLeader = false
   state.elector.hasLeader.mockResolvedValue(true)
   state.elector.awaitLeadership.mockImplementation(async () => {
@@ -140,4 +142,48 @@ it('removes the exact beforeunload listener when explicitly closed', async () =>
   expect(registration).toBeDefined()
   await channel.close()
   expect(remove).toHaveBeenCalledWith('beforeunload', registration?.[1])
+})
+
+it('observes asynchronous message callback failures', async () => {
+  const failure = new Error('application callback failed')
+  const warn = vi.spyOn(Logger.prototype, 'warn')
+  const channel = new MultiTabChannel(
+    'callback-failure',
+    async () => {
+      throw failure
+    },
+    vi.fn()
+  )
+  await channel.init()
+  await state.channel.onmessage?.({ type: 'RESPONSE' })
+  expect(warn).toHaveBeenCalledWith('message callback', failure)
+  await channel.close()
+})
+
+it('waits for the departure broadcast before closing the sender', async () => {
+  state.elector.hasLeader.mockResolvedValue(false)
+  let finish: () => void = () => {}
+  state.channel.postMessage.mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      finish = resolve
+    })
+  )
+  const channel = new MultiTabChannel('ordered-close', vi.fn(), vi.fn())
+  await channel.init()
+  const closing = channel.close()
+  await Promise.resolve()
+  expect(state.channel.close).not.toHaveBeenCalled()
+  finish()
+  await closing
+  expect(state.channel.close).toHaveBeenCalledOnce()
+})
+
+it('reports detached outbound failures', async () => {
+  const failure = new Error('broadcast failed')
+  const warn = vi.spyOn(Logger.prototype, 'warn')
+  state.channel.postMessage.mockRejectedValueOnce(failure)
+  const channel = new MultiTabChannel('send-failure', vi.fn(), vi.fn())
+  channel.postMessage({ type: 'REQUEST' })
+  await vi.waitFor(() => expect(warn).toHaveBeenCalledWith('postMessage', failure))
+  await channel.close()
 })

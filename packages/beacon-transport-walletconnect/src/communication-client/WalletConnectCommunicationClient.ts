@@ -510,6 +510,16 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     }
   }
 
+  private notifyCallback(context: string, callback: () => void | Promise<void>): void {
+    try {
+      Promise.resolve(callback()).catch((error: unknown) =>
+        logger.warn(context, getErrorDiagnostic(error))
+      )
+    } catch (error: unknown) {
+      logger.warn(context, getErrorDiagnostic(error))
+    }
+  }
+
   private onStorageMessageHandler(type: string) {
     if (this.retired || !this.isMobileOS()) {
       return
@@ -525,7 +535,9 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       return
     }
 
-    this.refreshState()
+    this.refreshState().catch((error: unknown) =>
+      logger.warn('storage refresh', getErrorDiagnostic(error))
+    )
   }
 
   private onStorageErrorHandler(data: unknown) {
@@ -1283,7 +1295,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         if (!hasResponse && ownsClient()) {
           // Only show "waiting for acknowledge" message if pong arrives before response
           const fun = this.eventHandlers.get(ClientEvents.WC_ACK_NOTIFICATION)
-          fun && fun('pending')
+          this.notifyCallback('pairing acknowledgement callback', () => fun?.('pending'))
         }
       })
       .catch(() => undefined)
@@ -1369,7 +1381,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         if (!message || message.toLowerCase().includes('expir')) {
           const fun = this.eventHandlers.get(ClientEvents.CLOSE_ALERT)
           if (fun) {
-            fun(TransportType.WALLETCONNECT)
+            this.notifyCallback('close alert callback', () => fun(TransportType.WALLETCONNECT))
           }
 
           return
@@ -1380,7 +1392,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         if (this.activeListeners.size === 0) {
           logger.debug('No active listeners', [])
           const fun = this.eventHandlers.get(ClientEvents.WC_ACK_NOTIFICATION)
-          fun && fun('error')
+          this.notifyCallback('pairing error callback', () => fun?.('error'))
         }
       })
       .finally(() => this.completeProposal(signClient, exposed))
@@ -1517,7 +1529,12 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
       this.setSession(session)
 
-      this.updateActiveAccount(this.getTezosNamespace(event.params.namespaces).accounts, session)
+      this.updateActiveAccount(
+        this.getTezosNamespace(event.params.namespaces).accounts,
+        session
+      ).catch((error: unknown) =>
+        logger.warn('session_update active account', getErrorDiagnostic(error))
+      )
     })
 
     on('session_delete', (event) => {
@@ -1703,7 +1720,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     if (resetPairing) {
       const reset = this.eventHandlers.get(ClientEvents.RESET_STATE)
       if (reset) {
-        reset(TransportType.WALLETCONNECT)
+        this.notifyCallback('reset state callback', () => reset(TransportType.WALLETCONNECT))
       }
     }
     await this.notifyListeners(session.topic, {
