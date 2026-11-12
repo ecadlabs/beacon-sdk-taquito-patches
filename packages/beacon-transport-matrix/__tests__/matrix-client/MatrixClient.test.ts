@@ -168,11 +168,16 @@ describe('MatrixClient', () => {
     it('backs off failed reauthentication and stops retrying after stop', async () => {
       const { client, login, sync } = setup()
       await client.start(user)
+      expect(login).toHaveBeenCalledTimes(1)
       sync.mockRejectedValue({ errcode: 'M_UNKNOWN_TOKEN' })
       login.mockRejectedValue(new Error('login unavailable'))
-      for (let i = 0; i < 4; i++) await vi.runOnlyPendingTimersAsync()
-      expect(login).toHaveBeenCalledTimes(5)
+      for (let i = 0; i < 3; i++) await vi.runOnlyPendingTimersAsync()
+      expect(login).toHaveBeenCalledTimes(4)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(login).toHaveBeenCalledTimes(4)
       await vi.advanceTimersByTimeAsync(4999)
+      expect(login).toHaveBeenCalledTimes(4)
+      await vi.advanceTimersByTimeAsync(1)
       expect(login).toHaveBeenCalledTimes(5)
       await client.stop()
       await vi.runOnlyPendingTimersAsync()
@@ -200,6 +205,70 @@ describe('MatrixClient', () => {
       expect(store.get('isRunning')).toBe(false)
       expect(sync).toHaveBeenCalledTimes(2)
       expect(vi.getTimerCount()).toBe(0)
+    })
+  })
+  describe('sync retry backoff and health transitions', () => {
+    const user = { id: 'matrix-user', password: 'password', deviceId: 'device' }
+    const setup = () => {
+      const store = createStore()
+      const login = vi
+        .fn()
+        .mockResolvedValueOnce({ access_token: 'old' })
+        .mockResolvedValue({ access_token: 'new' })
+      const sync = vi.fn().mockResolvedValue({ next_batch: 'batch', rooms: {} })
+      const client = new MatrixClient(
+        store as any,
+        { onStateChanged: vi.fn() } as any,
+        { login } as any,
+        {} as any,
+        { sync } as any,
+        { cancelAllRequests: vi.fn().mockResolvedValue(undefined) } as any
+      )
+      return { client, store, login, sync }
+    }
+
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => vi.useRealTimers())
+
+    it('enters 5000ms backoff immediately on the 3rd consecutive sync failure', async () => {
+      const { client, sync } = setup()
+      const healthEvents: unknown[] = []
+      client.onHealthTransition((event) => {
+        healthEvents.push(event)
+      })
+
+      await client.start(user)
+      expect(sync).toHaveBeenCalledTimes(1)
+
+      sync.mockRejectedValue(new Error('sync network failure'))
+
+      // Failure 1: retries immediately at 0ms
+      await vi.advanceTimersByTimeAsync(0)
+      expect(sync).toHaveBeenCalledTimes(2)
+      expect(healthEvents).toEqual([])
+
+      // Failure 2: retries immediately (nested timer tick)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(sync).toHaveBeenCalledTimes(3)
+      expect(healthEvents).toEqual([])
+
+      // Failure 3: retries immediately, emitting degraded health
+      await vi.advanceTimersByTimeAsync(1)
+      expect(sync).toHaveBeenCalledTimes(4)
+      expect(healthEvents).toEqual([{ health: 'degraded', reason: 'sync_failing' }])
+
+      // 3rd failure must enter 5000ms backoff: advancing by 0ms or 4999ms must not trigger a 4th retry
+      await vi.advanceTimersByTimeAsync(0)
+      expect(sync).toHaveBeenCalledTimes(4)
+      await vi.advanceTimersByTimeAsync(4999)
+      expect(sync).toHaveBeenCalledTimes(4)
+
+      // Advancing by 1ms (reaching 5000ms total) triggers the 4th retry
+      await vi.advanceTimersByTimeAsync(1)
+      expect(sync).toHaveBeenCalledTimes(5)
+
+      await client.stop()
+      await vi.runOnlyPendingTimersAsync()
     })
   })
   describe('startup cancellation', () => {

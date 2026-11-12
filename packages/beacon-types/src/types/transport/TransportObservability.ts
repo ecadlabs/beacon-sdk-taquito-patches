@@ -40,6 +40,12 @@ export interface PendingRequestInfo {
   transport: TransportType
   senderId?: string
   sentAt: number
+  /**
+   * Epoch millisecond timestamp when the request will time out with PEER_UNREACHABLE
+   * (incorporating DAppClientOptions.requestTimeoutMs, the 60s default permission timeout,
+   * and WalletConnect's 5-minute request expiry), or undefined when no deadline applies
+   * (or after correlated ACK).
+   */
   deadline?: number
   acknowledged: boolean | undefined
 }

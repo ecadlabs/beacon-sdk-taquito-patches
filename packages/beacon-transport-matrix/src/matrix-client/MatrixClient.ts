@@ -467,7 +467,7 @@ export class MatrixClient {
             }
             resolve()
           },
-          syncingRetries > IMMEDIATE_POLLING_RETRIES ? RETRY_INTERVAL + interval : interval
+          syncingRetries >= IMMEDIATE_POLLING_RETRIES ? RETRY_INTERVAL + interval : interval
         )
         this.pollingRetry = { timer, complete: resolve }
       })

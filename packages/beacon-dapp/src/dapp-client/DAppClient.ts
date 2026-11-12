@@ -191,6 +191,7 @@ const logger = new Logger('DAppClient')
 // Only permission requests get a default deadline. Beacon cannot cancel a request at the wallet,
 // so a timed-out operation or signature can still complete there, and a retry can pay twice.
 const DEFAULT_PERMISSION_TIMEOUT_MS = 60_000
+const WALLETCONNECT_REQUEST_EXPIRY_MS = 300_000
 const DEFAULT_ACK_TIMEOUT_MS = 5_000
 // Timed-out request IDs kept so a late wallet response can still be reported.
 const LATE_RESPONSE_RETENTION = 100
@@ -4399,19 +4400,6 @@ export class DAppClient extends Client {
           if (!canDispatch()) {
             return
           }
-          if (!this.onOutgoingMessage(request, transport.type, peer)) {
-            if (owned) {
-              this.requestTracker.abort(owned.key, this.createAbortedError(request.id))
-            }
-
-            return
-          }
-          const payload = await new Serializer().serialize(request)
-          if (!canDispatch()) {
-            return
-          }
-          // Account replacement can cancel preparation, but not an operation already sent.
-          this.finishProxyPreparation(proxyKey)
           const sentAt = Date.now()
           const recipientSenderId =
             peer && 'senderId' in peer && typeof peer.senderId === 'string'
@@ -4426,6 +4414,19 @@ export class DAppClient extends Client {
               sentAt
             )
           }
+          if (!this.onOutgoingMessage(request, transport.type, peer)) {
+            if (owned) {
+              this.requestTracker.abort(owned.key, this.createAbortedError(request.id))
+            }
+
+            return
+          }
+          const payload = await new Serializer().serialize(request)
+          if (!canDispatch()) {
+            return
+          }
+          // Account replacement can cancel preparation, but not an operation already sent.
+          this.finishProxyPreparation(proxyKey)
           try {
             await transport.send(payload, peer)
           } finally {
@@ -4588,17 +4589,6 @@ export class DAppClient extends Client {
           if (!canDispatch()) {
             return
           }
-          if (!this.onOutgoingMessage(request, transport.type, peer)) {
-            this.requestTracker.abort(owned.key, this.createAbortedError(request.id))
-
-            return
-          }
-          const payload = await new Serializer().serialize(request)
-          if (!canDispatch()) {
-            return
-          }
-          // Account replacement can cancel preparation, but not an operation already sent.
-          this.finishProxyPreparation(proxyKey)
           const sentAt = Date.now()
           const recipientSenderId =
             peer && 'senderId' in peer && typeof peer.senderId === 'string'
@@ -4615,6 +4605,17 @@ export class DAppClient extends Client {
             recipientSenderId,
             sentAt
           )
+          if (!this.onOutgoingMessage(request, transport.type, peer)) {
+            this.requestTracker.abort(owned.key, this.createAbortedError(request.id))
+
+            return
+          }
+          const payload = await new Serializer().serialize(request)
+          if (!canDispatch()) {
+            return
+          }
+          // Account replacement can cancel preparation, but not an operation already sent.
+          this.finishProxyPreparation(proxyKey)
           try {
             await transport.send(payload, peer)
           } finally {
@@ -4745,6 +4746,7 @@ export class DAppClient extends Client {
           senderId,
           forwardedAt
         )
+        this.armRequestDeadline(owned.key, request.type)
         this.multiTabChannel.postMessage({ type: request.type, data: request, id })
         if (!canDispatch()) {
           return
@@ -4774,7 +4776,6 @@ export class DAppClient extends Client {
             extraInfo: { resetCallback: () => this.disconnect() }
           })
           .catch((emitError) => logger.warn('requestDispatch', emitError))
-        this.armRequestDeadline(owned.key, request.type)
       } catch (error: unknown) {
         this.requestTracker.reject(owned.key, error)
       }
@@ -5180,7 +5181,16 @@ export class DAppClient extends Client {
       return
     }
     const timeoutMs = this.requestDeadlineMs(requestType)
-    const deadline = Number.isFinite(timeoutMs) && timeoutMs > 0 ? sentAt + timeoutMs : undefined
+    const effectiveTimeoutMs =
+      transportType === TransportType.WALLETCONNECT
+        ? Number.isFinite(timeoutMs) && timeoutMs > 0
+          ? Math.min(timeoutMs, WALLETCONNECT_REQUEST_EXPIRY_MS)
+          : WALLETCONNECT_REQUEST_EXPIRY_MS
+        : Number.isFinite(timeoutMs) && timeoutMs > 0
+          ? timeoutMs
+          : undefined
+    const deadline =
+      effectiveTimeoutMs !== undefined ? sentAt + effectiveTimeoutMs : undefined
     const acknowledged = transportType === TransportType.WALLETCONNECT ? undefined : false
     const metadata: {
       key: RequestKey

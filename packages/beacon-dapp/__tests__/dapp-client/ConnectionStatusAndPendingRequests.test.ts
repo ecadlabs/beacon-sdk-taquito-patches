@@ -15,6 +15,7 @@ import {
   BeaconErrorType,
   BeaconMessage,
   BeaconMessageType,
+  Blockchain,
   ConnectionContext,
   ExtendedP2PPairingResponse,
   ExtendedWalletConnectPairingResponse,
@@ -29,6 +30,7 @@ import {
   TransportType
 } from '@ecadlabs/beacon-types'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
+import { BeaconMessageRecord } from '../../src/dapp-client/message-observer'
 import { DappP2PTransport } from '../../src/transports/DappP2PTransport'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
 import { BeaconEvent, TransportStatusChangedInfo, WaitingForWalletAckInfo } from '../../src/events'
@@ -130,6 +132,18 @@ const wcAccount: AccountInfo = {
   connectedAt: 1,
   walletType: 'implicit'
 }
+
+const createMockBlockchain = (): Blockchain => ({
+  identifier: 'tezos',
+  async validateRequest() {},
+  async handleResponse() {},
+  async getWalletLists() {
+    return { extensionList: [], desktopList: [], webList: [], iOSList: [] }
+  },
+  async getAccountInfosFromPermissionResponse() {
+    return []
+  }
+})
 
 describe('DAppClient connection status, health, ACK timeout, and pending requests (#150)', () => {
   let dapp: DAppClient | undefined
@@ -428,12 +442,26 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
       expect(degradedInfo.health).toBe('degraded')
       expect(degradedInfo.relayServer).toBe('matrix-1.test.ecad.io')
 
-      // Consecutive failure 4 -> still degraded, no duplicate event
-      await stepPoll(0)
+      // Consecutive failure 3 must immediately enter the 5000ms backoff
+      // Advancing by 0ms or 4999ms must NOT trigger another sync() call
+      const syncCallsAtDegraded = sync.mock.calls.length
+      await vi.advanceTimersByTimeAsync(0)
+      expect(sync).toHaveBeenCalledTimes(syncCallsAtDegraded)
+      await vi.advanceTimersByTimeAsync(4_999)
+      expect(sync).toHaveBeenCalledTimes(syncCallsAtDegraded)
+
+      // Advancing to 5000ms triggers the 4th consecutive failure
+      await vi.advanceTimersByTimeAsync(1)
+      expect(sync).toHaveBeenCalledTimes(syncCallsAtDegraded + 1)
       expect(events).toHaveLength(1)
 
-      // Recovery on next sync after backoff (5000ms) -> back to ok
-      await stepPoll(5_000)
+      // Consecutive failure 4 also backs off by 5000ms
+      await vi.advanceTimersByTimeAsync(4_999)
+      expect(sync).toHaveBeenCalledTimes(syncCallsAtDegraded + 1)
+
+      // Recovery on next sync after 5000ms backoff -> back to ok
+      await vi.advanceTimersByTimeAsync(1)
+      expect(sync).toHaveBeenCalledTimes(syncCallsAtDegraded + 2)
       expect(events).toEqual([
         {
           transport: TransportType.P2P,
@@ -1030,6 +1058,280 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
       expect(client.getPendingRequests()).toEqual([])
     })
 
+    it('records pending request before onOutgoingMessage for V2 requests and V3 blockchain requests', async () => {
+      const { client, transport } = await createConfiguredClient({
+        transportType: TransportType.P2P,
+        requestTimeoutMs: 30_000
+      })
+
+      const mockBlockchain = createMockBlockchain()
+      client.addBlockchain(mockBlockchain)
+
+      let capturedPendingV2: ReturnType<typeof client.getPendingRequests> = []
+      let capturedRecordV2: BeaconMessageRecord | undefined
+      let capturedPendingV3: ReturnType<typeof client.getPendingRequests> = []
+      let capturedRecordV3: BeaconMessageRecord | undefined
+
+      client.subscribeToMessages((record) => {
+        if (record.direction === 'outgoing') {
+          if (record.message.version === '2') {
+            capturedRecordV2 = record
+            capturedPendingV2 = client.getPendingRequests()
+          } else if (record.message.version === '3') {
+            capturedRecordV3 = record
+            capturedPendingV3 = client.getPendingRequests()
+          }
+        }
+      })
+
+      // 1. V2 request (requestSignPayload)
+      const signPromise = client.requestSignPayload({
+        signingType: SigningType.RAW,
+        payload: '050100'
+      })
+      signPromise.catch(() => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      const signReqId = await getLastSentRequestId(transport)
+
+      expect(capturedRecordV2).toBeDefined()
+      expect(capturedPendingV2).toHaveLength(1)
+      expect(capturedPendingV2[0]).toEqual({
+        id: signReqId,
+        type: BeaconMessageType.SignPayloadRequest,
+        transport: TransportType.P2P,
+        senderId: p2pPeer.senderId,
+        sentAt: expect.any(Number),
+        deadline: capturedPendingV2[0]?.sentAt !== undefined ? capturedPendingV2[0].sentAt + 30_000 : undefined,
+        acknowledged: false
+      })
+
+      // Respond to clear V2 request
+      await transport.receive({
+        id: signReqId,
+        version: '2',
+        senderId: p2pPeer.senderId,
+        type: BeaconMessageType.SignPayloadResponse,
+        signingType: SigningType.RAW,
+        signature: 'sig123'
+      })
+      await expect(signPromise).resolves.toMatchObject({ signature: 'sig123' })
+      expect(client.getPendingRequests()).toEqual([])
+
+      // 2. V3 request (BlockchainRequest)
+      const v3Promise = client.request({
+        type: BeaconMessageType.BlockchainRequest,
+        blockchainIdentifier: 'tezos',
+        accountId: p2pAccount.accountIdentifier,
+        blockchainData: { type: 'operation', scope: 'operation' }
+      })
+      v3Promise.catch(() => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      const v3ReqId = await getLastSentRequestId(transport)
+
+      expect(capturedRecordV3).toBeDefined()
+      expect(capturedPendingV3).toHaveLength(1)
+      expect(capturedPendingV3[0]).toEqual({
+        id: v3ReqId,
+        type: BeaconMessageType.BlockchainRequest,
+        transport: TransportType.P2P,
+        senderId: p2pPeer.senderId,
+        sentAt: expect.any(Number),
+        deadline: capturedPendingV3[0]?.sentAt !== undefined ? capturedPendingV3[0].sentAt + 30_000 : undefined,
+        acknowledged: false
+      })
+
+      // Respond to clear V3 request
+      await transport.receive({
+        id: v3ReqId,
+        version: '3',
+        senderId: p2pPeer.senderId,
+        message: {
+          type: BeaconMessageType.BlockchainResponse,
+          blockchainIdentifier: 'tezos',
+          blockchainData: {}
+        }
+      })
+      await expect(v3Promise).resolves.toBeDefined()
+      expect(client.getPendingRequests()).toEqual([])
+    })
+
+    it('aborts cleanly and clears pending request when observer destroys client during onOutgoingMessage for V2 and V3 requests', async () => {
+      // 1. V2 request (requestSignPayload)
+      const { client: clientV2, transport: transportV2 } = await createConfiguredClient({
+        transportType: TransportType.P2P,
+        ackTimeoutMs: 1_000,
+        requestTimeoutMs: 10_000
+      })
+      const waitingEventsV2: WaitingForWalletAckInfo[] = []
+      await clientV2.subscribeToEvent(BeaconEvent.WAITING_FOR_WALLET_ACK, (info) => {
+        waitingEventsV2.push(info)
+      })
+
+      let pendingDuringOutgoingV2: ReturnType<typeof clientV2.getPendingRequests> = []
+      clientV2.subscribeToMessages((record) => {
+        if (record.direction === 'outgoing') {
+          pendingDuringOutgoingV2 = clientV2.getPendingRequests()
+          void clientV2.destroy()
+        }
+      })
+
+      const signPromise = clientV2.requestSignPayload({
+        signingType: SigningType.RAW,
+        payload: '050100'
+      })
+
+      await expect(signPromise).rejects.toBeInstanceOf(AbortedBeaconError)
+      expect(pendingDuringOutgoingV2).toHaveLength(1)
+      expect(pendingDuringOutgoingV2[0]).toMatchObject({
+        type: BeaconMessageType.SignPayloadRequest,
+        transport: TransportType.P2P,
+        senderId: p2pPeer.senderId,
+        acknowledged: false
+      })
+      expect(clientV2.getPendingRequests()).toEqual([])
+      expect(transportV2.send).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(waitingEventsV2).toEqual([])
+
+      // 2. V3 request (BlockchainRequest)
+      const { client: clientV3, transport: transportV3 } = await createConfiguredClient({
+        transportType: TransportType.P2P,
+        ackTimeoutMs: 1_000,
+        requestTimeoutMs: 10_000
+      })
+      clientV3.addBlockchain(createMockBlockchain())
+      const waitingEventsV3: WaitingForWalletAckInfo[] = []
+      await clientV3.subscribeToEvent(BeaconEvent.WAITING_FOR_WALLET_ACK, (info) => {
+        waitingEventsV3.push(info)
+      })
+
+      let pendingDuringOutgoingV3: ReturnType<typeof clientV3.getPendingRequests> = []
+      clientV3.subscribeToMessages((record) => {
+        if (record.direction === 'outgoing') {
+          pendingDuringOutgoingV3 = clientV3.getPendingRequests()
+          void clientV3.destroy()
+        }
+      })
+
+      const v3Promise = clientV3.request({
+        type: BeaconMessageType.BlockchainRequest,
+        blockchainIdentifier: 'tezos',
+        accountId: p2pAccount.accountIdentifier,
+        blockchainData: { type: 'operation', scope: 'operation' }
+      })
+
+      await expect(v3Promise).rejects.toBeInstanceOf(AbortedBeaconError)
+      expect(pendingDuringOutgoingV3).toHaveLength(1)
+      expect(pendingDuringOutgoingV3[0]).toMatchObject({
+        type: BeaconMessageType.BlockchainRequest,
+        transport: TransportType.P2P,
+        senderId: p2pPeer.senderId,
+        acknowledged: false
+      })
+      expect(clientV3.getPendingRequests()).toEqual([])
+      expect(transportV3.send).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(waitingEventsV3).toEqual([])
+    })
+
+    it('aborts cleanly and clears pending request when onOutgoingMessage returns false without destroy for V2 and V3 requests', async () => {
+      // 1. V2 request (requestSignPayload)
+      const { client: clientV2, transport: transportV2 } = await createConfiguredClient({
+        transportType: TransportType.P2P,
+        ackTimeoutMs: 1_000,
+        requestTimeoutMs: 10_000
+      })
+      const waitingEventsV2: WaitingForWalletAckInfo[] = []
+      await clientV2.subscribeToEvent(BeaconEvent.WAITING_FOR_WALLET_ACK, (info) => {
+        waitingEventsV2.push(info)
+      })
+
+      vi.spyOn(
+        clientV2 as unknown as { onOutgoingMessage: () => boolean },
+        'onOutgoingMessage'
+      ).mockReturnValue(false)
+
+      const signPromise = clientV2.requestSignPayload({
+        signingType: SigningType.RAW,
+        payload: '050100'
+      })
+
+      await expect(signPromise).rejects.toBeInstanceOf(AbortedBeaconError)
+      expect(clientV2.getPendingRequests()).toEqual([])
+      expect(transportV2.send).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(waitingEventsV2).toEqual([])
+      await clientV2.disconnect({ notifyPeers: false })
+
+      // 2. V3 request (BlockchainRequest)
+      const { client: clientV3, transport: transportV3 } = await createConfiguredClient({
+        transportType: TransportType.P2P,
+        ackTimeoutMs: 1_000,
+        requestTimeoutMs: 10_000
+      })
+      clientV3.addBlockchain(createMockBlockchain())
+      const waitingEventsV3: WaitingForWalletAckInfo[] = []
+      await clientV3.subscribeToEvent(BeaconEvent.WAITING_FOR_WALLET_ACK, (info) => {
+        waitingEventsV3.push(info)
+      })
+
+      vi.spyOn(
+        clientV3 as unknown as { onOutgoingMessage: () => boolean },
+        'onOutgoingMessage'
+      ).mockReturnValue(false)
+
+      const v3Promise = clientV3.request({
+        type: BeaconMessageType.BlockchainRequest,
+        blockchainIdentifier: 'tezos',
+        accountId: p2pAccount.accountIdentifier,
+        blockchainData: { type: 'operation', scope: 'operation' }
+      })
+
+      await expect(v3Promise).rejects.toBeInstanceOf(AbortedBeaconError)
+      expect(clientV3.getPendingRequests()).toEqual([])
+      expect(transportV3.send).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(waitingEventsV3).toEqual([])
+      await clientV3.disconnect({ notifyPeers: false })
+    })
+
+    it('handles makeRequest with skipResponse=true while message observer is subscribed', async () => {
+      const { client } = await createConfiguredClient({
+        transportType: TransportType.P2P
+      })
+      const capturedRecords: BeaconMessageRecord[] = []
+      client.subscribeToMessages((record) => {
+        capturedRecords.push(record)
+      })
+
+      vi.spyOn(client, 'checkPermissions').mockResolvedValue(true)
+
+      const makeRequestFn = (
+        client as unknown as {
+          makeRequest: (message: unknown, skipResponse?: boolean) => Promise<void>
+        }
+      ).makeRequest.bind(client)
+
+      const disconnectPromise = makeRequestFn(
+        {
+          id: 'disconnect-test-id',
+          type: BeaconMessageType.Disconnect
+        },
+        true
+      )
+
+      await expect(disconnectPromise).resolves.toBeUndefined()
+      expect(capturedRecords).toHaveLength(1)
+      expect(capturedRecords[0].direction).toBe('outgoing')
+      expect(client.getPendingRequests()).toEqual([])
+
+      await client.disconnect({ notifyPeers: false })
+    })
+
     it('sets acknowledged to undefined for WalletConnect requests', async () => {
       const { client, transport } = await createConfiguredClient({
         transportType: TransportType.WALLETCONNECT
@@ -1051,13 +1353,193 @@ describe('DAppClient connection status, health, ACK timeout, and pending request
           transport: TransportType.WALLETCONNECT,
           senderId: wcPeer.senderId,
           sentAt: expect.any(Number),
-          deadline: undefined,
+          deadline: pending[0].sentAt + 300_000,
           acknowledged: undefined
         }
       ])
 
       await client.disconnect({ notifyPeers: false })
       await expect(signPromise).rejects.toBeInstanceOf(AbortedBeaconError)
+    })
+
+    it('clamps WalletConnect pending request deadline to 5 minutes when requestTimeoutMs is unset, larger, or zero', async () => {
+      // 1. Unset requestTimeoutMs: non-permission request gets sentAt + 300_000
+      const { client: clientUnset } = await createConfiguredClient({
+        transportType: TransportType.WALLETCONNECT
+      })
+      const signPromise = clientUnset.requestSignPayload({
+        signingType: SigningType.RAW,
+        payload: '050100'
+      })
+      signPromise.catch(() => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      const signPending = clientUnset.getPendingRequests()
+      expect(signPending).toHaveLength(1)
+      expect(signPending[0].deadline).toBe(signPending[0].sentAt + 300_000)
+
+      // 2. Unset requestTimeoutMs: V3 BlockchainRequest gets sentAt + 300_000
+      clientUnset.addBlockchain(createMockBlockchain())
+      const v3Promise = clientUnset.request({
+        type: BeaconMessageType.BlockchainRequest,
+        blockchainIdentifier: 'tezos',
+        accountId: wcAccount.accountIdentifier,
+        blockchainData: { type: 'operation', scope: 'operation' }
+      })
+      v3Promise.catch(() => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      const v3Pending = clientUnset
+        .getPendingRequests()
+        .find((r) => r.type === BeaconMessageType.BlockchainRequest)
+      expect(v3Pending).toBeDefined()
+      expect(v3Pending?.deadline).toBe((v3Pending?.sentAt ?? 0) + 300_000)
+
+      await clientUnset.disconnect({ notifyPeers: false })
+
+      // 3. Unset requestTimeoutMs: permission request gets sentAt + 60_000
+      const { client: clientUnsetPerm } = await createConfiguredClient({
+        transportType: TransportType.WALLETCONNECT
+      })
+      const permPromise = clientUnsetPerm.requestPermissions()
+      permPromise.catch(() => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      const permPending = clientUnsetPerm
+        .getPendingRequests()
+        .find((r) => r.type === BeaconMessageType.PermissionRequest)
+      expect(permPending).toBeDefined()
+      expect(permPending?.deadline).toBe((permPending?.sentAt ?? 0) + 60_000)
+      await clientUnsetPerm.disconnect({ notifyPeers: false })
+
+      // 4. Smaller positive requestTimeoutMs (45_000) -> sentAt + 45_000
+      const { client: clientSmall } = await createConfiguredClient({
+        transportType: TransportType.WALLETCONNECT,
+        requestTimeoutMs: 45_000
+      })
+      const smallPromise = clientSmall.requestSignPayload({
+        signingType: SigningType.RAW,
+        payload: '050100'
+      })
+      smallPromise.catch(() => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      const smallPending = clientSmall.getPendingRequests()
+      expect(smallPending).toHaveLength(1)
+      expect(smallPending[0].deadline).toBe(smallPending[0].sentAt + 45_000)
+      await clientSmall.disconnect({ notifyPeers: false })
+
+      // 5. Larger requestTimeoutMs (600_000) -> clamped to sentAt + 300_000
+      const { client: clientLarge } = await createConfiguredClient({
+        transportType: TransportType.WALLETCONNECT,
+        requestTimeoutMs: 600_000
+      })
+      const largePromise = clientLarge.requestSignPayload({
+        signingType: SigningType.RAW,
+        payload: '050100'
+      })
+      largePromise.catch(() => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      const largePending = clientLarge.getPendingRequests()
+      expect(largePending).toHaveLength(1)
+      expect(largePending[0].deadline).toBe(largePending[0].sentAt + 300_000)
+      await clientLarge.disconnect({ notifyPeers: false })
+
+      // 6. requestTimeoutMs = 0 (disabled): still sentAt + 300_000 on WalletConnect
+      const { client: clientZero } = await createConfiguredClient({
+        transportType: TransportType.WALLETCONNECT,
+        requestTimeoutMs: 0
+      })
+      const zeroPromise = clientZero.requestSignPayload({
+        signingType: SigningType.RAW,
+        payload: '050100'
+      })
+      zeroPromise.catch(() => undefined)
+      await vi.advanceTimersByTimeAsync(0)
+      const zeroPending = clientZero.getPendingRequests()
+      expect(zeroPending).toHaveLength(1)
+      expect(zeroPending[0].deadline).toBe(zeroPending[0].sentAt + 300_000)
+      await clientZero.disconnect({ notifyPeers: false })
+    })
+
+    it('arms request deadline before awaiting wallet info in makeRequestBC follower path', async () => {
+      const { client } = await createConfiguredClient({
+        transportType: TransportType.WALLETCONNECT,
+        requestTimeoutMs: 1_000
+      })
+
+      // Force makeRequestBC path by making checkMakeRequest return false (follower tab)
+      vi.spyOn(
+        client as unknown as { checkMakeRequest: () => Promise<boolean> },
+        'checkMakeRequest'
+      ).mockResolvedValue(false)
+
+      // Delay getWalletInfo by 5000ms so it stays pending while the 1000ms deadline expires
+      const delayedWalletInfo = new Promise<{ name: string }>((resolve) => {
+        setTimeout(() => resolve({ name: 'Delayed Wallet' }), 5_000)
+      })
+      vi.spyOn(
+        client as unknown as { getWalletInfo: () => Promise<{ name: string }> },
+        'getWalletInfo'
+      )
+        .mockImplementationOnce(() => delayedWalletInfo)
+        .mockResolvedValue({ name: 'Immediate Wallet' })
+
+      let settled = false
+      let rejectionError: unknown
+      client
+        .requestSignPayload({
+          signingType: SigningType.RAW,
+          payload: '050100'
+        })
+        .then(() => {
+          settled = true
+        })
+        .catch((error: unknown) => {
+          settled = true
+          rejectionError = error
+        })
+
+      await vi.advanceTimersByTimeAsync(0)
+      const pending = client.getPendingRequests()
+      expect(pending).toHaveLength(1)
+      expect(pending[0].deadline).toBe(pending[0].sentAt + 1_000)
+
+      // Advance by 1000ms: request deadline must fire while getWalletInfo is still pending
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      expect(settled).toBe(true)
+      expect(rejectionError).toBeInstanceOf(PeerUnreachableBeaconError)
+      expect(client.getPendingRequests()).toEqual([])
+
+      await client.disconnect({ notifyPeers: false })
+    })
+
+    it('cleans up pending request and disarms deadline when getWalletInfo rejects in makeRequestBC follower path', async () => {
+      const { client } = await createConfiguredClient({
+        transportType: TransportType.WALLETCONNECT,
+        requestTimeoutMs: 1_000
+      })
+
+      vi.spyOn(
+        client as unknown as { checkMakeRequest: () => Promise<boolean> },
+        'checkMakeRequest'
+      ).mockResolvedValue(false)
+
+      const walletInfoError = new Error('failed to load wallet info')
+      vi.spyOn(
+        client as unknown as { getWalletInfo: () => Promise<{ name: string }> },
+        'getWalletInfo'
+      ).mockRejectedValue(walletInfoError)
+
+      const signPromise = client.requestSignPayload({
+        signingType: SigningType.RAW,
+        payload: '050100'
+      })
+
+      await expect(signPromise).rejects.toThrow('failed to load wallet info')
+      expect(client.getPendingRequests()).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(client.getPendingRequests()).toEqual([])
+
+      await client.disconnect({ notifyPeers: false })
     })
   })
 
