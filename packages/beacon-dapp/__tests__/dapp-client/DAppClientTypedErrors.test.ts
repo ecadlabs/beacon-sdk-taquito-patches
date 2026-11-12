@@ -13,18 +13,22 @@ import {
   ParametersInvalidBeaconError,
   PeerUnreachableBeaconError,
   TransactionInvalidBeaconError,
-  UnknownBeaconError
+  UnknownBeaconError,
+  isBeaconError
 } from '@ecadlabs/beacon-core'
 import {
   AccountInfo,
   BeaconErrorType,
   BeaconMessageType,
+  BlockchainRequestV3,
   ConnectionContext,
   ExtendedPostMessagePairingResponse,
   NetworkType,
   Origin,
   PeerInfoType,
+  PermissionRequestV3,
   PermissionScope,
+  RequestPermissionInput,
   SigningType,
   StorageKey,
   TransportType
@@ -363,6 +367,258 @@ describe('DAppClient typed error rejections', () => {
       expect(error).toBeInstanceOf(ParametersInvalidBeaconError)
       expect(error.errorType).toBe(BeaconErrorType.PARAMETERS_INVALID_ERROR)
       expect(error.errorOrigin).toBe('local')
+    })
+
+    it('rejects with ParametersInvalidBeaconError when sign payload is not a string', async () => {
+      const error: any = await dapp.requestSignPayload({
+        signingType: SigningType.RAW,
+        payload: 123 as unknown as string
+      }).then(
+        () => { throw new Error('Expected requestSignPayload to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BeaconError)
+      expect(error).toBeInstanceOf(ParametersInvalidBeaconError)
+      expect(isBeaconError(error)).toBe(true)
+      expect(error.id).toBe('')
+      expect(error.senderId).toBe('')
+      expect(error.version).toBe('2')
+      expect(error.errorType).toBe(BeaconErrorType.PARAMETERS_INVALID_ERROR)
+      expect(error.errorOrigin).toBe('local')
+      expect(error.description).toBe('Payload must be a string')
+    })
+
+    it('rejects with ParametersInvalidBeaconError when deprecated network property is passed to requestPermissions', async () => {
+      const error: any = await dapp.requestPermissions({
+        network: { type: NetworkType.MAINNET }
+      } as unknown as RequestPermissionInput).then(
+        () => { throw new Error('Expected requestPermissions to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BeaconError)
+      expect(error).toBeInstanceOf(ParametersInvalidBeaconError)
+      expect(isBeaconError(error)).toBe(true)
+      expect(error.id).toBe('')
+      expect(error.senderId).toBe('')
+      expect(error.version).toBe('2')
+      expect(error.errorType).toBe(BeaconErrorType.PARAMETERS_INVALID_ERROR)
+      expect(error.errorOrigin).toBe('local')
+      expect(error.description).toBe(
+        '[BEACON] the "network" property is no longer accepted in input. Please provide it when instantiating DAppClient.'
+      )
+    })
+
+    it('rejects with ParametersInvalidBeaconError when concurrent requestPermissions with different scopes is called', async () => {
+      const firstPromise = dapp.requestPermissions({ scopes: [PermissionScope.SIGN] }).catch(() => {})
+
+      const error: any = await dapp.requestPermissions({
+        scopes: [PermissionScope.OPERATION_REQUEST]
+      }).then(
+        () => { throw new Error('Expected requestPermissions to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BeaconError)
+      expect(error).toBeInstanceOf(ParametersInvalidBeaconError)
+      expect(isBeaconError(error)).toBe(true)
+      expect(error.id).toBe('')
+      expect(error.senderId).toBe('')
+      expect(error.version).toBe('2')
+      expect(error.errorType).toBe(BeaconErrorType.PARAMETERS_INVALID_ERROR)
+      expect(error.errorOrigin).toBe('local')
+      expect(error.description).toBe(
+        'Cannot start a permission request with different scopes while another permission request is pending'
+      )
+
+      await vi.advanceTimersByTimeAsync(0)
+      await dapp.disconnect()
+      await firstPromise
+    })
+
+    it('rejects with NoAddressBeaconError when requesting proof of event challenge without active account', async () => {
+      vi.spyOn(dapp, 'getActiveAccount').mockResolvedValue(undefined)
+
+      const error: any = await dapp.requestProofOfEventChallenge({ payload: 'test' }).then(
+        () => { throw new Error('Expected requestProofOfEventChallenge to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BeaconError)
+      expect(error).toBeInstanceOf(NoAddressBeaconError)
+      expect(isBeaconError(error)).toBe(true)
+      expect(error.id).toBe('')
+      expect(error.senderId).toBe('')
+      expect(error.version).toBe('2')
+      expect(error.errorType).toBe(BeaconErrorType.NO_ADDRESS_ERROR)
+      expect(error.errorOrigin).toBe('local')
+      expect(error.description).toBe('Please request permissions before doing a proof of event challenge')
+    })
+
+    it('rejects with NoAddressBeaconError when requesting simulated proof of event challenge without active account', async () => {
+      vi.spyOn(dapp, 'getActiveAccount').mockResolvedValue(undefined)
+
+      const error: any = await dapp.requestSimulatedProofOfEventChallenge({ payload: 'test' }).then(
+        () => { throw new Error('Expected requestSimulatedProofOfEventChallenge to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BeaconError)
+      expect(error).toBeInstanceOf(NoAddressBeaconError)
+      expect(isBeaconError(error)).toBe(true)
+      expect(error.id).toBe('')
+      expect(error.senderId).toBe('')
+      expect(error.version).toBe('2')
+      expect(error.errorType).toBe(BeaconErrorType.NO_ADDRESS_ERROR)
+      expect(error.errorOrigin).toBe('local')
+      expect(error.description).toBe('Please request permissions before doing a proof of event challenge')
+    })
+
+    it('rejects with NoAddressBeaconError when requesting proof of event challenge with active account missing network', async () => {
+      vi.spyOn(dapp, 'getActiveAccount').mockResolvedValue({
+        ...account,
+        network: undefined
+      } as unknown as AccountInfo)
+
+      const error: any = await dapp.requestProofOfEventChallenge({ payload: 'test' }).then(
+        () => { throw new Error('Expected requestProofOfEventChallenge to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BeaconError)
+      expect(error).toBeInstanceOf(NoAddressBeaconError)
+      expect(isBeaconError(error)).toBe(true)
+      expect(error.id).toBe('')
+      expect(error.senderId).toBe('')
+      expect(error.version).toBe('2')
+      expect(error.errorType).toBe(BeaconErrorType.NO_ADDRESS_ERROR)
+      expect(error.errorOrigin).toBe('local')
+      expect(error.description).toBe('Please request permissions before doing a proof of event challenge')
+    })
+
+    it('rejects with NoAddressBeaconError when requesting simulated proof of event challenge with active account missing network', async () => {
+      vi.spyOn(dapp, 'getActiveAccount').mockResolvedValue({
+        ...account,
+        network: undefined
+      } as unknown as AccountInfo)
+
+      const error: any = await dapp.requestSimulatedProofOfEventChallenge({ payload: 'test' }).then(
+        () => { throw new Error('Expected requestSimulatedProofOfEventChallenge to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BeaconError)
+      expect(error).toBeInstanceOf(NoAddressBeaconError)
+      expect(isBeaconError(error)).toBe(true)
+      expect(error.id).toBe('')
+      expect(error.senderId).toBe('')
+      expect(error.version).toBe('2')
+      expect(error.errorType).toBe(BeaconErrorType.NO_ADDRESS_ERROR)
+      expect(error.errorOrigin).toBe('local')
+      expect(error.description).toBe('Please request permissions before doing a proof of event challenge')
+    })
+
+    it('rejects with ParametersInvalidBeaconError when requesting proof of event challenge with non-abstracted account', async () => {
+      const error: any = await dapp.requestProofOfEventChallenge({ payload: 'test' }).then(
+        () => { throw new Error('Expected requestProofOfEventChallenge to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BeaconError)
+      expect(error).toBeInstanceOf(ParametersInvalidBeaconError)
+      expect(isBeaconError(error)).toBe(true)
+      expect(error.id).toBe('')
+      expect(error.senderId).toBe('')
+      expect(error.version).toBe('2')
+      expect(error.errorType).toBe(BeaconErrorType.PARAMETERS_INVALID_ERROR)
+      expect(error.errorOrigin).toBe('local')
+      expect(error.description).toBe(
+        'This wallet is not an abstracted account and thus cannot perform proof of event'
+      )
+    })
+
+    it('rejects with ParametersInvalidBeaconError when requesting simulated proof of event challenge with non-abstracted account', async () => {
+      const error: any = await dapp.requestSimulatedProofOfEventChallenge({ payload: 'test' }).then(
+        () => { throw new Error('Expected requestSimulatedProofOfEventChallenge to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BeaconError)
+      expect(error).toBeInstanceOf(ParametersInvalidBeaconError)
+      expect(isBeaconError(error)).toBe(true)
+      expect(error.id).toBe('')
+      expect(error.senderId).toBe('')
+      expect(error.version).toBe('2')
+      expect(error.errorType).toBe(BeaconErrorType.PARAMETERS_INVALID_ERROR)
+      expect(error.errorOrigin).toBe('local')
+      expect(error.description).toBe(
+        'This wallet is not an abstracted account and thus cannot perform a simulated proof of event'
+      )
+    })
+
+    it('rejects with ParametersInvalidBeaconError when permissionRequest V3 uses unregistered blockchainIdentifier', async () => {
+      const input: PermissionRequestV3 = {
+        type: BeaconMessageType.PermissionRequest,
+        blockchainIdentifier: 'tezos-v3-unknown',
+        blockchainData: {
+          appMetadata: { senderId: 'dapp', name: 'Test' },
+          scopes: []
+        }
+      }
+
+      const error: any = await dapp.permissionRequest(input).then(
+        () => { throw new Error('Expected permissionRequest to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BeaconError)
+      expect(error).toBeInstanceOf(ParametersInvalidBeaconError)
+      expect(isBeaconError(error)).toBe(true)
+      expect(error.id).toBe('')
+      expect(error.senderId).toBe('')
+      expect(error.version).toBe('2')
+      expect(error.errorType).toBe(BeaconErrorType.PARAMETERS_INVALID_ERROR)
+      expect(error.errorOrigin).toBe('local')
+      expect(error.description).toBe('Blockchain "tezos-v3-unknown" not supported by dAppClient')
+    })
+
+    it('rejects with ParametersInvalidBeaconError when request V3 uses unregistered blockchainIdentifier', async () => {
+      const input: BlockchainRequestV3 = {
+        type: BeaconMessageType.BlockchainRequest,
+        blockchainIdentifier: 'tezos-v3-unknown',
+        accountId: 'test-account-id',
+        blockchainData: {
+          type: 'test',
+          scope: 'test'
+        }
+      }
+
+      const error: any = await dapp.request(input).then(
+        () => { throw new Error('Expected request to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BeaconError)
+      expect(error).toBeInstanceOf(ParametersInvalidBeaconError)
+      expect(isBeaconError(error)).toBe(true)
+      expect(error.id).toBe('')
+      expect(error.senderId).toBe('')
+      expect(error.version).toBe('2')
+      expect(error.errorType).toBe(BeaconErrorType.PARAMETERS_INVALID_ERROR)
+      expect(error.errorOrigin).toBe('local')
+      expect(error.description).toBe('Blockchain "tezos-v3-unknown" not supported by dAppClient')
     })
   })
 })

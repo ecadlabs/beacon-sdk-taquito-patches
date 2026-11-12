@@ -224,9 +224,22 @@ export type PermissionResponseInfo = {
     }
 )
 
+/**
+ * The payload types emitted by each BeaconEvent.
+ *
+ * While DAppClient request methods reject with BeaconError instances (isBeaconError(err) === true),
+ * *_REQUEST_ERROR events emit { errorResponse } as a plain RequestErrorResponse object
+ * (isRequestErrorResponse(data.errorResponse) === true) for backward compatibility with existing event handlers.
+ * Event subscribers can call toBeaconError(data.errorResponse) when they want a BeaconError instance.
+ */
 export interface BeaconEventType {
   [BeaconEvent.PERMISSION_REQUEST_SENT]: RequestSentInfo
   [BeaconEvent.PERMISSION_REQUEST_SUCCESS]: RequestResponseInfo & PermissionResponseInfo
+  /**
+   * Emitted when a permission request fails.
+   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
+   */
   [BeaconEvent.PERMISSION_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
@@ -239,6 +252,11 @@ export interface BeaconEventType {
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
+  /**
+   * Emitted when a proof of event challenge request fails.
+   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
+   */
   [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
@@ -251,6 +269,11 @@ export interface BeaconEventType {
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
+  /**
+   * Emitted when a simulated proof of event challenge request fails.
+   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
+   */
   [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
@@ -263,6 +286,11 @@ export interface BeaconEventType {
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
+  /**
+   * Emitted when an operation request fails.
+   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
+   */
   [BeaconEvent.OPERATION_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
@@ -274,6 +302,11 @@ export interface BeaconEventType {
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
+  /**
+   * Emitted when a sign payload request fails.
+   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
+   */
   [BeaconEvent.SIGN_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo
@@ -295,6 +328,11 @@ export interface BeaconEventType {
     connectionContext: ConnectionContext
     walletInfo: WalletInfo
   }
+  /**
+   * Emitted when a broadcast request fails.
+   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
+   */
   [BeaconEvent.BROADCAST_REQUEST_ERROR]: RequestResponseInfo & {
     errorResponse: RequestErrorResponse
     walletInfo: WalletInfo

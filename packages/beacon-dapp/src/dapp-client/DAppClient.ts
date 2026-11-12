@@ -286,6 +286,10 @@ type PreparedAccountSelection =
  * The DAppClient has to be used in decentralized applications. It handles all the logic related to connecting to beacon-compatible
  * wallets and sending requests.
  *
+ * Public DAppClient request methods reject with typed BeaconError subclasses (isBeaconError(err) === true),
+ * while *_REQUEST_ERROR events emit { errorResponse } as a plain RequestErrorResponse object
+ * for backward compatibility.
+ *
  * @category DApp
  */
 export class DAppClient extends Client {
@@ -2827,7 +2831,13 @@ export class DAppClient extends Client {
     const blockchainIdentifier = input.blockchainIdentifier
     const blockchain = this.blockchains.get(blockchainIdentifier)
     if (!blockchain) {
-      throw new Error(`Blockchain "${blockchainIdentifier}" not supported by dAppClient`)
+      throw new ParametersInvalidBeaconError({
+        description: `Blockchain "${blockchainIdentifier}" not supported by dAppClient`,
+        errorOrigin: 'local',
+        id: '',
+        senderId: '',
+        version: '2'
+      })
     }
 
     const request: PermissionRequestV3 = {
@@ -2925,7 +2935,13 @@ export class DAppClient extends Client {
     logger.log('request', input)
     const blockchain = this.blockchains.get(input.blockchainIdentifier)
     if (!blockchain) {
-      throw new Error(`Blockchain "${blockchain}" not supported by dAppClient`)
+      throw new ParametersInvalidBeaconError({
+        description: `Blockchain "${input.blockchainIdentifier}" not supported by dAppClient`,
+        errorOrigin: 'local',
+        id: '',
+        senderId: '',
+        version: '2'
+      })
     }
 
     await blockchain.validateRequest(input)
@@ -2992,9 +3008,14 @@ export class DAppClient extends Client {
 
     if (this._requestPermissionsPromise) {
       if (this._requestPermissionsKey !== requestPermissionsKey) {
-        throw new Error(
-          'Cannot start a permission request with different scopes while another permission request is pending'
-        )
+        throw new ParametersInvalidBeaconError({
+          description:
+            'Cannot start a permission request with different scopes while another permission request is pending',
+          errorOrigin: 'local',
+          id: '',
+          senderId: '',
+          version: '2'
+        })
       }
 
       return this._requestPermissionsPromise
@@ -3081,9 +3102,14 @@ export class DAppClient extends Client {
 
   private getPermissionRequestScopes(input?: RequestPermissionInput): PermissionScope[] {
     if (input && 'network' in input) {
-      throw new Error(
-        '[BEACON] the "network" property is no longer accepted in input. Please provide it when instantiating DAppClient.'
-      )
+      throw new ParametersInvalidBeaconError({
+        description:
+          '[BEACON] the "network" property is no longer accepted in input. Please provide it when instantiating DAppClient.',
+        errorOrigin: 'local',
+        id: '',
+        senderId: '',
+        version: '2'
+      })
     }
 
     return input && input.scopes
@@ -3107,15 +3133,26 @@ export class DAppClient extends Client {
     const activeAccount = await this.getActiveAccount()
 
     if (!activeAccount || !activeAccount.network) {
-      throw new Error('Please request permissions before doing a proof of event challenge')
+      throw new NoAddressBeaconError({
+        description: 'Please request permissions before doing a proof of event challenge',
+        errorOrigin: 'local',
+        id: '',
+        senderId: '',
+        version: '2'
+      })
     }
     if (
       activeAccount.walletType !== 'abstracted_account' &&
       activeAccount.verificationType !== 'proof_of_event'
     ) {
-      throw new Error(
-        'This wallet is not an abstracted account and thus cannot perform proof of event'
-      )
+      throw new ParametersInvalidBeaconError({
+        description:
+          'This wallet is not an abstracted account and thus cannot perform proof of event',
+        errorOrigin: 'local',
+        id: '',
+        senderId: '',
+        version: '2'
+      })
     }
 
     const request: ProofOfEventChallengeRequestInput = {
@@ -3179,15 +3216,26 @@ export class DAppClient extends Client {
     const activeAccount = await this.getActiveAccount()
 
     if (!activeAccount || !activeAccount.network) {
-      throw new Error('Please request permissions before doing a proof of event challenge')
+      throw new NoAddressBeaconError({
+        description: 'Please request permissions before doing a proof of event challenge',
+        errorOrigin: 'local',
+        id: '',
+        senderId: '',
+        version: '2'
+      })
     }
     if (
       activeAccount.walletType !== 'abstracted_account' &&
       activeAccount.verificationType !== 'proof_of_event'
     ) {
-      throw new Error(
-        'This wallet is not an abstracted account and thus cannot perform a simulated proof of event'
-      )
+      throw new ParametersInvalidBeaconError({
+        description:
+          'This wallet is not an abstracted account and thus cannot perform a simulated proof of event',
+        errorOrigin: 'local',
+        id: '',
+        senderId: '',
+        version: '2'
+      })
     }
 
     const request: SimulatedProofOfEventChallengeRequestInput = {
@@ -3263,7 +3311,13 @@ export class DAppClient extends Client {
     const payload = input.payload
 
     if (typeof payload !== 'string') {
-      throw new Error('Payload must be a string')
+      throw new ParametersInvalidBeaconError({
+        description: 'Payload must be a string',
+        errorOrigin: 'local',
+        id: '',
+        senderId: '',
+        version: '2'
+      })
     }
 
     const signingType = ((): SigningType => {
@@ -3706,6 +3760,12 @@ export class DAppClient extends Client {
     )
   }
 
+  /**
+   * Normalizes internal errors and wallet error responses into public BeaconError instances.
+   * Public DAppClient request methods reject with BeaconError subclasses (isBeaconError(err) === true),
+   * while *_REQUEST_ERROR events emit { errorResponse } as a plain RequestErrorResponse object
+   * for backward compatibility.
+   */
   private toPublicError(error: unknown): unknown {
     if (isBeaconError(error)) {
       return error
