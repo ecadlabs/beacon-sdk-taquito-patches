@@ -293,7 +293,7 @@ describe('WalletWalletConnectTransport', () => {
     }
   })
 
-  it('does not initialize a client from work that cleanup already invalidated', async () => {
+  it('does not initialize a client from cancelled work', async () => {
     for (const operation of ['send', 'addPeer']) {
       const transport = await createTransport()
       const response = await serializer.serialize({
@@ -320,6 +320,21 @@ describe('WalletWalletConnectTransport', () => {
       await pending
       expect(vi.mocked(initWalletConnectSignClient)).toHaveBeenCalledTimes(initializations)
     }
+    const transport = await createTransport()
+    const peer = new ExtendedWalletConnectPairingRequest(
+      'cancelled-peer',
+      'dApp',
+      hexPk('c'),
+      '2',
+      'sender',
+      'wc:cancelled'
+    )
+    const initializations = vi.mocked(initWalletConnectSignClient).mock.calls.length
+    const admission = transport.addPeer(peer)
+    await transport.removePeer(peer)
+    await admission
+    expect(vi.mocked(initWalletConnectSignClient)).toHaveBeenCalledTimes(initializations)
+    expect(currentSignClient.pair).not.toHaveBeenCalled()
   })
 
   it('failed proposal rejection retains correlation for retry', async () => {

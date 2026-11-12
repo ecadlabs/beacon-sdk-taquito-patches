@@ -294,12 +294,12 @@ export class WalletWalletConnectTransport extends Transport<
 
   public override async addPeer(newPeer: ExtendedWalletConnectPairingRequest): Promise<void> {
     const generation = this.generation
-    await this.addPairingPeer(
+    const admitted = await this.addPairingPeer(
       newPeer,
       () => generation === this.generation,
       () => true
     )
-    if (generation !== this.generation) {
+    if (!admitted || generation !== this.generation) {
       return
     }
     if (newPeer.uri) {
@@ -502,7 +502,7 @@ export class WalletWalletConnectTransport extends Transport<
     const optionalTezos = params.optionalNamespaces?.[TEZOS_NAMESPACE]
     const hasBeaconSdkVersion = Boolean(params.sessionProperties?.beacon_sdk_version)
 
-    this.pendingByBeaconId.set(beaconId, {
+    const pending: PendingProposal = {
       kind: 'proposal',
       approval: { kind: 'pending' },
       proposalId,
@@ -511,9 +511,10 @@ export class WalletWalletConnectTransport extends Transport<
       requiredTezos,
       optionalTezos,
       hasBeaconSdkVersion
-    })
+    }
+    this.pendingByBeaconId.set(beaconId, pending)
 
-    await this.addPairingPeer(
+    const admitted = await this.addPairingPeer(
       new ExtendedWalletConnectPairingRequest(
         beaconId,
         proposer.metadata.name,
@@ -527,6 +528,13 @@ export class WalletWalletConnectTransport extends Transport<
       () => generation === this.generation,
       () => true
     )
+    if (!admitted) {
+      if (this.pendingByBeaconId.get(beaconId) === pending) {
+        this.pendingByBeaconId.delete(beaconId)
+      }
+
+      return
+    }
 
     const chains = uniqueStrings([
       ...(requiredTezos?.chains ?? []),
@@ -557,7 +565,7 @@ export class WalletWalletConnectTransport extends Transport<
       id: proposer.publicKey
     }
     const serialized = await this.serializer.serialize(permissionRequest)
-    if (generation === this.generation && this.pendingByBeaconId.has(beaconId)) {
+    if (generation === this.generation && this.pendingByBeaconId.get(beaconId) === pending) {
       await this.notifyListeners(serialized, context)
     }
   }
