@@ -4,12 +4,21 @@ import {
   LocalStorage,
   PermissionManager,
   AppMetadataManager,
+  getAccountIdentifier,
   getSenderId,
   Logger,
-  NOTIFICATION_ORACLE_URL
+  NOTIFICATION_ORACLE_URL,
+  ClientTransport
 } from '@ecadlabs/beacon-core'
 
-import { ExposedPromise, toHex } from '@ecadlabs/beacon-utils'
+import {
+  CONTRACT_PREFIX,
+  ExposedPromise,
+  generateGUID,
+  getAddressFromPublicKey,
+  isValidAddress,
+  toHex
+} from '@ecadlabs/beacon-utils'
 
 import {
   ConnectionContext,
@@ -38,7 +47,15 @@ import {
   SignPayloadRequestOutput,
   BroadcastRequestOutput,
   SigningType,
-  BeaconErrorType
+  BeaconErrorType,
+  WalletPendingRequestInfo,
+  WalletPendingRequestEvent,
+  WalletPeerEvent,
+  ChangeAccountInput,
+  ChangeAccountRequest,
+  ConnectionInfo,
+  TransportStatusChangedInfo,
+  Origin
 } from '@ecadlabs/beacon-types'
 import type { SignClientTypes } from '@walletconnect/types'
 import {
@@ -60,7 +77,7 @@ import type {
   WalletResponseInputMessage,
   WalletResponseOutputMessage
 } from '../types/WalletResponseMessage'
-import { isV3Envelope } from '../utils/message-guards'
+import { isBeaconMessageType, isV3Envelope } from '../utils/message-guards'
 
 const logger = new Logger('WalletClient')
 
@@ -94,6 +111,21 @@ export class WalletClient extends Client {
    * This array stores pending requests, meaning requests we received and have not yet handled / sent a response.
    */
   private pendingRequests: [BeaconRequestMessage | BeaconMessageEnvelopeV3, ConnectionContext][] = []
+  private walletPendingRequests: WalletPendingRequestInfo[] = []
+  private readonly pendingRequestListeners = new Map<
+    (event: WalletPendingRequestEvent) => void,
+    () => void
+  >()
+  private readonly transportStatusListeners = new Map<
+    (info: TransportStatusChangedInfo) => void | Promise<void>,
+    () => void
+  >()
+  private transportStatusUnsub: (() => void) | undefined
+  private activeObservedTransport: ClientTransport | undefined
+  private readonly peerListeners = new Map<(event: WalletPeerEvent) => void, () => void>()
+  private readonly knownPeerPublicKeys = new Set<string>()
+  private readonly knownPeersByPublicKey = new Map<string, ExtendedPeerInfo>()
+  private readonly peersSeeded: Promise<void>
   private readonly disconnectListeners = new Map<DisconnectListener, () => void>()
 
   constructor(config: WalletClientOptions) {
@@ -104,6 +136,33 @@ export class WalletClient extends Client {
     this.walletConnectOptions = config.walletConnectOptions
     this.permissionManager = new PermissionManager(this.storage)
     this.appMetadataManager = new AppMetadataManager(this.storage)
+    this.peersSeeded = this.seedKnownPeers()
+    this.initStorageSync()
+  }
+
+  private async seedKnownPeers(): Promise<void> {
+    try {
+      const [p2pPeers, postMessagePeers] = await Promise.all([
+        this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_WALLET),
+        this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET)
+      ])
+      if (this.destroyed) {
+        return
+      }
+      const allPeers = [...(p2pPeers ?? []), ...(postMessagePeers ?? [])]
+      for (const peer of allPeers) {
+        if (peer && peer.publicKey) {
+          this.knownPeerPublicKeys.add(peer.publicKey)
+          const extended = await this.getPeerInfo(peer)
+          if (this.destroyed) {
+            return
+          }
+          this.knownPeersByPublicKey.set(peer.publicKey, extended)
+        }
+      }
+    } catch (error) {
+      logger.error('seedKnownPeers', error)
+    }
   }
 
   public async init(): Promise<TransportType> {
@@ -173,21 +232,45 @@ export class WalletClient extends Client {
           throw new Error('Invalid V3 request envelope')
         }
         const typedMessage = message
+        const rawType = typedMessage.message.type
+        const messageType: BeaconMessageType = isBeaconMessageType(rawType)
+          ? rawType
+          : BeaconMessageType.BlockchainRequest
 
         if (!this.pendingRequests.some((request) => request[0].id === message.id)) {
           this.pendingRequests.push([typedMessage, connectionContext])
+
+          const requestInfo: WalletPendingRequestInfo = Object.freeze({
+            id: typedMessage.id,
+            type: messageType,
+            version: typedMessage.version,
+            transport: this.mapOriginToTransportType(connectionContext.origin),
+            senderId: typedMessage.senderId,
+            receivedAt: Date.now(),
+            connectionContext,
+            request: typedMessage
+          })
+          this.walletPendingRequests.push(requestInfo)
+          this.emitPendingRequestEvent({
+            type: 'request_received',
+            request: requestInfo
+          })
 
           // ACK delivery must not block cold-start replay or application delivery.
           this.sendAcknowledgeResponse(typedMessage, connectionContext).catch((error) =>
             logger.error('sendAcknowledgeResponse', error)
           )
 
-          await IncomingRequestInterceptor.intercept({
-            message: typedMessage,
-            connectionInfo: connectionContext,
-            appMetadataManager: this.appMetadataManager,
-            interceptorCallback: deliver
-          })
+          try {
+            await IncomingRequestInterceptor.intercept({
+              message: typedMessage,
+              connectionInfo: connectionContext,
+              appMetadataManager: this.appMetadataManager,
+              interceptorCallback: deliver
+            })
+          } catch (error) {
+            logger.error('IncomingRequestInterceptor.intercept', error)
+          }
         }
       } else {
         const typedMessage = message as BeaconRequestMessage | DisconnectMessage
@@ -199,18 +282,38 @@ export class WalletClient extends Client {
         if (!this.pendingRequests.some((request) => request[0].id === message.id)) {
           this.pendingRequests.push([typedMessage, connectionContext])
 
+          const requestInfo: WalletPendingRequestInfo = Object.freeze({
+            id: typedMessage.id,
+            type: typedMessage.type,
+            version: typedMessage.version,
+            transport: this.mapOriginToTransportType(connectionContext.origin),
+            senderId: typedMessage.senderId,
+            receivedAt: Date.now(),
+            connectionContext,
+            request: typedMessage
+          })
+          this.walletPendingRequests.push(requestInfo)
+          this.emitPendingRequestEvent({
+            type: 'request_received',
+            request: requestInfo
+          })
+
           if (typedMessage.version !== '1') {
             this.sendAcknowledgeResponse(typedMessage, connectionContext).catch((error) =>
               logger.error('sendAcknowledgeResponse', error)
             )
           }
 
-          await IncomingRequestInterceptor.intercept({
-            message: typedMessage,
-            connectionInfo: connectionContext,
-            appMetadataManager: this.appMetadataManager,
-            interceptorCallback: deliver
-          })
+          try {
+            await IncomingRequestInterceptor.intercept({
+              message: typedMessage,
+              connectionInfo: connectionContext,
+              appMetadataManager: this.appMetadataManager,
+              interceptorCallback: deliver
+            })
+          } catch (error) {
+            logger.error('IncomingRequestInterceptor.intercept', error)
+          }
         }
       }
     }
@@ -221,6 +324,19 @@ export class WalletClient extends Client {
   public override async destroy(): Promise<void> {
     this.destroyed = true
     this.deliveryGeneration = Symbol('Wallet connection')
+    if (this.transportStatusUnsub) {
+      this.transportStatusUnsub()
+      this.transportStatusUnsub = undefined
+    }
+    this.activeObservedTransport = undefined
+    this.transportStatusListeners.clear()
+    this.pendingRequestListeners.clear()
+    this.peerListeners.clear()
+    this.disconnectListeners.clear()
+    this.pendingRequests = []
+    this.walletPendingRequests = []
+    this.knownPeerPublicKeys.clear()
+    this.knownPeersByPublicKey.clear()
     await super.destroy()
   }
 
@@ -439,10 +555,6 @@ export class WalletClient extends Client {
       throw new Error('No matching request found!')
     }
 
-    this.pendingRequests = this.pendingRequests.filter(
-      (pendingRequest) => pendingRequest[0].id !== message.id
-    )
-
     await OutgoingResponseInterceptor.intercept({
       senderId: await getSenderId(await this.beaconId),
       request: matchedRequest[0],
@@ -454,6 +566,22 @@ export class WalletClient extends Client {
         await this.respondToMessage(response, matchedRequest[1])
       }
     })
+
+    this.pendingRequests = this.pendingRequests.filter(
+      (pendingRequest) => pendingRequest[0].id !== message.id
+    )
+
+    const pendingIndex = this.walletPendingRequests.findIndex((req) => req.id === message.id)
+    if (pendingIndex >= 0) {
+      const [removed] = this.walletPendingRequests.splice(pendingIndex, 1)
+      if (removed) {
+        this.emitPendingRequestEvent({
+          type: 'request_removed',
+          request: removed,
+          reason: 'responded'
+        })
+      }
+    }
   }
 
   public async respondPermission(
@@ -526,7 +654,10 @@ export class WalletClient extends Client {
   }
 
   private async getPeerInfo(peer: PeerInfo): Promise<ExtendedPeerInfo> {
-    const senderId = await getSenderId(peer.publicKey)
+    const senderId =
+      'senderId' in peer && typeof peer.senderId === 'string' && peer.senderId.length > 0
+        ? peer.senderId
+        : await getSenderId(peer.publicKey)
 
     if (peer instanceof PostMessagePairingRequest) {
       return new ExtendedPostMessagePairingRequest(
@@ -584,14 +715,28 @@ export class WalletClient extends Client {
    * @param peer The new peer to add
    */
   public async addPeer(peer: PeerInfo, sendPairingResponse: boolean = true): Promise<void> {
-    return (await this.transport).addPeer(await this.getPeerInfo(peer), sendPairingResponse)
+    const extendedPeer = await this.getPeerInfo(peer)
+    await (await this.transport).addPeer(extendedPeer, sendPairingResponse)
+    this.knownPeerPublicKeys.add(peer.publicKey)
+    this.knownPeersByPublicKey.set(peer.publicKey, extendedPeer)
+    this.emitPeerEvent({
+      type: 'peer_added',
+      peer: extendedPeer,
+      source: 'local'
+    })
   }
 
   public async removePeer(
     peer: PeerInfo,
     sendDisconnectToPeer: boolean = false
   ): Promise<void> {
-    const removePeerResult = (await this.transport).removePeer(peer)
+    const extendedPeer =
+      this.knownPeersByPublicKey.get(peer.publicKey) ?? (await this.getPeerInfo(peer))
+    await (await this.transport).removePeer(peer)
+
+    this.knownPeerPublicKeys.delete(peer.publicKey)
+    this.knownPeersByPublicKey.delete(peer.publicKey)
+    this.evictPendingRequestsForPeer(extendedPeer)
 
     await this.removePermissionsForPeers([peer])
 
@@ -599,12 +744,35 @@ export class WalletClient extends Client {
       await this.sendDisconnectToPeer(peer)
     }
 
-    return removePeerResult
+    this.emitPeerEvent({
+      type: 'peer_removed',
+      peer: extendedPeer,
+      source: 'local'
+    })
   }
 
   public async removeAllPeers(sendDisconnectToPeers: boolean = false): Promise<void> {
     const peers = await (await this.transport).getPeers()
-    const removePeerResult = (await this.transport).removeAllPeers()
+    await (await this.transport).removeAllPeers()
+
+    for (const peer of peers) {
+      this.knownPeerPublicKeys.delete(peer.publicKey)
+      this.knownPeersByPublicKey.delete(peer.publicKey)
+      this.evictPendingRequestsForPeer(peer)
+    }
+
+    while (this.walletPendingRequests.length > 0) {
+      const remainingReq = this.walletPendingRequests.shift()
+      if (!remainingReq) {
+        break
+      }
+      this.pendingRequests = this.pendingRequests.filter((p) => p[0].id !== remainingReq.id)
+      this.emitPendingRequestEvent({
+        type: 'request_removed',
+        request: remainingReq,
+        reason: 'peer_disconnected'
+      })
+    }
 
     await this.removePermissionsForPeers(peers)
 
@@ -614,7 +782,13 @@ export class WalletClient extends Client {
       await Promise.all(disconnectPromises)
     }
 
-    return removePeerResult
+    for (const peer of peers) {
+      this.emitPeerEvent({
+        type: 'peer_removed',
+        peer,
+        source: 'local'
+      })
+    }
   }
 
   private async removePermissionsForPeers(peersToRemove: PeerInfo[]): Promise<void> {
@@ -699,6 +873,7 @@ export class WalletClient extends Client {
     })
 
     if (!peer) {
+      this.evictPendingRequestsForPeer({ senderId })
       return
     }
 
@@ -740,5 +915,460 @@ export class WalletClient extends Client {
     return 'type' in message && message.type === BeaconMessageType.Disconnect
       ? message.senderId
       : undefined
+  }
+
+  public getPendingRequests(): readonly WalletPendingRequestInfo[] {
+    return Object.freeze([...this.walletPendingRequests])
+  }
+
+  public dismissPendingRequest(id: string): boolean {
+    const index = this.walletPendingRequests.findIndex((req) => req.id === id)
+    if (index === -1) {
+      return false
+    }
+    const [removed] = this.walletPendingRequests.splice(index, 1)
+    this.pendingRequests = this.pendingRequests.filter((req) => req[0].id !== id)
+    if (removed) {
+      this.emitPendingRequestEvent({
+        type: 'request_removed',
+        request: removed,
+        reason: 'dismissed'
+      })
+    }
+
+    return true
+  }
+
+  public subscribeToPendingRequests(
+    listener: (event: WalletPendingRequestEvent) => void
+  ): () => void {
+    const existing = this.pendingRequestListeners.get(listener)
+    if (existing) {
+      return existing
+    }
+
+    const unsubscribe = (): void => {
+      if (this.pendingRequestListeners.get(listener) === unsubscribe) {
+        this.pendingRequestListeners.delete(listener)
+      }
+    }
+    this.pendingRequestListeners.set(listener, unsubscribe)
+
+    return unsubscribe
+  }
+
+  private emitPendingRequestEvent(event: WalletPendingRequestEvent): void {
+    if (this.destroyed) {
+      return
+    }
+    for (const listener of Array.from(this.pendingRequestListeners.keys())) {
+      try {
+        listener(event)
+      } catch (error) {
+        logger.error('pending request listener', error)
+      }
+    }
+  }
+
+  private evictPendingRequestsForPeer(peer: {
+    senderId?: string
+    publicKey?: string
+    id?: string
+  }): void {
+    const toRemove: WalletPendingRequestInfo[] = []
+    this.walletPendingRequests = this.walletPendingRequests.filter((req) => {
+      const matchSenderId = Boolean(peer.senderId && req.senderId === peer.senderId)
+      const matchPublicKey = Boolean(peer.publicKey && req.connectionContext?.id === peer.publicKey)
+      const matchId = Boolean(peer.id && req.connectionContext?.id === peer.id)
+      if (matchSenderId || matchPublicKey || matchId) {
+        toRemove.push(req)
+
+        return false
+      }
+
+      return true
+    })
+
+    if (toRemove.length > 0) {
+      const removedIds = new Set(toRemove.map((r) => r.id))
+      this.pendingRequests = this.pendingRequests.filter((req) => !removedIds.has(req[0].id))
+      for (const req of toRemove) {
+        this.emitPendingRequestEvent({
+          type: 'request_removed',
+          request: req,
+          reason: 'peer_disconnected'
+        })
+      }
+    }
+  }
+
+  public async getConnectionInfo(): Promise<ConnectionInfo> {
+    if (!this._transport.isResolved() && this.transport === this._transport.promise) {
+      return {
+        status: TransportStatus.NOT_CONNECTED,
+        health: 'ok'
+      }
+    }
+    const transport = await this.transport
+
+    return {
+      transport: transport.type,
+      status: transport.connectionStatus,
+      health: transport.health ?? 'ok',
+      ...(transport.relayServer ? { relayServer: transport.relayServer } : {})
+    }
+  }
+
+  public async getSelectedMatrixNode(): Promise<string | undefined> {
+    if (this._transport.isResolved() || this.transport !== this._transport.promise) {
+      const transport = await this.transport
+      if (transport.relayServer) {
+        return transport.relayServer
+      }
+    }
+
+    const storedNode = await this.storage.get(StorageKey.MATRIX_SELECTED_NODE)
+    if (!storedNode) {
+      return undefined
+    }
+
+    if (this.matrixNodes && typeof this.matrixNodes === 'object') {
+      const configuredServers = Object.values(this.matrixNodes).flatMap((servers) => servers ?? [])
+      if (configuredServers.length > 0) {
+        return configuredServers.includes(storedNode) ? storedNode : undefined
+      }
+    }
+
+    return storedNode
+  }
+
+  public subscribeToTransportStatus(
+    listener: (info: TransportStatusChangedInfo) => void | Promise<void>
+  ): () => void {
+    const existing = this.transportStatusListeners.get(listener)
+    if (existing) {
+      return existing
+    }
+
+    if (this._transport.isResolved() || this.transport !== this._transport.promise) {
+      this.transport
+        .then((transport) => {
+          if (!this.destroyed && transport) {
+            this.observeTransportStatus(transport)
+          }
+        })
+        .catch(() => {
+          // ignore error if transport rejection handled elsewhere
+        })
+    }
+
+    const unsubscribe = (): void => {
+      if (this.transportStatusListeners.get(listener) === unsubscribe) {
+        this.transportStatusListeners.delete(listener)
+      }
+    }
+    this.transportStatusListeners.set(listener, unsubscribe)
+
+    return unsubscribe
+  }
+
+  protected override async setTransport(transport?: ClientTransport): Promise<void> {
+    await super.setTransport(transport)
+    if (transport) {
+      this.observeTransportStatus(transport)
+    }
+  }
+
+  private observeTransportStatus(transport: ClientTransport): void {
+    if (this.activeObservedTransport === transport) {
+      return
+    }
+    if (this.transportStatusUnsub) {
+      this.transportStatusUnsub()
+      this.transportStatusUnsub = undefined
+    }
+    this.activeObservedTransport = transport
+    if (typeof transport.addStatusListener === 'function') {
+      this.transportStatusUnsub = transport.addStatusListener((info) => {
+        if (this.destroyed) {
+          return
+        }
+        for (const listener of Array.from(this.transportStatusListeners.keys())) {
+          try {
+            Promise.resolve(listener(info)).catch((error) => {
+              logger.error('transport status listener', error)
+            })
+          } catch (error) {
+            logger.error('transport status listener', error)
+          }
+        }
+      })
+    }
+  }
+
+  public async changeAccount(peerSenderId: string, account: ChangeAccountInput): Promise<void> {
+    if (!account.address && !account.publicKey) {
+      throw new Error('Address or PublicKey must be defined')
+    }
+
+    const walletType = account.walletType ?? 'implicit'
+    let address = account.address
+
+    if (!address && account.publicKey) {
+      address = await getAddressFromPublicKey(account.publicKey)
+    }
+
+    if (!address || !isValidAddress(address)) {
+      throw new Error(`Invalid address: "${address}"`)
+    }
+
+    if (
+      walletType === 'abstracted_account' &&
+      address.substring(0, 3) !== CONTRACT_PREFIX
+    ) {
+      throw new Error(
+        `Invalid abstracted account address "${address}", it should be a ${CONTRACT_PREFIX} address`
+      )
+    }
+
+    const peers = await this.getPeers()
+    const peer = peers.find((p) => 'senderId' in p && p.senderId === peerSenderId)
+    if (!peer) {
+      throw new Error(`Unknown peer senderId: "${peerSenderId}"`)
+    }
+
+    const appMetadata = await this.appMetadataManager.getAppMetadata(peerSenderId)
+    if (appMetadata) {
+      const permissions = await this.permissionManager.getPermissions()
+      const existingForSender = permissions.filter(
+        (p) => p.senderId === peerSenderId || p.appMetadata.senderId === peerSenderId
+      )
+      if (existingForSender.length > 0) {
+        await this.permissionManager.removePermissions(
+          existingForSender.map((p) => p.accountIdentifier)
+        )
+      }
+
+      const permission: PermissionInfo = {
+        accountIdentifier: await getAccountIdentifier(address, account.network),
+        senderId: peerSenderId,
+        appMetadata,
+        website: '',
+        address,
+        ...(account.publicKey ? { publicKey: account.publicKey } : {}),
+        network: account.network,
+        scopes: account.scopes,
+        connectedAt: Date.now(),
+        walletType,
+        ...(account.threshold ? { threshold: account.threshold } : {}),
+        ...(account.verificationType ? { verificationType: account.verificationType } : {})
+      }
+      await this.permissionManager.addPermission(permission)
+    }
+
+    const requestMessage: ChangeAccountRequest = {
+      id: await generateGUID(),
+      version: '2',
+      senderId: await getSenderId(await this.beaconId),
+      type: BeaconMessageType.ChangeAccountRequest,
+      walletType,
+      address,
+      ...(account.publicKey ? { publicKey: account.publicKey } : {}),
+      network: account.network,
+      scopes: account.scopes,
+      ...(account.threshold ? { threshold: account.threshold } : {}),
+      ...(account.verificationType ? { verificationType: account.verificationType } : {}),
+      ...(account.notification ? { notification: account.notification } : {})
+    }
+
+    const serialized = await new Serializer().serialize(requestMessage)
+    const transport = await this.transport
+    await transport.send(serialized, peer)
+  }
+
+  public subscribeToPeers(listener: (event: WalletPeerEvent) => void): () => void {
+    const existing = this.peerListeners.get(listener)
+    if (existing) {
+      return existing
+    }
+
+    const unsubscribe = (): void => {
+      if (this.peerListeners.get(listener) === unsubscribe) {
+        this.peerListeners.delete(listener)
+      }
+    }
+    this.peerListeners.set(listener, unsubscribe)
+
+    return unsubscribe
+  }
+
+  private emitPeerEvent(event: WalletPeerEvent): void {
+    if (this.destroyed) {
+      return
+    }
+    for (const listener of Array.from(this.peerListeners.keys())) {
+      try {
+        listener(event)
+      } catch (error) {
+        logger.error('peer listener', error)
+      }
+    }
+  }
+
+  private mapOriginToTransportType(origin: Origin): TransportType {
+    switch (origin) {
+      case Origin.P2P:
+        return TransportType.P2P
+      case Origin.EXTENSION:
+      case Origin.WEBSITE:
+        return TransportType.POST_MESSAGE
+      case Origin.WALLETCONNECT:
+        return TransportType.WALLETCONNECT
+      default:
+        return TransportType.P2P
+    }
+  }
+
+  private handleStorageCleared(): void {
+    const removedPeers = Array.from(this.knownPeersByPublicKey.values())
+    this.knownPeerPublicKeys.clear()
+    this.knownPeersByPublicKey.clear()
+
+    while (this.walletPendingRequests.length > 0) {
+      const remainingReq = this.walletPendingRequests.shift()
+      if (!remainingReq) {
+        break
+      }
+      this.pendingRequests = this.pendingRequests.filter((p) => p[0].id !== remainingReq.id)
+      this.emitPendingRequestEvent({
+        type: 'request_removed',
+        request: remainingReq,
+        reason: 'peer_disconnected'
+      })
+    }
+
+    for (const peer of removedPeers) {
+      this.emitPeerEvent({
+        type: 'peer_removed',
+        peer,
+        source: 'storage'
+      })
+    }
+  }
+
+  private parsePeersFromStorage(raw: string | null): ExtendedPeerInfo[] {
+    if (!raw) {
+      return []
+    }
+    try {
+      const parsed = JSON.parse(raw)
+
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+
+  private async handleStoragePeersAdded(
+    newPeers: ExtendedPeerInfo[],
+    isP2P: boolean
+  ): Promise<void> {
+    for (const peer of newPeers) {
+      if (!this.knownPeerPublicKeys.has(peer.publicKey)) {
+        this.knownPeerPublicKeys.add(peer.publicKey)
+        const extendedPeer = await this.getPeerInfo(peer)
+        if (this.destroyed) {
+          return
+        }
+        this.knownPeersByPublicKey.set(peer.publicKey, extendedPeer)
+        if (
+          isP2P &&
+          (this._transport.isResolved() || this.transport !== this._transport.promise)
+        ) {
+          try {
+            const transport = await this.transport
+            if (this.destroyed) {
+              return
+            }
+            await transport.addPeer(extendedPeer, false)
+          } catch (error) {
+            logger.error('initStorageSync reconcile addPeer', error)
+          }
+        }
+        if (this.destroyed) {
+          return
+        }
+        this.emitPeerEvent({
+          type: 'peer_added',
+          peer: extendedPeer,
+          source: 'storage'
+        })
+      }
+    }
+  }
+
+  private async handleStoragePeersRemoved(
+    oldPeers: ExtendedPeerInfo[],
+    newPeers: ExtendedPeerInfo[]
+  ): Promise<void> {
+    const newPks = new Set(newPeers.map((p) => p.publicKey))
+    for (const peer of oldPeers) {
+      if (!newPks.has(peer.publicKey) && this.knownPeerPublicKeys.has(peer.publicKey)) {
+        this.knownPeerPublicKeys.delete(peer.publicKey)
+        const extendedPeer =
+          this.knownPeersByPublicKey.get(peer.publicKey) ?? (await this.getPeerInfo(peer))
+        this.knownPeersByPublicKey.delete(peer.publicKey)
+        if (this.destroyed) {
+          return
+        }
+        this.evictPendingRequestsForPeer(extendedPeer)
+        this.emitPeerEvent({
+          type: 'peer_removed',
+          peer: extendedPeer,
+          source: 'storage'
+        })
+      }
+    }
+  }
+
+  private initStorageSync(): void {
+    if (typeof this.storage.subscribeToStorageChanged !== 'function') {
+      return
+    }
+    this.storage
+      .subscribeToStorageChanged(async (event) => {
+        await this.peersSeeded
+        if (this.destroyed) {
+          return
+        }
+
+        if (event.eventType === 'storageCleared') {
+          this.handleStorageCleared()
+
+          return
+        }
+
+        const p2pKey = this.storage.getPrefixedKey(StorageKey.TRANSPORT_P2P_PEERS_WALLET)
+        const postMessageKey = this.storage.getPrefixedKey(
+          StorageKey.TRANSPORT_POSTMESSAGE_PEERS_WALLET
+        )
+
+        if (event.key !== p2pKey && event.key !== postMessageKey) {
+          return
+        }
+
+        const isP2P = event.key === p2pKey
+        const oldPeers = this.parsePeersFromStorage(event.oldValue)
+        const newPeers = this.parsePeersFromStorage(event.newValue)
+
+        await this.handleStoragePeersAdded(newPeers, isP2P)
+        if (this.destroyed) {
+          return
+        }
+        await this.handleStoragePeersRemoved(oldPeers, newPeers)
+      })
+      .catch((error) => {
+        logger.error('subscribeToStorageChanged', error)
+      })
   }
 }
