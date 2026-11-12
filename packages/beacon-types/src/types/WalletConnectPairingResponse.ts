@@ -4,13 +4,13 @@ import { PeerInfo } from './PeerInfo'
  * @internalapi
  */
 export class WalletConnectPairingResponse implements PeerInfo {
-  readonly type: string = 'walletconnect-pairing-response'
-  id: string
-  name: string
-  icon?: string | undefined
-  appUrl?: string | undefined
-  publicKey: string
-  version: string
+  public readonly type: string = 'walletconnect-pairing-response'
+  public id: string
+  public name: string
+  public icon?: string | undefined
+  public appUrl?: string | undefined
+  public publicKey: string
+  public version: string
 
   constructor(
     id: string,
@@ -33,8 +33,8 @@ export class WalletConnectPairingResponse implements PeerInfo {
  * @internalapi
  */
 export class ExtendedWalletConnectPairingResponse extends WalletConnectPairingResponse {
-  senderId: string
-  extensionId: string
+  public senderId: string
+  public extensionId: string
 
   constructor(
     id: string,

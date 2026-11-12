@@ -4,13 +4,13 @@ import { ExtendedPeerInfo, PeerInfo } from './PeerInfo'
  * @internalapi
  */
 export class PostMessagePairingRequest implements PeerInfo {
-  readonly type: string = 'postmessage-pairing-request'
-  id: string
-  name: string
-  icon?: string | undefined
-  appUrl?: string | undefined
-  publicKey: string
-  version: string
+  public readonly type: string = 'postmessage-pairing-request'
+  public id: string
+  public name: string
+  public icon?: string | undefined
+  public appUrl?: string | undefined
+  public publicKey: string
+  public version: string
 
   constructor(
     id: string,
@@ -36,7 +36,7 @@ export class ExtendedPostMessagePairingRequest
   extends PostMessagePairingRequest
   implements ExtendedPeerInfo
 {
-  senderId: string
+  public senderId: string
 
   constructor(
     id: string,

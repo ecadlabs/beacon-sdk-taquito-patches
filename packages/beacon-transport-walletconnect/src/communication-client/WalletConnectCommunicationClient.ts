@@ -204,7 +204,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   private activeAccountOrPbk: string | undefined
   private activeNetwork: string | undefined
   private accountUpdateGeneration: number = 0
-  readonly disconnectionEvents: Set<string> = new Set()
+  public readonly disconnectionEvents: Set<string> = new Set()
   private pingInterval: NodeJS.Timeout | undefined
 
   private requestGeneration = 0
@@ -334,7 +334,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     this.storage.onErrorHandler = this.onStorageErrorHandler.bind(this)
   }
 
-  static getInstance(
+  public static getInstance(
     wcOptions: {
       network: NetworkType
       opts: SignClientTypes.Options
@@ -534,7 +534,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     }
   }
 
-  async unsubscribeFromEncryptedMessages(): Promise<void> {
+  public async unsubscribeFromEncryptedMessages(): Promise<void> {
     this.clearRequests()
     this.cancelPendingPairing()
     this.clearMessageListeners()
@@ -2154,7 +2154,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
    * @description Access the active network
    * @error ActiveNetworkUnspecified thorwn when there are multiple Tezos networks in the session and none is set as the active one
    */
-  getActiveNetwork() {
+  public getActiveNetwork() {
     if (!this.activeNetwork) {
       this.getSession()
       throw new ActiveNetworkUnspecified()
@@ -2178,7 +2178,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
    * @description Return all connected accounts from the active session
    * @error NotConnected if no active session
    */
-  getAccounts() {
+  public getAccounts() {
     return this.getTezosNamespace().accounts.map((account) => account.split(':')[2])
   }
 
@@ -2186,7 +2186,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
    * @description Return all networks from the namespace of the active session
    * @error NotConnected if no active session
    */
-  getNetworks() {
+  public getNetworks() {
     return this.getPermittedNetwork()
   }
   private getTezosNamespace(namespaces: SessionTypes.Namespaces = this.getSession().namespaces): {
@@ -2497,7 +2497,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
    * @description Access the public key hash (or public key) of the active account
    * @error ActiveAccountUnspecified thrown when there are multiple Tezos account in the session and none is set as the active one
    */
-  async getAccountOrPK() {
+  public async getAccountOrPK() {
     if (!this.activeAccountOrPbk) {
       this.getSession()
       throw new ActiveAccountUnspecified()

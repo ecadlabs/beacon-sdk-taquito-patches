@@ -95,8 +95,8 @@ export abstract class CommunicationClient {
     return sealCryptobox(message, Buffer.from(recipientPublicKey, 'hex'))
   }
 
-  abstract unsubscribeFromEncryptedMessages(): Promise<void>
-  abstract unsubscribeFromEncryptedMessage(senderPublicKey: string): Promise<void>
+  public abstract unsubscribeFromEncryptedMessages(): Promise<void>
+  public abstract unsubscribeFromEncryptedMessage(senderPublicKey: string): Promise<void>
   // abstract send(message: string, recipient?: string): Promise<void>
   public abstract sendMessage(message: string, peer?: PeerInfoType): Promise<void>
 }

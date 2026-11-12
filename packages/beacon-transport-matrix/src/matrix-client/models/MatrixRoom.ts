@@ -97,7 +97,7 @@ export class MatrixRoom {
    * @param id
    * @param joined
    */
-  private static fromJoined(id: string, joined: MatrixSyncJoinedRoom): MatrixRoom {
+  private static fromJoined(this: void, id: string, joined: MatrixSyncJoinedRoom): MatrixRoom {
     const events = [...joined.state.events, ...joined.timeline.events]
     const members = MatrixRoom.getMembersFromEvents(events)
     const messages = MatrixRoom.getMessagesFromEvents(events)
@@ -111,7 +111,7 @@ export class MatrixRoom {
    * @param id
    * @param invited
    */
-  private static fromInvited(id: string, invited: MatrixSyncInvitedRoom): MatrixRoom {
+  private static fromInvited(this: void, id: string, invited: MatrixSyncInvitedRoom): MatrixRoom {
     const members = MatrixRoom.getMembersFromEvents(invited.invite_state.events)
 
     const memberEventsByTarget = new Map<
@@ -161,7 +161,7 @@ export class MatrixRoom {
    * @param id
    * @param left
    */
-  private static fromLeft(id: string, left: MatrixSyncLeftRoom): MatrixRoom {
+  private static fromLeft(this: void, id: string, left: MatrixSyncLeftRoom): MatrixRoom {
     const events = [...left.state.events, ...left.timeline.events]
     const members = MatrixRoom.getMembersFromEvents(events)
     const messages = MatrixRoom.getMessagesFromEvents(events)

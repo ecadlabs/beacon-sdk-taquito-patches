@@ -4,14 +4,14 @@ import { ExtendedPeerInfo, PeerInfo } from './PeerInfo'
  * @internalapi
  */
 export class WalletConnectPairingRequest implements PeerInfo {
-  readonly type: string = 'walletconnect-pairing-request'
-  uri: string
-  id: string
-  name: string
-  icon?: string | undefined
-  appUrl?: string | undefined
-  publicKey: string
-  version: string
+  public readonly type: string = 'walletconnect-pairing-request'
+  public uri: string
+  public id: string
+  public name: string
+  public icon?: string | undefined
+  public appUrl?: string | undefined
+  public publicKey: string
+  public version: string
 
   constructor(
     id: string,
@@ -39,7 +39,7 @@ export class ExtendedWalletConnectPairingRequest
   extends WalletConnectPairingRequest
   implements ExtendedPeerInfo
 {
-  senderId: string
+  public senderId: string
 
   constructor(
     id: string,

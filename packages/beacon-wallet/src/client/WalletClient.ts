@@ -70,7 +70,6 @@ import { WalletP2PTransport } from '../transports/WalletP2PTransport'
 import { WalletWalletConnectTransport } from '../transports/WalletWalletConnectTransport'
 import { IncomingRequestInterceptor } from '../interceptors/IncomingRequestInterceptor'
 import { OutgoingResponseInterceptor } from '../interceptors/OutgoingResponseInterceptor'
-import { WalletClientOptions } from './WalletClientOptions'
 
 import type { WalletRequestOutputMessage } from '../types/WalletRequestOutputMessage'
 import type {
@@ -78,6 +77,7 @@ import type {
   WalletResponseOutputMessage
 } from '../types/WalletResponseMessage'
 import { isBeaconMessageType, isV3Envelope } from '../utils/message-guards'
+import { WalletClientOptions } from './WalletClientOptions'
 
 const logger = new Logger('WalletClient')
 
@@ -874,6 +874,7 @@ export class WalletClient extends Client {
 
     if (!peer) {
       this.evictPendingRequestsForPeer({ senderId })
+
       return
     }
 

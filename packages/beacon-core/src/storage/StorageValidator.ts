@@ -24,7 +24,7 @@ export class StorageValidator {
     }
   }
 
-  async validate(): Promise<boolean> {
+  public async validate(): Promise<boolean> {
     if (!this.innerValidate(await this.storage.get(StorageKey.BEACON_SDK_VERSION), 'str')) {
       return false
     }

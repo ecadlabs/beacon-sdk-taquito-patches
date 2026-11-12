@@ -31,7 +31,7 @@ export class InternalLogger implements LoggerInterface {
     this._log('error', name, method, args)
   }
 
-  time(start: boolean, label?: string | undefined): void {
+  public time(start: boolean, label?: string | undefined): void {
     start ? console.time(label) : console.timeEnd(label)
   }
 
@@ -108,7 +108,7 @@ export class Logger implements LoggerInterface {
     logger.error(this.name, method, args)
   }
 
-  time(start: boolean, label?: string | undefined): void {
+  public time(start: boolean, label?: string | undefined): void {
     logger.time(start, label)
   }
 

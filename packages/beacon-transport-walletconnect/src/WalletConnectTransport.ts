@@ -90,7 +90,7 @@ export class WalletConnectTransport<
   /**
    * Returns a promise that blocks the execution flow when awaited if the transport hasn't resolved yet; otherwise, it returns true.
    */
-  waitForResolution(): Promise<boolean> {
+  public waitForResolution(): Promise<boolean> {
     return this.isReady.promise
   }
 
@@ -157,11 +157,11 @@ export class WalletConnectTransport<
     }
   }
 
-  wasDisconnectedByWallet() {
+  public wasDisconnectedByWallet() {
     return Boolean(this.client.disconnectionEvents.size)
   }
 
-  closeClient() {
+  public closeClient() {
     if (!this.released) {
       this.client.closeSignClient().catch((error: unknown) => logger.warn('closeClient', error))
     }
@@ -268,7 +268,7 @@ export class WalletConnectTransport<
     //
   }
 
-  async doClientCleanup() {
+  public async doClientCleanup() {
     if (!this.released) {
       await this.client.unsubscribeFromEncryptedMessages()
     }
@@ -278,6 +278,7 @@ export class WalletConnectTransport<
     if (this.released) {
       throw new Error('WalletConnect transport has been released.')
     }
+
     return this.client.getPairingRequestInfo()
   }
 

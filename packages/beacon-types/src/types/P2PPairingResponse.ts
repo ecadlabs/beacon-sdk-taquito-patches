@@ -4,14 +4,14 @@ import { ExtendedPeerInfo, PeerInfo } from './PeerInfo'
  * @internalapi
  */
 export class P2PPairingResponse implements PeerInfo {
-  readonly type: string = 'p2p-pairing-request'
-  relayServer: string
-  id: string
-  name: string
-  icon?: string | undefined
-  appUrl?: string | undefined
-  publicKey: string
-  version: string
+  public readonly type: string = 'p2p-pairing-request'
+  public relayServer: string
+  public id: string
+  public name: string
+  public icon?: string | undefined
+  public appUrl?: string | undefined
+  public publicKey: string
+  public version: string
 
   constructor(
     id: string,
@@ -36,7 +36,7 @@ export class P2PPairingResponse implements PeerInfo {
  * @internalapi
  */
 export class ExtendedP2PPairingResponse extends P2PPairingResponse implements ExtendedPeerInfo {
-  senderId: string
+  public senderId: string
 
   constructor(
     id: string,

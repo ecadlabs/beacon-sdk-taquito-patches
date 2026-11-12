@@ -21,7 +21,7 @@ export class TezosSaplingBlockchain implements Blockchain {
     // No special response handling required.
   }
 
-  async getWalletLists(): Promise<{
+  public async getWalletLists(): Promise<{
     extensionList: ExtensionApp[]
     desktopList: DesktopApp[]
     webList: WebApp[]
@@ -35,7 +35,7 @@ export class TezosSaplingBlockchain implements Blockchain {
     }
   }
 
-  async getAccountInfosFromPermissionResponse(
+  public async getAccountInfosFromPermissionResponse(
     permissionResponse: TezosSaplingPermissionResponse
   ): Promise<{ accountId: string; address: string; publicKey: string }[]> {
     return permissionResponse.blockchainData.accounts.map((account) => ({

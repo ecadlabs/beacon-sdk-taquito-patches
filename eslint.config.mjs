@@ -181,5 +181,27 @@ export default [
     // Logger is the console adapter; application code uses LoggerInterface.
     files: ['packages/beacon-core/src/utils/Logger.ts'],
     rules: { 'no-console': 'off' }
+  },
+  {
+    // Pairing variants belong together; the extended class adds the sender identity.
+    files: [
+      'packages/beacon-types/src/types/P2PPairingRequest.ts',
+      'packages/beacon-types/src/types/P2PPairingResponse.ts',
+      'packages/beacon-types/src/types/PostMessagePairingRequest.ts',
+      'packages/beacon-types/src/types/PostMessagePairingResponse.ts',
+      'packages/beacon-types/src/types/WalletConnectPairingRequest.ts',
+      'packages/beacon-types/src/types/WalletConnectPairingResponse.ts'
+    ],
+    rules: { 'max-classes-per-file': ['error', 2] }
+  },
+  {
+    // Keep the console adapter and its public logger facade in one module.
+    files: ['packages/beacon-core/src/utils/Logger.ts'],
+    rules: { 'max-classes-per-file': ['error', 2] }
+  },
+  {
+    // These errors are one WalletConnect failure vocabulary with shared exports.
+    files: ['packages/beacon-transport-walletconnect/src/error.ts'],
+    rules: { 'max-classes-per-file': ['error', 8] }
   }
 ]

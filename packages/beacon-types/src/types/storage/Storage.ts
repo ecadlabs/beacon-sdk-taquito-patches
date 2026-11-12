@@ -19,7 +19,7 @@ export abstract class Storage {
    *
    * @param key The storage key
    */
-  abstract get<K extends StorageKey>(key: K): Promise<StorageKeyReturnType[K]>
+  public abstract get<K extends StorageKey>(key: K): Promise<StorageKeyReturnType[K]>
 
   /**
    * Sets a value in the storage and persist it
@@ -27,21 +27,21 @@ export abstract class Storage {
    * @param key The storage key
    * @param value The value to be persisted
    */
-  abstract set<K extends StorageKey>(key: K, value: StorageKeyReturnType[K]): Promise<void>
+  public abstract set<K extends StorageKey>(key: K, value: StorageKeyReturnType[K]): Promise<void>
 
   /**
    * Delete a key from storage
    *
    * @param key The storage key
    */
-  abstract delete<K extends StorageKey>(key: K): Promise<void>
+  public abstract delete<K extends StorageKey>(key: K): Promise<void>
 
   /**
    * This event will fire if the storage was modified by someone else, eg. on another tab
    *
    * @param callback The callback to be called when a storage value changes
    */
-  abstract subscribeToStorageChanged(
+  public abstract subscribeToStorageChanged(
     callback: (arg: {
       eventType: 'storageCleared' | 'entryModified'
       key: string | null
@@ -55,5 +55,5 @@ export abstract class Storage {
    *
    * @param key the storage key
    */
-  abstract getPrefixedKey<K extends StorageKey>(key: K): string
+  public abstract getPrefixedKey<K extends StorageKey>(key: K): string
 }

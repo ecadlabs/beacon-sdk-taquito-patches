@@ -211,6 +211,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     }
 
     this.pendingPairings.add(info.id, generation)
+
     return info
   }
 
@@ -332,6 +333,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       this.assertRelaySession(session)
       if (Date.now() - relayServer.localTimestamp < 60 * 1000) {
         this.recordRelayServer(relayServer.server)
+
         return { server: relayServer.server, timestamp: relayServer.timestamp }
       }
       try {
@@ -345,6 +347,7 @@ export class P2PCommunicationClient extends CommunicationClient {
           })
         }
         this.recordRelayServer(relayServer.server)
+
         return { server: relayServer.server, timestamp: info.timestamp }
       } catch (error) {
         this.assertRelaySession(session)
@@ -374,6 +377,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       const relayServer = await this.relayServer.promise
       this.assertRelaySession(session)
       this.recordRelayServer(relayServer.server)
+
       return { server: relayServer.server, timestamp: relayServer.timestamp }
     }
 
@@ -1630,6 +1634,7 @@ export class P2PCommunicationClient extends CommunicationClient {
       await this.mutatePeerRooms(session, (current) => ({ ...current, [recipient]: room.id }))
       this.assertSession(session)
     }
+
     return roomId
   }
 

@@ -56,3 +56,14 @@ package settings must point at `.github/workflows/release.yml` in this repo.
 Avoid introducing long-lived npm publish tokens back into the workflow.
 Prerelease versions publish under the prerelease identifier as the npm dist-tag,
 for example `4.8.1-ecad.4` publishes with the `ecad` tag.
+
+## Declaration lint policy
+
+Write explicit accessibility modifiers on class members. Public members keep
+public visibility; this policy does not require redesigning existing interfaces.
+
+Keep each pairing type beside its extended variant. The logger adapter and
+facade also stay together, as do the WalletConnect error classes. ESLint allows
+only their current class counts in those named files. Other files retain the
+one-class limit. Splitting these families solely to satisfy the file limit would
+scatter the declarations without changing their responsibilities.

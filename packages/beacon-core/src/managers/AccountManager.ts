@@ -38,6 +38,7 @@ export class AccountManager {
 
   public async addAccount(accountInfo: StoredAccountInfo): Promise<void> {
     await this.getAccounts()
+
     return this.storageManager.addOne(
       decodeStoredAccount(accountInfo),
       (account) => account.accountIdentifier === accountInfo.accountIdentifier

@@ -105,6 +105,7 @@ export class IndexedDBStorage extends Storage {
     operation: (store: IDBObjectStore) => Promise<T>
   ): Promise<T> {
     await this.initPromise
+
     return new Promise((resolve, reject) => {
       if (!this.isSupported) {
         reject('IndexedDB is not supported.')
@@ -248,13 +249,13 @@ export class IndexedDBStorage extends Storage {
     )
   }
 
-  getPrefixedKey<K extends StorageKey>(key: K): string {
+  public getPrefixedKey<K extends StorageKey>(key: K): string {
     logger.debug('getPrefixedKey', key)
 
     return key
   }
 
-  subscribeToStorageChanged(
+  public subscribeToStorageChanged(
     callback: (arg: {
       eventType: 'storageCleared' | 'entryModified'
       key: string | null

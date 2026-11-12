@@ -445,5 +445,5 @@ export abstract class Transport<
     )
   }
 
-  abstract listen(publicKey: string): Promise<void>
+  public abstract listen(publicKey: string): Promise<void>
 }
