@@ -4309,6 +4309,153 @@ export class DAppClient extends Client {
     return peer
   }
 
+  private async prepareRequestDispatch(canDispatch: () => boolean): Promise<
+    | {
+        peer: PeerInfo | undefined
+        walletInfo: WalletInfo
+        transport: ClientTransport
+        senderId: string | undefined
+        recipientSenderId: string | undefined
+      }
+    | undefined
+  > {
+    const account = await this.getActiveAccount()
+    if (!canDispatch()) {
+      return undefined
+    }
+    const peer = await this.getPeer(account)
+    if (!canDispatch()) {
+      return undefined
+    }
+    const walletInfo = await this.getWalletInfo(peer, account)
+    if (!canDispatch()) {
+      return undefined
+    }
+    const transport = await this.transport
+    if (!canDispatch()) {
+      return undefined
+    }
+    const senderId =
+      peer && 'senderId' in peer && typeof peer.senderId === 'string' ? peer.senderId : undefined
+
+    return {
+      peer,
+      walletInfo,
+      transport,
+      senderId,
+      recipientSenderId: senderId ?? account?.senderId
+    }
+  }
+
+  // V2 and V3 share transport lifetime, while their callers own admission and response types.
+  private async dispatchRequest(
+    request: { id: string; version: string },
+    requestType: BeaconMessageType,
+    owned: RequestHandle | undefined,
+    proxyKey?: RequestKey,
+    otherTabMessageId?: string
+  ): Promise<void> {
+    const logMethod = request.version === '3' ? 'makeRequestV3' : 'makeRequest'
+    const canDispatch = () =>
+      !owned ||
+      (this.isRequestCurrent(owned.key) &&
+        this.requestTracker.get(owned.key.id)?.state !== 'ResponsePreparing')
+    try {
+      const route = await this.prepareRequestDispatch(canDispatch)
+      if (!route || !canDispatch()) {
+        return
+      }
+      const { peer, walletInfo, transport, senderId, recipientSenderId } = route
+      const sentAt = Date.now()
+      if (owned) {
+        this.recordPendingRequestDispatch(
+          owned.key,
+          requestType,
+          transport.type,
+          recipientSenderId,
+          sentAt
+        )
+      }
+      if (!this.onOutgoingMessage(request, transport.type, peer)) {
+        if (owned) {
+          this.requestTracker.abort(owned.key, this.createAbortedError(request.id))
+        }
+
+        return
+      }
+      const payload = await new Serializer().serialize(request)
+      if (!canDispatch()) {
+        return
+      }
+      // Account replacement can cancel preparation, but not an operation already sent.
+      this.finishProxyPreparation(proxyKey)
+      try {
+        await transport.send(payload, peer)
+      } finally {
+        if (owned && transport instanceof WalletConnectTransport) {
+          this.requestTracker.attachCleanup(owned.key, () =>
+            this.releaseTransportRequest(request.id, transport)
+          )
+        }
+      }
+      if (!canDispatch()) {
+        return
+      }
+      const shouldSwitch =
+        requestType !== BeaconMessageType.PermissionRequest ||
+        (this._activeAccount.isResolved() && (await this._activeAccount.promise))
+      if (!canDispatch()) {
+        return
+      }
+      if (shouldSwitch) {
+        this.tryToAppSwitch(canDispatch).catch((error) => logger.warn('tryToAppSwitch', error))
+      }
+      if (!otherTabMessageId && canDispatch()) {
+        this.events
+          .emit(messageEvents[requestType].sent, {
+            requestId: request.id,
+            requestType,
+            transport: transport.type,
+            senderId,
+            dispatchStage: 'transport',
+            sentAt,
+            walletInfo: { ...walletInfo, name: walletInfo.name ?? 'Wallet' },
+            extraInfo: { resetCallback: async () => this.disconnect() }
+          })
+          .catch((emitError) => logger.warn(logMethod, emitError))
+      }
+    } catch (sendError) {
+      this.handleRequestDispatchError(owned, sendError, logMethod)
+    }
+  }
+
+  private handleRequestDispatchError(
+    owned: RequestHandle | undefined,
+    sendError: unknown,
+    logMethod: string
+  ): void {
+    if (owned && !this.requestTracker.reject(owned.key, sendError)) {
+      return
+    }
+    this.events
+      .emit(BeaconEvent.INTERNAL_ERROR, {
+        text: 'Unable to send message. If this problem persists, please reset the connection and pair your wallet again.',
+        buttons: [
+          {
+            text: 'Reset Connection',
+            actionCallback: async () => {
+              closeToast()
+              await this.disconnect()
+            }
+          }
+        ]
+      })
+      .catch((emitError) => logger.warn(logMethod, emitError))
+    if (!owned) {
+      throw sendError
+    }
+  }
+
   /**
    * This method handles sending of requests to the DApp. It makes sure that the DAppClient is initialized and connected
    * to the transport. After that rate limits and permissions will be checked, an ID is attached and the request is sent
@@ -4398,122 +4545,19 @@ export class DAppClient extends Client {
         this.armRequestDeadline(owned.key, request.type)
       }
 
-      const canDispatch = () =>
-        !owned ||
-        (this.isRequestCurrent(owned.key) &&
-          this.requestTracker.get(owned.key.id)?.state !== 'ResponsePreparing')
-      const dispatch = async (): Promise<void> => {
-        try {
-          const account = await this.getActiveAccount()
-          if (!canDispatch()) {
-            return
-          }
-          const peer = await this.getPeer(account)
-          if (!canDispatch()) {
-            return
-          }
-          const walletInfo = await this.getWalletInfo(peer, account)
-          if (!canDispatch()) {
-            return
-          }
-          const transport = await this.transport
-          if (!canDispatch()) {
-            return
-          }
-          const sentAt = Date.now()
-          const recipientSenderId =
-            peer && 'senderId' in peer && typeof peer.senderId === 'string'
-              ? peer.senderId
-              : account?.senderId
-          if (owned) {
-            this.recordPendingRequestDispatch(
-              owned.key,
-              request.type,
-              transport.type,
-              recipientSenderId,
-              sentAt
-            )
-          }
-          if (!this.onOutgoingMessage(request, transport.type, peer)) {
-            if (owned) {
-              this.requestTracker.abort(owned.key, this.createAbortedError(request.id))
-            }
-
-            return
-          }
-          const payload = await new Serializer().serialize(request)
-          if (!canDispatch()) {
-            return
-          }
-          // Account replacement can cancel preparation, but not an operation already sent.
-          this.finishProxyPreparation(proxyKey)
-          try {
-            await transport.send(payload, peer)
-          } finally {
-            if (owned && transport instanceof WalletConnectTransport) {
-              this.requestTracker.attachCleanup(owned.key, () =>
-                this.releaseTransportRequest(request.id, transport)
-              )
-            }
-          }
-          if (!canDispatch()) {
-            return
-          }
-          const shouldSwitch =
-            request.type !== BeaconMessageType.PermissionRequest ||
-            (this._activeAccount.isResolved() && (await this._activeAccount.promise))
-          if (!canDispatch()) {
-            return
-          }
-          if (shouldSwitch) {
-            this.tryToAppSwitch(canDispatch).catch((error) => logger.warn('tryToAppSwitch', error))
-          }
-          if (!otherTabMessageId && canDispatch()) {
-            this.events
-              .emit(messageEvents[requestInput.type].sent, {
-                requestId: request.id,
-                requestType: requestInput.type,
-                transport: transport.type,
-                senderId:
-                  peer && 'senderId' in peer && typeof peer.senderId === 'string'
-                    ? peer.senderId
-                    : undefined,
-                dispatchStage: 'transport',
-                sentAt,
-                walletInfo: { ...walletInfo, name: walletInfo.name ?? 'Wallet' },
-                extraInfo: { resetCallback: async () => this.disconnect() }
-              })
-              .catch((emitError) => logger.warn('makeRequest', emitError))
-          }
-        } catch (sendError) {
-          if (owned && !this.requestTracker.reject(owned.key, sendError)) {
-            return
-          }
-          this.events
-            .emit(BeaconEvent.INTERNAL_ERROR, {
-              text: 'Unable to send message. If this problem persists, please reset the connection and pair your wallet again.',
-              buttons: [
-                {
-                  text: 'Reset Connection',
-                  actionCallback: async () => {
-                    closeToast()
-                    await this.disconnect()
-                  }
-                }
-              ]
-            })
-            .catch((emitError) => logger.warn('makeRequest', emitError))
-          if (!owned) {
-            throw sendError
-          }
-        }
-      }
+      const dispatch = this.dispatchRequest(
+        request,
+        request.type,
+        owned,
+        proxyKey,
+        otherTabMessageId
+      )
       if (!owned) {
-        await dispatch()
+        await dispatch
 
         return undefined
       }
-      dispatch().catch((dispatchError) => logger.warn('makeRequest', dispatchError))
+      dispatch.catch((dispatchError) => logger.warn('makeRequest', dispatchError))
 
       return owned.promise
     }
@@ -4581,124 +4625,14 @@ export class DAppClient extends Client {
       }
       this.admitPermissionRequest(permissionOwner, owned.key)
       // V3 requests are either a permission request or a generic blockchain request.
-      this.armRequestDeadline(
-        owned.key,
+      const requestType =
         requestInput.type === BeaconMessageType.PermissionRequest
           ? BeaconMessageType.PermissionRequest
           : BeaconMessageType.BlockchainRequest
+      this.armRequestDeadline(owned.key, requestType)
+      this.dispatchRequest(request, requestType, owned, proxyKey, otherTabMessageId).catch(
+        (dispatchError) => logger.warn('makeRequestV3', dispatchError)
       )
-
-      const canDispatch = () =>
-        this.isRequestCurrent(owned.key) &&
-        this.requestTracker.get(owned.key.id)?.state !== 'ResponsePreparing'
-      const dispatch = async (): Promise<void> => {
-        try {
-          const account = await this.getActiveAccount()
-          if (!canDispatch()) {
-            return
-          }
-          const peer = await this.getPeer(account)
-          if (!canDispatch()) {
-            return
-          }
-          const walletInfo = await this.getWalletInfo(peer, account)
-          if (!canDispatch()) {
-            return
-          }
-          const transport = await this.transport
-          if (!canDispatch()) {
-            return
-          }
-          const sentAt = Date.now()
-          const recipientSenderId =
-            peer && 'senderId' in peer && typeof peer.senderId === 'string'
-              ? peer.senderId
-              : account?.senderId
-          const v3RequestType =
-            requestInput.type === BeaconMessageType.PermissionRequest
-              ? BeaconMessageType.PermissionRequest
-              : BeaconMessageType.BlockchainRequest
-          this.recordPendingRequestDispatch(
-            owned.key,
-            v3RequestType,
-            transport.type,
-            recipientSenderId,
-            sentAt
-          )
-          if (!this.onOutgoingMessage(request, transport.type, peer)) {
-            this.requestTracker.abort(owned.key, this.createAbortedError(request.id))
-
-            return
-          }
-          const payload = await new Serializer().serialize(request)
-          if (!canDispatch()) {
-            return
-          }
-          // Account replacement can cancel preparation, but not an operation already sent.
-          this.finishProxyPreparation(proxyKey)
-          try {
-            await transport.send(payload, peer)
-          } finally {
-            if (transport instanceof WalletConnectTransport) {
-              this.requestTracker.attachCleanup(owned.key, () =>
-                this.releaseTransportRequest(request.id, transport)
-              )
-            }
-          }
-          if (!canDispatch()) {
-            return
-          }
-          const shouldSwitch =
-            request.message.type !== BeaconMessageType.PermissionRequest ||
-            (this._activeAccount.isResolved() && (await this._activeAccount.promise))
-          if (!canDispatch()) {
-            return
-          }
-          if (shouldSwitch) {
-            this.tryToAppSwitch(canDispatch).catch((error) => logger.warn('tryToAppSwitch', error))
-          }
-          if (!otherTabMessageId && canDispatch()) {
-            const index =
-              requestInput.type === BeaconMessageType.PermissionRequest
-                ? BeaconMessageType.PermissionRequest
-                : BeaconMessageType.BlockchainRequest
-            this.events
-              .emit(messageEvents[index].sent, {
-                requestId: request.id,
-                requestType: index,
-                transport: transport.type,
-                senderId:
-                  peer && 'senderId' in peer && typeof peer.senderId === 'string'
-                    ? peer.senderId
-                    : undefined,
-                dispatchStage: 'transport',
-                sentAt,
-                walletInfo: { ...walletInfo, name: walletInfo.name ?? 'Wallet' },
-                extraInfo: { resetCallback: async () => this.disconnect() }
-              })
-              .catch((emitError) => logger.warn('makeRequestV3', emitError))
-          }
-        } catch (sendError) {
-          if (!this.requestTracker.reject(owned.key, sendError)) {
-            return
-          }
-          this.events
-            .emit(BeaconEvent.INTERNAL_ERROR, {
-              text: 'Unable to send message. If this problem persists, please reset the connection and pair your wallet again.',
-              buttons: [
-                {
-                  text: 'Reset Connection',
-                  actionCallback: async () => {
-                    closeToast()
-                    await this.disconnect()
-                  }
-                }
-              ]
-            })
-            .catch((emitError) => logger.warn('makeRequestV3', emitError))
-        }
-      }
-      dispatch().catch((dispatchError) => logger.warn('makeRequestV3', dispatchError))
 
       return owned.promise
     }

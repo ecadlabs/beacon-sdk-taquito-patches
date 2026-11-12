@@ -266,6 +266,44 @@ describe('Request dispatch lifetime', () => {
     }
   }
 
+  it.each(versions)(
+    'does not send V%s after cancellation during serialization',
+    async (version) => {
+      await start(TransportType.POST_MESSAGE, 0)
+      const serialize = Serializer.prototype.serialize
+      let requestId = ''
+      vi.spyOn(Serializer.prototype, 'serialize').mockImplementationOnce(async function (message) {
+        if (
+          !message ||
+          typeof message !== 'object' ||
+          !('id' in message) ||
+          typeof message.id !== 'string'
+        ) {
+          throw new Error('Missing serialization ID')
+        }
+        requestId = message.id
+        await release.promise
+
+        return serialize.call(this, message)
+      })
+      const pending = dispatch(version)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(requestId).not.toBe('')
+      expect(pending.send).not.toHaveBeenCalled()
+
+      await dapp.disconnect({ notifyPeers: false })
+      const expected = expectedError(requestId, BeaconErrorType.ABORTED_ERROR)
+      expect(await pending.outcome).toEqual(expected)
+      release.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(pending.send).not.toHaveBeenCalled()
+      expect(sent).not.toHaveBeenCalled()
+      expect(switchApp).not.toHaveBeenCalled()
+      expect(internalError).not.toHaveBeenCalled()
+    }
+  )
+
   it.each(cases)(
     'settles V$version $transport timeout before send completes and ignores its later completion',
     async ({ version, transport: type }) => {
