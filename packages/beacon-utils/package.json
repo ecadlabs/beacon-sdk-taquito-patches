@@ -1,6 +1,6 @@
 {
   "name": "@ecadlabs/beacon-utils",
-  "version": "4.9.0-ecad-beta.0",
+  "version": "4.9.0-ecad-beta.1",
   "description": "Shared utility helpers used across the Beacon SDK packages.",
   "author": "ECAD Labs",
   "homepage": "https://github.com/ecadlabs/beacon-sdk-taquito-patches",
