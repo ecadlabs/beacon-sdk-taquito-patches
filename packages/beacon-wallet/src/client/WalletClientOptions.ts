@@ -37,4 +37,9 @@ export interface WalletClientOptions {
    * WalletConnect v2 SignClient options. When provided, WalletClient initializes WalletWalletConnectTransport.
    */
   walletConnectOptions?: SignClientTypes.Options
+
+  /**
+   * Optional multi-tab leadership check for WalletWalletConnectTransport.
+   */
+  isLeader?: () => boolean | Promise<boolean>
 }

@@ -104,6 +104,7 @@ export class WalletClient extends Client {
   private readonly permissionManager: PermissionManager
   private readonly appMetadataManager: AppMetadataManager
   private readonly walletConnectOptions?: SignClientTypes.Options
+  private readonly isLeader?: () => boolean | Promise<boolean>
   private p2pTransport: ClientTransport | undefined
   private wcTransport: ClientTransport | undefined
   private connectionAttempt: Promise<void> | undefined
@@ -136,6 +137,7 @@ export class WalletClient extends Client {
       ...config
     })
     this.walletConnectOptions = config.walletConnectOptions
+    this.isLeader = config.isLeader
     this.permissionManager = new PermissionManager(this.storage)
     this.appMetadataManager = new AppMetadataManager(this.storage)
     this.peersSeeded = this.seedKnownPeers()
@@ -190,7 +192,8 @@ export class WalletClient extends Client {
         this.storage,
         this.walletConnectOptions,
         this.iconUrl,
-        this.appUrl
+        this.appUrl,
+        this.isLeader
       )
       this.wcTransport = wcTransport
       this.observeTransportStatus(wcTransport)
@@ -1208,9 +1211,11 @@ export class WalletClient extends Client {
       const transports = [this.wcTransport, this.p2pTransport]
       const status = transports.some((t) => t.connectionStatus === TransportStatus.CONNECTED)
         ? TransportStatus.CONNECTED
-        : transports.some((t) => t.connectionStatus === TransportStatus.CONNECTING)
-          ? TransportStatus.CONNECTING
-          : TransportStatus.NOT_CONNECTED
+        : transports.some((t) => t.connectionStatus === TransportStatus.SECONDARY_TAB_CONNECTED)
+          ? TransportStatus.SECONDARY_TAB_CONNECTED
+          : transports.some((t) => t.connectionStatus === TransportStatus.CONNECTING)
+            ? TransportStatus.CONNECTING
+            : TransportStatus.NOT_CONNECTED
       const health = transports.some((t) => t.health === 'degraded') ? 'degraded' : 'ok'
       const activeTransport =
         transports.find((t) => t.connectionStatus === status) ?? this.wcTransport
@@ -1257,6 +1262,38 @@ export class WalletClient extends Client {
     }
 
     return storedNode
+  }
+
+  private getWalletConnectTransport(): WalletWalletConnectTransport | undefined {
+    if (this.wcTransport instanceof WalletWalletConnectTransport) {
+      return this.wcTransport
+    }
+    const primary = this._transport.isResolved() ? this._transport.promiseResult : undefined
+    if (primary instanceof WalletWalletConnectTransport) {
+      return primary
+    }
+
+    return undefined
+  }
+
+  public async openRelayer(relayUrl?: string): Promise<void> {
+    if (this.destroyed) {
+      return
+    }
+    const wcTransport = this.getWalletConnectTransport()
+    if (wcTransport) {
+      await wcTransport.openRelayer(relayUrl)
+    }
+  }
+
+  public async closeRelayer(): Promise<void> {
+    if (this.destroyed) {
+      return
+    }
+    const wcTransport = this.getWalletConnectTransport()
+    if (wcTransport) {
+      await wcTransport.closeRelayer()
+    }
   }
 
   public subscribeToTransportStatus(

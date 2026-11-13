@@ -188,6 +188,7 @@ export class WalletWalletConnectTransport extends Transport<
   private signClient?: SignClientInstance
   private initPromise?: Promise<SignClientInstance>
   private generation = 0
+  private relayerClosed = false
   private readonly closedTopics = new Set<string>()
   private readonly responsesInFlight = new WeakMap<PendingWcEntry, Promise<void>>()
   private listenersAttached = false
@@ -231,7 +232,8 @@ export class WalletWalletConnectTransport extends Transport<
     storage: Storage,
     private readonly wcOptions: SignClientTypes.Options,
     private readonly iconUrl?: string,
-    private readonly appUrl?: string
+    private readonly appUrl?: string,
+    private readonly isLeader?: () => boolean | Promise<boolean>
   ) {
     super(
       name,
@@ -247,6 +249,10 @@ export class WalletWalletConnectTransport extends Transport<
     return true
   }
 
+  private checkIsLeader(): boolean | Promise<boolean> {
+    return this.isLeader ? this.isLeader() : true
+  }
+
   public async connect(): Promise<void> {
     if (this._isConnected === TransportStatus.CONNECTED) {
       return
@@ -254,9 +260,29 @@ export class WalletWalletConnectTransport extends Transport<
     const generation = this.generation
     this._isConnected = TransportStatus.CONNECTING
     try {
-      const signClient = await this.ensureSignClient()
+      const leaderResult = this.checkIsLeader()
+      const leader = typeof leaderResult === 'boolean' ? leaderResult : await leaderResult
       if (generation !== this.generation) {
         return
+      }
+      if (!leader) {
+        if (this.signClient && this.listenersAttached) {
+          this.detachSignClientListeners(this.signClient)
+        }
+        this._isConnected = TransportStatus.SECONDARY_TAB_CONNECTED
+
+        return
+      }
+      const signClient = await this.ensureSignClient()
+      if (generation !== this.generation || this.signClient !== signClient) {
+        return
+      }
+      if (this.relayerClosed) {
+        await signClient.core?.relayer?.transportOpen()
+        if (generation !== this.generation || this.signClient !== signClient) {
+          return
+        }
+        this.relayerClosed = false
       }
       this.attachSignClientListeners(signClient)
       this._isConnected = TransportStatus.CONNECTED
@@ -266,6 +292,56 @@ export class WalletWalletConnectTransport extends Transport<
       }
       throw error
     }
+  }
+
+  public async closeRelayer(): Promise<void> {
+    const generation = this.generation
+    const signClient = this.signClient
+    if (!signClient) {
+      if (this._isConnected !== TransportStatus.NOT_CONNECTED) {
+        this._isConnected = TransportStatus.NOT_CONNECTED
+      }
+
+      return
+    }
+    await signClient.core.relayer.transportClose()
+    if (generation !== this.generation || this.signClient !== signClient) {
+      return
+    }
+    this.relayerClosed = true
+    this._isConnected = TransportStatus.NOT_CONNECTED
+  }
+
+  public async openRelayer(relayUrl?: string): Promise<void> {
+    const generation = this.generation
+    const leaderResult = this.checkIsLeader()
+    const leader = typeof leaderResult === 'boolean' ? leaderResult : await leaderResult
+    if (generation !== this.generation) {
+      return
+    }
+    if (!leader) {
+      if (this.signClient && this.listenersAttached) {
+        this.detachSignClientListeners(this.signClient)
+      }
+      this._isConnected = TransportStatus.SECONDARY_TAB_CONNECTED
+
+      return
+    }
+    const signClient = await this.ensureSignClient()
+    if (generation !== this.generation || this.signClient !== signClient) {
+      return
+    }
+    if (relayUrl !== undefined) {
+      await signClient.core.relayer.transportOpen(relayUrl)
+    } else {
+      await signClient.core.relayer.transportOpen()
+    }
+    if (generation !== this.generation || this.signClient !== signClient) {
+      return
+    }
+    this.relayerClosed = false
+    this.attachSignClientListeners(signClient)
+    this._isConnected = TransportStatus.CONNECTED
   }
 
   public async disconnect(): Promise<void> {
@@ -288,6 +364,7 @@ export class WalletWalletConnectTransport extends Transport<
     this.sessionMetaByTopic.clear()
     this.topicByPeerPublicKey.clear()
     this.closedTopics.clear()
+    this.relayerClosed = false
     this.signClient = undefined
     this.initPromise = undefined
   }
@@ -312,8 +389,13 @@ export class WalletWalletConnectTransport extends Transport<
 
   public override async listen(): Promise<void> {
     const generation = this.generation
+    const leaderResult = this.checkIsLeader()
+    const leader = typeof leaderResult === 'boolean' ? leaderResult : await leaderResult
+    if (!leader || generation !== this.generation) {
+      return
+    }
     const signClient = await this.ensureSignClient()
-    if (generation === this.generation) {
+    if (generation === this.generation && this.signClient === signClient) {
       this.attachSignClientListeners(signClient)
     }
   }

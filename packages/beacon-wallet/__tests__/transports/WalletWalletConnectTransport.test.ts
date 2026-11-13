@@ -73,6 +73,12 @@ const createMockSignClient = () => {
     emit: vi.fn().mockResolvedValue(undefined),
     update: vi.fn().mockResolvedValue({ acknowledged: vi.fn().mockResolvedValue(undefined) }),
     disconnect: vi.fn().mockResolvedValue(undefined),
+    core: {
+      relayer: {
+        transportOpen: vi.fn().mockResolvedValue(undefined),
+        transportClose: vi.fn().mockResolvedValue(undefined)
+      }
+    },
     session: {
       getAll: vi.fn(() => [...sessions.values()]),
       get: vi.fn((topic: string) => sessions.get(topic))
@@ -117,7 +123,7 @@ describe('WalletWalletConnectTransport', () => {
     vi.restoreAllMocks()
   })
 
-  const createTransport = async () => {
+  const createTransport = async (isLeader?: () => boolean | Promise<boolean>) => {
     const keyPair = await getKeypairFromSeed('wallet-wc-test')
     const storage = new LocalStorage()
 
@@ -127,7 +133,8 @@ describe('WalletWalletConnectTransport', () => {
       storage,
       { projectId: 'test-project-id' },
       'https://wallet.example/icon.png',
-      'https://wallet.example'
+      'https://wallet.example',
+      isLeader
     )
   }
 
@@ -947,6 +954,98 @@ describe('WalletWalletConnectTransport', () => {
     const expMsg = (await serializer.deserialize(received[1] as string)) as DisconnectMessage
     expect(expMsg.type).toBe(BeaconMessageType.Disconnect)
     expect(expMsg.senderId).toBe(await getSenderId(hexPk('2')))
+
+    await transport.doClientCleanup()
+  })
+
+  it('closes and reopens the relayer socket while keeping signClient alive and respecting generation bounds', async () => {
+    const transport = await createTransport()
+    const statusHistory: TransportStatus[] = []
+    transport.addStatusListener((info) => {
+      statusHistory.push(info.status)
+    })
+
+    // Calling closeRelayer before connect does not initialize SignClient
+    const initCallsBefore = vi.mocked(initWalletConnectSignClient).mock.calls.length
+    await transport.closeRelayer()
+    expect(vi.mocked(initWalletConnectSignClient)).toHaveBeenCalledTimes(initCallsBefore)
+    expect(currentSignClient.core.relayer.transportClose).not.toHaveBeenCalled()
+
+    await transport.connect()
+    expect(transport.connectionStatus).toBe(TransportStatus.CONNECTED)
+    const initCallsAfterConnect = vi.mocked(initWalletConnectSignClient).mock.calls.length
+    expect(initCallsAfterConnect).toBe(initCallsBefore + 1)
+    expect(currentSignClient.on).toHaveBeenCalledTimes(4)
+
+    await transport.closeRelayer()
+    expect(currentSignClient.core.relayer.transportClose).toHaveBeenCalledTimes(1)
+    expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
+
+    await transport.openRelayer('wss://relay.walletconnect.com')
+    expect(currentSignClient.core.relayer.transportOpen).toHaveBeenCalledTimes(1)
+    expect(currentSignClient.core.relayer.transportOpen).toHaveBeenCalledWith(
+      'wss://relay.walletconnect.com'
+    )
+    expect(transport.connectionStatus).toBe(TransportStatus.CONNECTED)
+    // SignClient was reused in memory and listeners were not duplicated
+    expect(vi.mocked(initWalletConnectSignClient)).toHaveBeenCalledTimes(initCallsAfterConnect)
+    expect(currentSignClient.on).toHaveBeenCalledTimes(4)
+
+    expect(statusHistory).toEqual([
+      TransportStatus.CONNECTING,
+      TransportStatus.CONNECTED,
+      TransportStatus.NOT_CONNECTED,
+      TransportStatus.CONNECTED
+    ])
+
+    // Generation check: if doClientCleanup happens while openRelayer is in flight, status stays NOT_CONNECTED
+    await transport.closeRelayer()
+    const openGate = Promise.withResolvers<void>()
+    currentSignClient.core.relayer.transportOpen.mockImplementationOnce(() => openGate.promise)
+    const opening = transport.openRelayer()
+    await transport.doClientCleanup()
+    openGate.resolve()
+    await opening
+    expect(transport.connectionStatus).toBe(TransportStatus.NOT_CONNECTED)
+  })
+
+  it('transitions follower tabs to SECONDARY_TAB_CONNECTED without initializing SignClient or attaching duplicate listeners until promoted', async () => {
+    let leader = false
+    const transport = await createTransport(async () => leader)
+    const statusHistory: TransportStatus[] = []
+    transport.addStatusListener((info) => {
+      statusHistory.push(info.status)
+    })
+
+    const initCallsBefore = vi.mocked(initWalletConnectSignClient).mock.calls.length
+
+    await transport.connect()
+    expect(transport.connectionStatus).toBe(TransportStatus.SECONDARY_TAB_CONNECTED)
+    expect(vi.mocked(initWalletConnectSignClient)).toHaveBeenCalledTimes(initCallsBefore)
+    expect(currentSignClient.on).not.toHaveBeenCalled()
+
+    await transport.listen()
+    expect(vi.mocked(initWalletConnectSignClient)).toHaveBeenCalledTimes(initCallsBefore)
+    expect(currentSignClient.on).not.toHaveBeenCalled()
+
+    await transport.openRelayer()
+    expect(transport.connectionStatus).toBe(TransportStatus.SECONDARY_TAB_CONNECTED)
+    expect(vi.mocked(initWalletConnectSignClient)).toHaveBeenCalledTimes(initCallsBefore)
+    expect(currentSignClient.core.relayer.transportOpen).not.toHaveBeenCalled()
+
+    // Promote tab to leader and connect
+    leader = true
+    await transport.connect()
+    expect(transport.connectionStatus).toBe(TransportStatus.CONNECTED)
+    expect(vi.mocked(initWalletConnectSignClient)).toHaveBeenCalledTimes(initCallsBefore + 1)
+    expect(currentSignClient.on).toHaveBeenCalledTimes(4)
+
+    expect(statusHistory).toEqual([
+      TransportStatus.CONNECTING,
+      TransportStatus.SECONDARY_TAB_CONNECTED,
+      TransportStatus.CONNECTING,
+      TransportStatus.CONNECTED
+    ])
 
     await transport.doClientCleanup()
   })

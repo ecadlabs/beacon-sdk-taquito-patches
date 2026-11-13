@@ -8,6 +8,7 @@ import {
   SignPayloadRequestOutput,
   TezosOperationType,
   TezosRpcError,
+  TransportStatus,
   TransportType
 } from '@ecadlabs/beacon-types'
 import { serializeBeaconErrorToJsonRpcError } from '@ecadlabs/beacon-transport-walletconnect'
@@ -56,6 +57,12 @@ const createMockSignClient = () => {
     emit: vi.fn().mockResolvedValue(undefined),
     update: vi.fn().mockResolvedValue({ acknowledged: vi.fn().mockResolvedValue(undefined) }),
     disconnect: vi.fn().mockResolvedValue(undefined),
+    core: {
+      relayer: {
+        transportOpen: vi.fn().mockResolvedValue(undefined),
+        transportClose: vi.fn().mockResolvedValue(undefined)
+      }
+    },
     session: {
       getAll: vi.fn(() => [...sessions.values()]),
       get: vi.fn((topic: string) => sessions.get(topic))
@@ -214,5 +221,44 @@ describe('WalletClient with walletConnectOptions', () => {
     })
 
     await expect(walletClient.destroy()).resolves.toBeUndefined()
+  })
+
+  it('supports isLeader multi-tab coordination and closeRelayer / openRelayer on WalletClient', async () => {
+    let isLeader = false
+    const walletClient = new WalletClient({
+      name: 'MultiTab WC Wallet',
+      storage: new LocalStorage('wc-multitab-wallet'),
+      walletConnectOptions: {
+        projectId: 'test-project-id'
+      },
+      isLeader: () => isLeader
+    })
+
+    await walletClient.init()
+    await walletClient.connect(() => {})
+
+    // Follower tab does not initialize SignClient and reports SECONDARY_TAB_CONNECTED on WC transport
+    expect(currentSignClient.on).not.toHaveBeenCalled()
+
+    // Promote tab to leader and open relayer
+    isLeader = true
+    await walletClient.openRelayer()
+    expect(currentSignClient.core.relayer.transportOpen).toHaveBeenCalledTimes(1)
+    expect(currentSignClient.on).toHaveBeenCalledTimes(4)
+    expect(await walletClient.getConnectionInfo()).toMatchObject({
+      status: TransportStatus.CONNECTED
+    })
+
+    // Close relayer on logout
+    await walletClient.closeRelayer()
+    expect(currentSignClient.core.relayer.transportClose).toHaveBeenCalledTimes(1)
+
+    // Reopen relayer on login
+    await walletClient.openRelayer('wss://relay.walletconnect.com')
+    expect(currentSignClient.core.relayer.transportOpen).toHaveBeenLastCalledWith(
+      'wss://relay.walletconnect.com'
+    )
+
+    await walletClient.destroy()
   })
 })
