@@ -208,7 +208,7 @@ describe('WalletConnect public request lifetime (#102)', () => {
     mockRequests[0].reply.resolve({ signature: 'completed-signature' })
     await flush()
     expect(await pending.outcome).toHaveProperty('value')
-    expect(observed).toHaveBeenCalledTimes(2)
+    expect(observed).toHaveBeenCalledTimes(3)
     expect(observed.mock.calls[1][0]).toMatchObject({
       direction: 'incoming',
       transport: TransportType.WALLETCONNECT,
@@ -218,14 +218,22 @@ describe('WalletConnect public request lifetime (#102)', () => {
         signature: 'completed-signature'
       }
     })
+    expect(observed.mock.calls[2][0]).toMatchObject({
+      direction: 'incoming',
+      transport: TransportType.WALLETCONNECT,
+      disposition: 'handled',
+      message: {
+        id: pending.id,
+        type: BeaconMessageType.SignPayloadResponse,
+        signature: 'completed-signature'
+      }
+    })
     for (const [record] of observed.mock.calls) {
-      expect(Object.keys(record).sort()).toEqual([
-        'direction',
-        'message',
-        'senderId',
-        'transport',
-        'ts'
-      ])
+      expect(Object.keys(record).sort()).toEqual(
+        record.disposition !== undefined
+          ? ['direction', 'disposition', 'message', 'senderId', 'transport', 'ts']
+          : ['direction', 'message', 'senderId', 'transport', 'ts']
+      )
       expect(record.message).not.toHaveProperty('session')
       expect(record.message).not.toHaveProperty('pairing')
     }
