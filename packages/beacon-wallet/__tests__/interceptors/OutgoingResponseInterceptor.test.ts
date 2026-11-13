@@ -75,7 +75,9 @@ const responses: BeaconResponseInputMessage[] = [
 ]
 it.each(responses)('adds envelope fields to $type', async (message) => {
   const config = setup(message)
-  await OutgoingResponseInterceptor.intercept(config)
+  const outcome = OutgoingResponseInterceptor.intercept(config)
+  expect(config.interceptorCallback).toHaveBeenCalledTimes(1)
+  await outcome
   expect(config.interceptorCallback).toHaveBeenCalledWith({
     ...message,
     senderId: 'wallet',
@@ -85,7 +87,7 @@ it.each(responses)('adds envelope fields to $type', async (message) => {
 it('derives and persists the permission address and metadata', async () => {
   const config = setup()
   await config.appMetadataManager.addAppMetadata(metadata)
-  await OutgoingResponseInterceptor['handleV2Message'](config)
+  await OutgoingResponseInterceptor.intercept(config)
   await vi.waitFor(async () =>
     expect(await config.permissionManager.getPermissions()).toHaveLength(1)
   )
@@ -110,7 +112,7 @@ it('derives and persists the permission address and metadata', async () => {
 })
 it('rejects missing metadata before persisting a permission', async () => {
   const config = setup()
-  await expect(OutgoingResponseInterceptor['handleV2Message'](config)).rejects.toThrow(
+  await expect(OutgoingResponseInterceptor.intercept(config)).rejects.toThrow(
     'AppMetadata not found'
   )
   expect(await config.permissionManager.getPermissions()).toEqual([])
@@ -143,17 +145,12 @@ it('waits for permissionManager.addPermission before resolving', async () => {
   })
   await vi.waitFor(() => expect(persist).toHaveBeenCalledTimes(1))
   const resolvedEarly = complete
+  const sentEarly = config.interceptorCallback.mock.calls.length
   gate.resolve()
   await outcome
   expect(resolvedEarly).toBe(false)
+  expect(sentEarly).toBe(0)
 })
-it('propagates missing AppMetadata from intercept', async () => {
-  const config = setup()
-  await expect(OutgoingResponseInterceptor.intercept(config)).rejects.toThrow(
-    'AppMetadata not found'
-  )
-})
-
 it('waits for the V3 interceptor callback', async () => {
   const config = setup()
   const gate = new ExposedPromise<void>()
@@ -182,49 +179,6 @@ it('waits for the V3 interceptor callback', async () => {
   gate.resolve()
   await outcome
   expect(resolvedEarly).toBe(false)
-})
-
-it.each([
-  {
-    address: undefined,
-    publicKey: undefined,
-    walletType: 'implicit' as const,
-    error: 'Address or PublicKey must be defined'
-  },
-  {
-    address: 'invalid',
-    publicKey: undefined,
-    walletType: 'implicit' as const,
-    error: 'Invalid address'
-  },
-  {
-    address,
-    publicKey,
-    walletType: 'abstracted_account' as const,
-    error: 'Invalid abstracted account address'
-  }
-])('rejects invalid permission input: $error', async ({ error, ...fields }) => {
-  const config = setup({ ...permission, ...fields } as unknown as BeaconResponseInputMessage)
-  await expect(OutgoingResponseInterceptor['handleV2Message'](config)).rejects.toThrow(error)
-  expect(config.interceptorCallback).not.toHaveBeenCalled()
-  expect(await config.permissionManager.getPermissions()).toEqual([])
-})
-it('accepts an explicit address without a public key', async () => {
-  const config = setup({
-    ...permission,
-    publicKey: undefined,
-    address
-  } as unknown as BeaconResponseInputMessage)
-  await config.appMetadataManager.addAppMetadata(metadata)
-  await OutgoingResponseInterceptor['handleV2Message'](config)
-  await vi.waitFor(async () =>
-    expect(await config.permissionManager.getPermissions()).toHaveLength(1)
-  )
-  expect(await config.permissionManager.getPermissions()).toEqual([
-    expect.objectContaining({ address })
-  ])
-  expect((await config.permissionManager.getPermissions())[0].publicKey).toBeUndefined()
-  expect(config.interceptorCallback).toHaveBeenCalledWith(expect.objectContaining({ address }))
 })
 
 it.each([...responses, permission])(
@@ -268,8 +222,138 @@ it.each([...responses, permission])(
 it('rejects unknown V2 response types', async () => {
   const message = { id: 'unknown', type: 'unknown' } as unknown as BeaconResponseInputMessage
   const config = setup(message)
-  await expect(OutgoingResponseInterceptor['handleV2Message'](config)).rejects.toThrow(
+  await expect(OutgoingResponseInterceptor.intercept(config)).rejects.toThrow(
     'Function not implemented.'
   )
+  expect(config.interceptorCallback).not.toHaveBeenCalled()
+})
+
+const contractAddress = 'KT1TxqZ8QtKvLu3V3JH7Gx58n7Co8pgtpQU5'
+const missingCredentials = 'Address or PublicKey must be defined'
+const invalidAddress = 'Invalid address'
+const invalidAbstractedAddress = 'Invalid abstracted account address'
+type CredentialCase = {
+  name: string
+  fields: Pick<
+    Extract<BeaconResponseInputMessage, { type: BeaconMessageType.PermissionResponse }>,
+    'address' | 'publicKey' | 'walletType'
+  >
+  expected: { kind: 'accepted'; address: string } | { kind: 'rejected'; error: string }
+}
+const credentialCases = [
+  {
+    name: 'missing credentials before metadata',
+    fields: { address: undefined, publicKey: undefined, walletType: undefined },
+    expected: { kind: 'rejected', error: missingCredentials }
+  },
+  {
+    name: 'empty public key without an address',
+    fields: { address: undefined, publicKey: '', walletType: 'implicit' },
+    expected: { kind: 'rejected', error: missingCredentials }
+  },
+  {
+    name: 'key-only implicit default without adding a wire address',
+    fields: { address: undefined, publicKey, walletType: undefined },
+    expected: { kind: 'accepted', address }
+  },
+  {
+    name: 'empty address without a public key',
+    fields: { address: '', publicKey: undefined, walletType: 'abstracted_account' },
+    expected: { kind: 'rejected', error: missingCredentials }
+  },
+  {
+    name: 'both credentials empty',
+    fields: { address: '', publicKey: '', walletType: 'implicit' },
+    expected: { kind: 'rejected', error: missingCredentials }
+  },
+  {
+    name: 'empty address takes precedence over a valid key',
+    fields: { address: '', publicKey, walletType: 'implicit' },
+    expected: { kind: 'rejected', error: invalidAddress }
+  },
+  {
+    name: 'invalid address before abstracted-account validation',
+    fields: { address: 'invalid', publicKey: undefined, walletType: 'abstracted_account' },
+    expected: { kind: 'rejected', error: invalidAddress }
+  },
+  {
+    name: 'invalid address takes precedence over a valid key',
+    fields: { address: 'invalid', publicKey, walletType: 'implicit' },
+    expected: { kind: 'rejected', error: invalidAddress }
+  },
+  {
+    name: 'explicit implicit address without a public key',
+    fields: { address, publicKey: undefined, walletType: 'implicit' },
+    expected: { kind: 'accepted', address }
+  },
+  {
+    name: 'implicit address cannot represent an abstracted account',
+    fields: { address, publicKey: '', walletType: 'abstracted_account' },
+    expected: { kind: 'rejected', error: invalidAbstractedAddress }
+  },
+  {
+    name: 'valid explicit address does not derive an invalid key',
+    fields: { address, publicKey: 'invalid-key', walletType: 'implicit' },
+    expected: { kind: 'accepted', address }
+  },
+  {
+    name: 'contract address for an abstracted account',
+    fields: { address: contractAddress, publicKey: undefined, walletType: 'abstracted_account' },
+    expected: { kind: 'accepted', address: contractAddress }
+  },
+  {
+    name: 'contract address with the implicit default',
+    fields: { address: contractAddress, publicKey: '', walletType: undefined },
+    expected: { kind: 'accepted', address: contractAddress }
+  },
+  {
+    name: 'explicit contract address does not derive an invalid key',
+    fields: { address: contractAddress, publicKey: 'invalid-key', walletType: 'abstracted_account' },
+    expected: { kind: 'accepted', address: contractAddress }
+  },
+  {
+    name: 'derived implicit address cannot represent an abstracted account',
+    fields: { address: undefined, publicKey, walletType: 'abstracted_account' },
+    expected: { kind: 'rejected', error: invalidAbstractedAddress }
+  }
+] satisfies CredentialCase[]
+it.each(credentialCases)('preserves permission credentials: $name', async ({ fields, expected }) => {
+  const config = setup()
+  if (expected.kind === 'accepted') {
+    await config.appMetadataManager.addAppMetadata(metadata)
+  }
+  // Exercise JavaScript callers too: some compatibility and rejection cases violate the input union.
+  const outcome: Promise<void> = Reflect.apply(
+    OutgoingResponseInterceptor.intercept,
+    OutgoingResponseInterceptor,
+    [{ ...config, message: { ...permission, ...fields } }]
+  )
+  if (expected.kind === 'accepted') {
+    await outcome
+    expect(await config.permissionManager.getPermissions()).toEqual([
+      expect.objectContaining({ address: expected.address })
+    ])
+    expect((await config.permissionManager.getPermissions())[0]?.publicKey).toBe(fields.publicKey)
+    expect(config.interceptorCallback).toHaveBeenCalledWith({
+      senderId: 'wallet',
+      version: '2',
+      appMetadata: ownAppMetadata,
+      ...permission,
+      ...fields,
+      walletType: fields.walletType ?? 'implicit'
+    })
+  } else {
+    await expect(outcome).rejects.toThrow(expected.error)
+    expect(await config.permissionManager.getPermissions()).toEqual([])
+    expect(config.interceptorCallback).not.toHaveBeenCalled()
+  }
+})
+
+it('propagates permission persistence failure without sending the response', async () => {
+  const config = setup()
+  await config.appMetadataManager.addAppMetadata(metadata)
+  const failure = new Error('permission storage failed')
+  vi.spyOn(config.permissionManager, 'addPermission').mockRejectedValue(failure)
+  await expect(OutgoingResponseInterceptor.intercept(config)).rejects.toBe(failure)
   expect(config.interceptorCallback).not.toHaveBeenCalled()
 })

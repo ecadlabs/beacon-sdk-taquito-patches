@@ -9,9 +9,6 @@ import {
   BeaconResponseInputMessage,
   BeaconMessageType,
   PermissionResponse,
-  OperationResponse,
-  SignPayloadResponse,
-  BroadcastResponse,
   PermissionInfo,
   AcknowledgeResponse,
   AppMetadata,
@@ -19,8 +16,6 @@ import {
   BeaconErrorType,
   BeaconMessageEnvelopeV3,
   type BlockchainMessage,
-  ProofOfEventChallengeResponse,
-  SimulatedProofOfEventChallengeResponse,
   isTezosRpcError
   // EncryptPayloadResponse
 } from '@ecadlabs/beacon-types'
@@ -110,15 +105,7 @@ export class OutgoingResponseInterceptor {
   }
 
   private static async handleV2Message(config: OutgoingResponseInterceptorOptionsV2) {
-    const {
-      senderId,
-      request,
-      message,
-      ownAppMetadata,
-      permissionManager,
-      appMetadataManager,
-      interceptorCallback
-    }: OutgoingResponseInterceptorOptionsV2 = config
+    const { senderId, message, interceptorCallback } = config
 
     switch (message.type) {
       case BeaconMessageType.Error: {
@@ -154,124 +141,83 @@ export class OutgoingResponseInterceptor {
         break
       }
       case BeaconMessageType.PermissionResponse: {
-        const walletType = message.walletType ?? 'implicit'
-        const response: PermissionResponse = {
-          senderId,
-          version: '2',
-          appMetadata: ownAppMetadata,
-          ...message,
-          walletType
-        }
-
-        if (!response.address && !response.publicKey) {
-          throw new Error('Address or PublicKey must be defined')
-        }
-
-        const publicKey = response.publicKey
-
-        const address: string = response.address ?? (await getAddressFromPublicKey(publicKey!))
-
-        if (!isValidAddress(address)) {
-          throw new Error(`Invalid address: "${address}"`)
-        }
-
-        if (
-          walletType === 'abstracted_account' &&
-          address.substring(0, 3) !== CONTRACT_PREFIX
-        ) {
-          throw new Error(
-            `Invalid abstracted account address "${address}", it should be a ${CONTRACT_PREFIX} address`
-          )
-        }
-
-        const appMetadata = await appMetadataManager.getAppMetadata(request.senderId)
-
-        if (!appMetadata) {
-          throw new Error('AppMetadata not found')
-        }
-
-        const permission: PermissionInfo = {
-          accountIdentifier: await getAccountIdentifier(address, response.network),
-          senderId: request.senderId,
-          appMetadata,
-          website: '',
-          address,
-          publicKey,
-          network: response.network,
-          scopes: response.scopes,
-          connectedAt: new Date().getTime()
-        }
-
-        await permissionManager.addPermission(permission)
-
+        const response = await OutgoingResponseInterceptor.preparePermissionResponse({
+          ...config,
+          message
+        })
         await interceptorCallback(response)
         break
       }
       case BeaconMessageType.OperationResponse:
-        {
-          const response: OperationResponse = {
-            senderId,
-            version: '2',
-            ...message
-          }
-          await interceptorCallback(response)
-        }
-        break
       case BeaconMessageType.SignPayloadResponse:
-        {
-          const response: SignPayloadResponse = {
-            senderId,
-            version: '2',
-            ...message
-          }
-          await interceptorCallback(response)
-        }
-        break
-      // TODO: ENCRYPTION
-      // case BeaconMessageType.EncryptPayloadResponse:
-      //   {
-      //     const response: EncryptPayloadResponse = {
-      //       senderId,
-      //       version: BEACON_VERSION,
-      //       ...message
-      //     }
-      //     interceptorCallback(response)
-      //   }
-      //   break
       case BeaconMessageType.BroadcastResponse:
-        {
-          const response: BroadcastResponse = {
-            senderId,
-            version: '2',
-            ...message
-          }
-          await interceptorCallback(response)
-        }
-        break
       case BeaconMessageType.ProofOfEventChallengeResponse:
-        {
-          const response: ProofOfEventChallengeResponse = {
-            senderId,
-            version: '2',
-            ...message
-          }
-          await interceptorCallback(response)
-        }
-        break
       case BeaconMessageType.SimulatedProofOfEventChallengeResponse:
-        {
-          const response: SimulatedProofOfEventChallengeResponse = {
-            senderId,
-            version: '2',
-            ...message
-          }
-          await interceptorCallback(response)
-        }
+        await interceptorCallback({ senderId, version: '2', ...message })
         break
       default:
         logger.log('intercept', 'Message not handled')
         assertNever(message)
     }
+  }
+
+  private static async preparePermissionResponse(
+    config: OutgoingResponseInterceptorOptionsV2 & {
+      message: Extract<BeaconResponseInputMessage, { type: BeaconMessageType.PermissionResponse }>
+    }
+  ): Promise<PermissionResponse> {
+    const { senderId, request, message, ownAppMetadata, permissionManager, appMetadataManager } = config
+    const walletType = message.walletType ?? 'implicit'
+    const response: PermissionResponse = {
+      senderId,
+      version: '2',
+      appMetadata: ownAppMetadata,
+      ...message,
+      walletType
+    }
+
+    const publicKey = response.publicKey
+    let address: string
+    if (response.address) {
+      address = response.address
+    } else if (publicKey) {
+      // An explicitly empty address still takes precedence and must fail address validation.
+      address = response.address ?? (await getAddressFromPublicKey(publicKey))
+    } else {
+      throw new Error('Address or PublicKey must be defined')
+    }
+
+    if (!isValidAddress(address)) {
+      throw new Error(`Invalid address: "${address}"`)
+    }
+
+    if (walletType === 'abstracted_account' && address.substring(0, 3) !== CONTRACT_PREFIX) {
+      throw new Error(
+        `Invalid abstracted account address "${address}", it should be a ${CONTRACT_PREFIX} address`
+      )
+    }
+
+    const appMetadata = await appMetadataManager.getAppMetadata(request.senderId)
+
+    if (!appMetadata) {
+      throw new Error('AppMetadata not found')
+    }
+
+    const permission: PermissionInfo = {
+      accountIdentifier: await getAccountIdentifier(address, response.network),
+      senderId: request.senderId,
+      appMetadata,
+      website: '',
+      address,
+      publicKey,
+      network: response.network,
+      scopes: response.scopes,
+      connectedAt: new Date().getTime()
+    }
+
+    await permissionManager.addPermission(permission)
+
+    return response
   }
 }
 function assertNever(_message: never) {
