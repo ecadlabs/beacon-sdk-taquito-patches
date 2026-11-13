@@ -97,7 +97,7 @@ export abstract class MessageBasedClient extends CommunicationClient {
     if (hexPayload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
       try {
         return await decryptCryptoboxPayload(hexPayload, sharedKey.receive)
-      } catch (decryptionError) {
+      } catch {
         /* NO-OP. We try to decode every message, but some might not be addressed to us. */
       }
     }

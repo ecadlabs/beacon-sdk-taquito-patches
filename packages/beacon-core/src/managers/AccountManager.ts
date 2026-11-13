@@ -58,7 +58,7 @@ export class AccountManager {
     const newAccount = decodeStoredAccount({ ...account, ...accountInfo })
     await this.storageManager.addOne(
       newAccount,
-      (account) => account.accountIdentifier === accountIdentifier,
+      (candidate) => candidate.accountIdentifier === accountIdentifier,
       true
     )
 

@@ -1631,7 +1631,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         return
       }
       if (accounts.length) {
-        const [_namespace, chainId, addressOrPbk] = accounts[0].split(':', 3)
+        const [, chainId, addressOrPbk] = accounts[0].split(':', 3)
         let publicKey: string | undefined
 
         if (!isPublicKeySC(addressOrPbk)) {
@@ -1768,24 +1768,24 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   }
 
   private async createPairingRequestInfo(): Promise<ExtendedWalletConnectPairingRequest> {
-    let _uri = ''
-    let _topic = ''
+    let pairingUri = ''
+    let pairingTopic = ''
     try {
       logger.warn('getPairingRequestInfo')
       const { uri, topic } = (await this.init(true)) ?? { uri: '', topic: '' }
-      _uri = uri
-      _topic = topic
+      pairingUri = uri
+      pairingTopic = topic
     } catch (error: unknown) {
       logger.warn(error instanceof Error ? error.message : String(error))
     }
 
     return new ExtendedWalletConnectPairingRequest(
-      _topic,
+      pairingTopic,
       'WalletConnect',
       await generateGUID(),
       BEACON_VERSION,
       await generateGUID(),
-      _uri
+      pairingUri
     )
   }
 

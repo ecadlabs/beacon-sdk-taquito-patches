@@ -1,29 +1,29 @@
 import { DAppClient } from '../dapp-client/DAppClient'
 import { DAppClientOptions } from '../dapp-client/DAppClientOptions'
 
-let _instance: DAppClient | undefined
+let instance: DAppClient | undefined
 
 /** Get a DAppClient instance. Will make sure only one dAppClient exists. After the first instance has been created, the config will be ignored, unless "reset" is set */
 export const getDAppClientInstance = (config: DAppClientOptions, reset?: boolean): DAppClient => {
-  if (_instance?.isDestroyed()) {
-    _instance = undefined
+  if (instance?.isDestroyed()) {
+    instance = undefined
   }
 
-  if (_instance && reset) {
+  if (instance && reset) {
     // sync API — kick off cleanup but surface failures rather than swallow.
-    _instance
+    instance
       .disconnect()
       .catch((error) => console.error('[DAppClient] disconnect on reset failed', error))
-    _instance = undefined
+    instance = undefined
   }
 
-  if (_instance) {
-    return _instance
+  if (instance) {
+    return instance
   }
 
-  if (!_instance) {
-    _instance = new DAppClient(config)
+  if (!instance) {
+    instance = new DAppClient(config)
   }
 
-  return _instance
+  return instance
 }

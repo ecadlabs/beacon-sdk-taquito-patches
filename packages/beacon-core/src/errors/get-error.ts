@@ -32,4 +32,5 @@ export {
   UnknownBeaconError
 }
 
+// eslint-disable-next-line import/no-default-export -- Preserve the existing default import alongside the named error exports.
 export default getError

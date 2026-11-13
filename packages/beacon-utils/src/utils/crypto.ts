@@ -2,8 +2,7 @@ import bs58check from 'bs58check'
 import { box, generateKeyPair, openBox, openSecretBox, secretBox } from '@stablelib/nacl'
 import { randomBytes } from '@stablelib/random'
 import { encode } from '@stablelib/utf8'
-import { hash } from '@stablelib/blake2b'
-import { BLAKE2b } from '@stablelib/blake2b'
+import { hash, BLAKE2b } from '@stablelib/blake2b'
 import { concat } from '@stablelib/bytes'
 import {
   convertPublicKeyToX25519,
@@ -90,13 +89,13 @@ export async function decryptCryptoboxPayload(
   const nonce = payload.slice(0, secretbox_NONCEBYTES)
   const ciphertext = payload.slice(secretbox_NONCEBYTES)
 
-  const openBox = openSecretBox(sharedKey, nonce, ciphertext)
+  const plaintext = openSecretBox(sharedKey, nonce, ciphertext)
 
-  if (!openBox) {
+  if (!plaintext) {
     throw new Error('Decryption failed')
   }
 
-  return Buffer.from(openBox).toString('utf8')
+  return Buffer.from(plaintext).toString('utf8')
 }
 
 /**
@@ -268,8 +267,8 @@ export const signMessage = async (
 
   const edsigPrefix: Uint8Array = new Uint8Array([9, 245, 205, 134, 18])
 
-  const hash: Uint8Array = await coinlibhash(bufferMessage)
-  const rawSignature: Uint8Array = sign(keypair.secretKey, hash)
+  const digest: Uint8Array = await coinlibhash(bufferMessage)
+  const rawSignature: Uint8Array = sign(keypair.secretKey, digest)
   const signature: string = bs58check.encode(
     Buffer.concat([Buffer.from(edsigPrefix), Buffer.from(rawSignature)])
   )
@@ -286,7 +285,7 @@ export const isValidAddress = (address: string): boolean => {
 
   try {
     bs58check.decode(address)
-  } catch (error) {
+  } catch {
     return false
   }
 

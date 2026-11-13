@@ -40,6 +40,7 @@ export class TezosBlockchain implements Blockchain {
   }
 
   public async getAccountInfosFromPermissionResponse(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Preserve the Blockchain method signature; this implementation returns a placeholder.
     _permissionResponse: PermissionResponseV3<'tezos'>
   ): Promise<{ accountId: string; address: string; publicKey: string }[]> {
     return [{ accountId: '', address: '', publicKey: '' }]

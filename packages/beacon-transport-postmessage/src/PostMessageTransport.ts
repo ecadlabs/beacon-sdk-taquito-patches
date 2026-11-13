@@ -9,9 +9,9 @@ import {
   ExtensionMessageTarget,
   TransportStatus,
   ConnectionContext,
-  Origin
+  Origin,
+  Storage
 } from '@ecadlabs/beacon-types'
-import { Storage } from '@ecadlabs/beacon-types'
 import {
   PendingPairingRequests,
   Transport,
