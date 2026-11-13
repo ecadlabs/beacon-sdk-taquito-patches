@@ -23,6 +23,7 @@ export {
   type ImplicitPermissionResponseBuilderOptions,
   type AbstractedPermissionResponseBuilderOptions
 } from './interceptors/buildResponseInput'
+export { isBeaconMessageType, isV3Envelope } from './utils/message-guards'
 
 export type { WalletRequestOutputMessage } from './types/WalletRequestOutputMessage'
 
