@@ -42,6 +42,7 @@ jobs:
     needs: end-to-end
     if: github.repository == 'ecadlabs/beacon-sdk-taquito-patches'
     runs-on: ubuntu-latest
+    environment: release
     timeout-minutes: 40
 
     steps:
