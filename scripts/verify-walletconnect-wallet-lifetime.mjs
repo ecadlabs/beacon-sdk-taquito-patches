@@ -36,8 +36,9 @@ const mutations = [
   {
     name: 'late initialization attaches listeners after cleanup',
     before:
-      '      if (generation !== this.generation) {\n        return\n      }\n      this.attachSignClientListeners(signClient)',
-    after: '      this.attachSignClientListeners(signClient)',
+      '      const signClient = await this.ensureSignClient()\n      if (generation !== this.generation || this.signClient !== signClient) {\n        return\n      }\n      if (this.relayerClosed) {',
+    after:
+      '      const signClient = await this.ensureSignClient()\n      if (this.relayerClosed) {',
     test: 'bounds initialization ownership'
   },
   {
@@ -64,8 +65,9 @@ const mutations = [
 
 if (run() !== 0) throw new Error('Unmodified ownership checks failed')
 for (const mutation of mutations) {
-  if (!original.includes(mutation.before))
-    throw new Error(`Code correspondence changed: ${mutation.name}`)
+  const matches = original.split(mutation.before).length - 1
+  if (matches !== 1)
+    throw new Error(`Code correspondence changed: ${mutation.name} (${matches} matches)`)
   try {
     writeFileSync(source, original.replace(mutation.before, mutation.after))
     if (run(mutation.test) === 0) throw new Error(`Mutation survived: ${mutation.name}`)
