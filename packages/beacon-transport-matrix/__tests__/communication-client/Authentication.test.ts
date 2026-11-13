@@ -5,7 +5,7 @@ import { encode } from '@stablelib/utf8'
 import { P2PCommunicationClient } from '../../src/communication-client/P2PCommunicationClient'
 import { MatrixClient } from '../../src/matrix-client/MatrixClient'
 
-describe('relay session and sender matching', () => {
+describe('relay authentication contract', () => {
   it('recovers an old session with a fresh signed challenge from the same relay', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-01T12:00:00Z'))

@@ -433,7 +433,7 @@ describe('DAppClient: basic unit tests', () => {
     removeAccountsForPeerIds.mockRestore()
   })
 
-  it('ignores disconnects that do not match the active wallet identity', async () => {
+  it('ignores disconnects that do not match the authenticated active wallet', async () => {
     const publicKey = '11'.repeat(32)
     const senderId = await (await import('@ecadlabs/beacon-core')).getSenderId(publicKey)
     ;(client as any)._activePeer = ExposedPromise.resolve({
@@ -447,12 +447,12 @@ describe('DAppClient: basic unit tests', () => {
     const closed = vi.fn()
     client.subscribeToEvent(BeaconEvent.CHANNEL_CLOSED, closed)
     for (const [claimedSender, connectionId] of [
-      ['mismatched-sender', publicKey],
+      ['forged-sender', publicKey],
       [senderId, '22'.repeat(32)]
     ]) {
       await (client as any).handleResponse(
         {
-          id: 'mismatched-disconnect',
+          id: 'forged-disconnect',
           version: '3',
           senderId: claimedSender,
           type: BeaconMessageType.Disconnect
@@ -3009,7 +3009,7 @@ describe('DAppClient: basic unit tests', () => {
     }
   })
 
-  it('removes an inactive saved peer and its accounts on a matching Disconnect without deactivating the active peer', async () => {
+  it('removes an inactive saved peer and its accounts on authenticated Disconnect without deactivating the active peer', async () => {
     const { getSenderId: mockGetSenderId } = (await import('@ecadlabs/beacon-core'))
     const pubKeyA = 'aa'.repeat(32)
     const pubKeyB = 'bb'.repeat(32)

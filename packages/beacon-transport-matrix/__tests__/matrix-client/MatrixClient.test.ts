@@ -441,13 +441,13 @@ describe('MatrixClient', () => {
                 {
                   type: 'm.room.member',
                   sender: '@trusted:relay',
-                  state_key: '@recipient:relay',
+                  state_key: '@victim:relay',
                   content: { membership: 'invite' }
                 } as any,
                 {
                   type: 'm.room.member',
-                  sender: '@unpaired:relay',
-                  state_key: '@recipient:relay',
+                  sender: '@attacker:relay',
+                  state_key: '@victim:relay',
                   content: { membership: 'invite' }
                 } as any
               ]
@@ -464,13 +464,13 @@ describe('MatrixClient', () => {
                 {
                   type: 'm.room.member',
                   sender: '@trusted:relay',
-                  state_key: '@recipient:relay',
+                  state_key: '@victim:relay',
                   content: { membership: 'invite' }
                 } as any,
                 {
                   type: 'm.room.member',
-                  sender: '@unpaired:relay',
-                  state_key: '@recipient:relay',
+                  sender: '@attacker:relay',
+                  state_key: '@victim:relay',
                   content: { membership: 'leave' }
                 } as any
               ]

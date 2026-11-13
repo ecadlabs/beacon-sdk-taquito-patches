@@ -661,7 +661,7 @@ describe('P2PCommunicationClient', () => {
     }
   )
 
-  describe('encrypted message sender matching', () => {
+  describe('authenticated encrypted messages', () => {
     it('requires the complete Matrix localpart', async () => {
       const event = { content: { message: { sender: '@hex-hash-extra:relay' } } }
       await expect(client.isSender(event as any, '11'.repeat(32))).resolves.toBe(false)
@@ -670,7 +670,7 @@ describe('P2PCommunicationClient', () => {
     })
 
     it.each(['base58', 'json'])(
-      'delivers matching %s messages and rejects mismatched sender IDs',
+      'delivers authentic %s messages and rejects forged sender IDs',
       async (encoding) => {
         const key = '11'.repeat(32)
         const senderId = await getSenderId(key)
@@ -735,9 +735,9 @@ describe('P2PCommunicationClient', () => {
       // 1) Cross-domain ciphertext from an untrusted server must be rejected
       await listener({
         content: {
-          roomId: '!other-room',
+          roomId: '!evil-room',
           message: {
-            sender: '@hex-hash:other.server',
+            sender: '@hex-hash:evil.server',
             content: realCiphertext
           }
         }
@@ -908,7 +908,7 @@ describe('P2PCommunicationClient', () => {
     })
   })
 
-  describe('room invitation matching', () => {
+  describe('invitation authorization', () => {
     it.each([
       [
         'persisted identity before listeners start',
@@ -924,7 +924,7 @@ describe('P2PCommunicationClient', () => {
         false,
         true
       ],
-      ['wrong homeserver', '@hex-hash:other.server', '@hex-hash:relay.server', false, false],
+      ['wrong homeserver', '@hex-hash:evil.server', '@hex-hash:relay.server', false, false],
       ['wrong target', '@hex-hash:relay.server', '@other:relay.server', false, false],
       ['unknown peer', '@unknown:relay.server', '@hex-hash:relay.server', false, false],
       ['pending pairing, wrong target', '@unknown:relay.server', '@other:relay.server', true, false],
@@ -962,10 +962,10 @@ describe('P2PCommunicationClient', () => {
       await invite({
         content: {
           roomId: '!room',
-          members: ['@hex-hash:relay.server', '@unpaired:relay.server'],
+          members: ['@hex-hash:relay.server', '@evil:relay.server'],
           invitations: [
             { sender: '@hex-hash:relay.server', target: '@hex-hash:relay.server' },
-            { sender: '@unpaired:relay.server', target: '@hex-hash:relay.server' }
+            { sender: '@evil:relay.server', target: '@hex-hash:relay.server' }
           ]
         }
       })
@@ -987,7 +987,7 @@ describe('P2PCommunicationClient', () => {
                 },
                 {
                   type: 'm.room.member',
-                  sender: '@unpaired:relay.server',
+                  sender: '@attacker:relay.server',
                   state_key: '@hex-hash:relay.server',
                   content: { membership: 'invite' }
                 }
@@ -1016,11 +1016,11 @@ describe('P2PCommunicationClient', () => {
     })
   })
 
-  describe('pairing response matching', () => {
+  describe('pairing authorization', () => {
     const key = '11'.repeat(32)
     const event = {
       content: {
-        roomId: '!unpaired:relay',
+        roomId: '!attack:relay',
         message: {
           sender: '@hex-hash:relay.server',
           content: '@channel-open:00'.padEnd(100, '0')
@@ -1085,7 +1085,7 @@ describe('P2PCommunicationClient', () => {
       listen.mockRestore()
     })
 
-    it('rejects a mismatched sender response without routing writes or peer acceptance', async () => {
+    it('rejects a forged response without routing writes or peer acceptance', async () => {
       await client.getPairingRequestInfo()
       respond('wrong-id')
       await handler(event)
@@ -1134,7 +1134,7 @@ describe('P2PCommunicationClient', () => {
       ;(openCryptobox as Mock).mockClear()
       await handler({
         content: {
-          roomId: '!unpaired:relay',
+          roomId: '!attack:relay',
           message: {
             sender: '@hex-hash:relay.server',
             content: `@channel-open:${'a'.repeat(49)}`

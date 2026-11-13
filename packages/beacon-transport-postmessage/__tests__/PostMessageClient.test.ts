@@ -99,7 +99,7 @@ describe('PostMessageClient', () => {
       client.decryptMessage = vi.fn().mockResolvedValue('decrypted-text')
       ;(Serializer as Mock).mockImplementationOnce(function () {
         return {
-          deserialize: vi.fn().mockResolvedValue({ senderId: 'mismatched-sender' })
+          deserialize: vi.fn().mockResolvedValue({ senderId: 'forged-sender' })
         }
       })
       await client.listenForEncryptedMessage('sender-pub', cb)

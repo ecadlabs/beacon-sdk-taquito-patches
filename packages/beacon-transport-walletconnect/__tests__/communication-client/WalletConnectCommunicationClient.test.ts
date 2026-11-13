@@ -816,7 +816,7 @@ describe('String message dispatching', () => {
     })
   })
 
-  it('does not let an outbound Disconnect message affect correlation of a subsequent SignPayloadResponse', async () => {
+  it('does not let an outbound Disconnect message poison correlation of a subsequent SignPayloadResponse', async () => {
     const publicKey = 'edpktp3QT23n223n223n223n223n223n223n223n223n223n223n1'
     const session = createApprovedSession('session-topic-1', publicKey)
 

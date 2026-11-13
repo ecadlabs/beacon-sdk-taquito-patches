@@ -225,7 +225,7 @@ describe('P2P callbacks retired by stop', () => {
     }
   })
 
-  it.each(['cancelled', 'expired', 'replaced', 'valid'])('rechecks pending invite eligibility on a %s retry', async (outcome) => {
+  it.each(['cancelled', 'expired', 'replaced', 'valid'])('rechecks pending invite authorization on a %s retry', async (outcome) => {
     const keys = await getKeypairFromSeed('callback-lifecycle')
     const target = `@${await getHexHash(Buffer.from(keys.publicKey))}:relay.example`
     const { client } = await create(inviteSync(target))
@@ -270,7 +270,7 @@ describe('P2P callbacks retired by stop', () => {
     await client.stop()
   })
 
-  it.each([false, true])('retains known peer matching after pairing ends, previously stored=%s', async (existing) => {
+  it.each([false, true])('retains peer authorization after pairing ends, previously stored=%s', async (existing) => {
     const keys = await getKeypairFromSeed('callback-lifecycle')
     const peerKeys = await getKeypairFromSeed('known-inviter')
     const target = `@${await getHexHash(Buffer.from(keys.publicKey))}:relay.example`
@@ -298,7 +298,7 @@ describe('P2P callbacks retired by stop', () => {
     await client.stop()
   })
 
-  it('does not accept a delayed invite using a replacement pairing', async () => {
+  it('does not authorize a delayed invite using a replacement pairing', async () => {
     const { client, keys, polling } = await create()
     const target = `@${await getHexHash(Buffer.from(keys.publicKey))}:relay.example`
     await client.getPairingRequestInfo()
