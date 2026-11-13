@@ -27,6 +27,16 @@ interface MatrixLoginConfig {
 
 const IMMEDIATE_POLLING_RETRIES = 3
 const RETRY_INTERVAL = 5000
+const MIN_WAKE_SYNC_AGE_MS = 1000
+
+interface ActiveSyncAttempt {
+  controller: AbortController
+  startedAt: number
+  canAbortOnWake: boolean
+  abortedByWake: boolean
+}
+
+const WAKE_REFRESH_SENTINEL = Symbol('MatrixWakeRefresh')
 
 export type MatrixHealthTransition =
   | { health: 'degraded'; reason: 'sync_failing' }
@@ -41,6 +51,8 @@ export class MatrixClient {
   private session: number = 0
   private cancelStartup: (() => void) | undefined
   private pollingRetry: { timer: ReturnType<typeof setTimeout>; complete: () => void } | undefined
+  private activeSync: ActiveSyncAttempt | undefined
+  private cleanupWakeListeners: (() => void) | undefined
   private _isReady: ExposedPromise<void> = this.createReadiness()
   private txnIdLock: Promise<void> = Promise.resolve()
   private healthListener?: (event: MatrixHealthTransition) => void | Promise<void>
@@ -128,8 +140,10 @@ export class MatrixClient {
   public start(user: MatrixLoginConfig): Promise<void> {
     this.cancelStartup?.()
     this.clearPollingRetry()
+    this.abortActiveSync()
     const session = ++this.session
     this.isActive = true
+    this.registerWakeListeners()
     if (this._isReady.isSettled()) {
       this._isReady = this.createReadiness()
     }
@@ -176,6 +190,7 @@ export class MatrixClient {
         this.poll(
           0,
           session,
+          () => settled,
           login,
           async (pollingResponse: MatrixSyncResponse) => {
             if (!isCurrent()) {
@@ -225,7 +240,12 @@ export class MatrixClient {
           }
         ).catch(rejectWithCancel)
       }
-      initialize().catch(rejectWithCancel)
+      initialize().catch((error) => {
+        if (isCurrent()) {
+          this.cleanupWakeListeners?.()
+        }
+        rejectWithCancel(error)
+      })
     })
   }
 
@@ -239,9 +259,11 @@ export class MatrixClient {
   public async stop(): Promise<void> {
     logger.log(`MATRIX CLIENT STOPPED`)
     this.isActive = false
+    this.cleanupWakeListeners?.()
     this.cancelStartup?.()
     ++this.session
     this.clearPollingRetry()
+    this.abortActiveSync()
     this._isReady.reject(new DOMException('Matrix client stopped', 'AbortError'))
     this._isReady = this.createReadiness()
 
@@ -407,6 +429,60 @@ export class MatrixClient {
     }
   }
 
+  private abortActiveSync(): void {
+    const active = this.activeSync
+    this.activeSync = undefined
+    if (active) {
+      active.controller.abort(new DOMException('Matrix sync cancelled', 'AbortError'))
+    }
+  }
+
+  private handleWakeTrigger(): void {
+    if (!this.isActive) {
+      return
+    }
+    this.clearPollingRetry()
+    const active = this.activeSync
+    if (
+      active &&
+      active.canAbortOnWake &&
+      !active.controller.signal.aborted &&
+      Date.now() - active.startedAt >= MIN_WAKE_SYNC_AGE_MS
+    ) {
+      active.abortedByWake = true
+      active.controller.abort(new DOMException('Matrix sync refreshed on wake', 'AbortError'))
+    }
+  }
+
+  private registerWakeListeners(): void {
+    this.cleanupWakeListeners?.()
+    const onWake = (): void => {
+      this.handleWakeTrigger()
+    }
+    const onVisibilityChange = (): void => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        this.handleWakeTrigger()
+      }
+    }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('online', onWake)
+      window.addEventListener('focus', onWake)
+    }
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', onVisibilityChange)
+    }
+    this.cleanupWakeListeners = () => {
+      if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+        window.removeEventListener('online', onWake)
+        window.removeEventListener('focus', onWake)
+      }
+      if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+        document.removeEventListener('visibilitychange', onVisibilityChange)
+      }
+      this.cleanupWakeListeners = undefined
+    }
+  }
+
   /**
    * Poll the server to get the latest data and get notified of changes
    *
@@ -417,6 +493,7 @@ export class MatrixClient {
   private async poll(
     interval: number,
     session: number,
+    isStartupSettled: () => boolean,
     renewAuthorization: () => Promise<void>,
     onSyncSuccess: (response: MatrixSyncResponse) => void | Promise<void>,
     onSyncError: (error: unknown) => void | Promise<void>
@@ -425,23 +502,13 @@ export class MatrixClient {
     while (this.isActive && session === this.session) {
       let syncingRetries = 0
       try {
-        let response: MatrixSyncResponse
-        try {
-          response = await this.sync()
-        } catch (error) {
-          if (
-            (error as { errcode?: string })?.errcode !== 'M_UNKNOWN_TOKEN' ||
-            !this.isActive ||
-            session !== this.session
-          ) {
-            throw error
-          }
-          await renewAuthorization()
-          if (!this.isActive || session !== this.session) {
-            return
-          }
-          await this.healthListener?.({ reason: 'token_renewed' })
-          response = await this.sync()
+        const response = await this.syncWithRenewal(
+          session,
+          isStartupSettled,
+          renewAuthorization
+        )
+        if (!response) {
+          return
         }
         if (this.isActive && session === this.session) {
           await onSyncSuccess(response)
@@ -449,6 +516,9 @@ export class MatrixClient {
       } catch (error) {
         if (!this.isActive || session !== this.session) {
           return
+        }
+        if (error === WAKE_REFRESH_SENTINEL) {
+          continue
         }
         await onSyncError(error)
         syncingRetries = this.store.get('pollingRetries')
@@ -459,31 +529,79 @@ export class MatrixClient {
       if (!this.isActive || session !== this.session) {
         return
       }
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(
-          () => {
-            if (this.pollingRetry?.timer === timer) {
-              this.pollingRetry = undefined
-            }
-            resolve()
-          },
-          syncingRetries >= IMMEDIATE_POLLING_RETRIES ? RETRY_INTERVAL + interval : interval
-        )
-        this.pollingRetry = { timer, complete: resolve }
-      })
+      await this.waitForNextPoll(interval, syncingRetries)
     }
+  }
+
+  private async syncWithRenewal(
+    session: number,
+    isStartupSettled: () => boolean,
+    renewAuthorization: () => Promise<void>
+  ): Promise<MatrixSyncResponse | undefined> {
+    try {
+      return await this.sync(isStartupSettled())
+    } catch (error) {
+      if (
+        (error as { errcode?: string })?.errcode !== 'M_UNKNOWN_TOKEN' ||
+        !this.isActive ||
+        session !== this.session
+      ) {
+        throw error
+      }
+      await renewAuthorization()
+      if (!this.isActive || session !== this.session) {
+        return undefined
+      }
+      await this.healthListener?.({ reason: 'token_renewed' })
+
+      return this.sync(isStartupSettled())
+    }
+  }
+
+  private async waitForNextPoll(interval: number, syncingRetries: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(
+        () => {
+          if (this.pollingRetry?.timer === timer) {
+            this.pollingRetry = undefined
+          }
+          resolve()
+        },
+        syncingRetries >= IMMEDIATE_POLLING_RETRIES ? RETRY_INTERVAL + interval : interval
+      )
+      this.pollingRetry = { timer, complete: resolve }
+    })
   }
 
   /**
    * Get state from server
    */
-  private async sync(): Promise<MatrixSyncResponse> {
-    return this.requiresAuthorization('sync', async (accessToken) =>
-      this.eventService.sync(accessToken, {
-        pollingTimeout: this.store.get('pollingTimeout'),
-        syncToken: this.store.get('syncToken')
-      })
-    )
+  private async sync(canAbortOnWake = false): Promise<MatrixSyncResponse> {
+    return this.requiresAuthorization('sync', async (accessToken) => {
+      const syncAttempt: ActiveSyncAttempt = {
+        controller: new AbortController(),
+        startedAt: Date.now(),
+        canAbortOnWake,
+        abortedByWake: false
+      }
+      this.activeSync = syncAttempt
+      try {
+        return await this.eventService.sync(accessToken, {
+          pollingTimeout: this.store.get('pollingTimeout'),
+          syncToken: this.store.get('syncToken'),
+          signal: syncAttempt.controller.signal
+        })
+      } catch (error) {
+        if (syncAttempt.abortedByWake) {
+          throw WAKE_REFRESH_SENTINEL
+        }
+        throw error
+      } finally {
+        if (this.activeSync === syncAttempt) {
+          this.activeSync = undefined
+        }
+      }
+    })
   }
 
   /**
