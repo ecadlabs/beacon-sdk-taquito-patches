@@ -516,7 +516,8 @@ describe('DAppClient plaintext message observers (#149)', () => {
       'malformed',
       [],
       { unexpected: { nested: true } },
-      { id: 'unknown', type: 'not-a-beacon-type', senderId: 42 }
+      { id: 'unknown', type: 'not-a-beacon-type', senderId: 42 },
+      { id: 'missing-version', type: BeaconMessageType.SignPayloadResponse, senderId: 'wallet-sender' }
     ].map((malformed) => ({ malformed }))
   )('observes malformed deserialized input before routing: $malformed', async ({ malformed }) => {
     await start()
@@ -531,7 +532,14 @@ describe('DAppClient plaintext message observers (#149)', () => {
     })
     expect(records[0].disposition).toBeUndefined()
     expect(records[0].message).toEqual(malformed)
-    expect(records[0].senderId).toBeUndefined()
+    const expectedSenderId =
+      malformed !== null &&
+      typeof malformed === 'object' &&
+      'senderId' in malformed &&
+      typeof malformed.senderId === 'string'
+        ? malformed.senderId
+        : undefined
+    expect(records[0].senderId).toBe(expectedSenderId)
     expect(records[1]).toMatchObject({
       direction: 'incoming',
       transport: TransportType.POST_MESSAGE,
@@ -539,7 +547,7 @@ describe('DAppClient plaintext message observers (#149)', () => {
       disposition: 'invalid'
     })
     expect(records[1].message).toEqual(malformed)
-    expect(records[1].senderId).toBeUndefined()
+    expect(records[1].senderId).toBe(expectedSenderId)
   })
 
   it('observes a stale response after timeout without emitting success', async () => {

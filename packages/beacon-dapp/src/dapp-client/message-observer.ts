@@ -28,6 +28,13 @@ export const isValidIncomingResponseMessage = (message: unknown): message is Res
     return false
   }
   if (
+    !('version' in message) ||
+    typeof message.version !== 'string' ||
+    message.version.length === 0
+  ) {
+    return false
+  }
+  if (
     'senderId' in message &&
     message.senderId !== undefined &&
     typeof message.senderId !== 'string'

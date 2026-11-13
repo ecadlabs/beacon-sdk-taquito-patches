@@ -707,6 +707,8 @@ export class DAppClient extends Client {
         typedMessage.type === BeaconMessageType.PermissionResponse
       if (preparing) {
         if (!this.requestTracker.beginPreparation(request.key)) {
+          this.messageObserver.notifyIncoming(transportType, message, 'unknown-request')
+
           return
         }
         this.clearPendingRequestAckTimer(message.id, request.key)
@@ -769,20 +771,20 @@ export class DAppClient extends Client {
               id: message.id,
               data: { message, connectionInfo }
             })
-            this.messageObserver.notifyIncoming(transportType, message, 'handled')
           }
         } else {
           this.requestTracker.resolve(request.key, {
             message: this.attributeForwardedMessage(message, fromAdapter),
             connectionInfo
           })
-          this.messageObserver.notifyIncoming(transportType, message, 'handled')
         }
+        this.messageObserver.notifyIncoming(transportType, message, 'handled')
 
         return
       }
 
       if (typedMessage.type === BeaconMessageType.Acknowledge) {
+        this.messageObserver.notifyIncoming(transportType, message, 'handled')
         if (!this.requestTracker.acknowledge(request.key)) {
           return
         }
@@ -807,7 +809,6 @@ export class DAppClient extends Client {
             walletInfo
           })
           .catch((emitError) => logger.error('handleResponse', emitError))
-        this.messageObserver.notifyIncoming(transportType, message, 'handled')
 
         return
       }
@@ -832,6 +833,7 @@ export class DAppClient extends Client {
                 version: '2'
               })
             )
+            this.messageObserver.notifyIncoming(transportType, message, 'handled')
 
             return
           }
