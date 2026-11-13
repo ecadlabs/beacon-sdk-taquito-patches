@@ -1,6 +1,7 @@
 import { LocalStorage, PeerManager } from '@ecadlabs/beacon-core'
 import {
   AccountInfo,
+  BeaconMessageType,
   ExtendedPostMessagePairingResponse,
   NetworkType,
   Origin,
@@ -405,6 +406,116 @@ describe('DAppClient.getActiveWalletInfo', () => {
       type: storedWallet.type
     })
   })
+
+  it('falls back to unprefixed localStorage LAST_SELECTED_WALLET when prefixed storage is empty', async () => {
+    selectAccount()
+    localStorage.setItem(StorageKey.LAST_SELECTED_WALLET, JSON.stringify(storedWallet))
+
+    await expect(storage.get(StorageKey.LAST_SELECTED_WALLET)).resolves.toBeUndefined()
+    await expect(client.getActiveWalletInfo()).resolves.toEqual({
+      name: storedWallet.name,
+      icon: storedWallet.icon,
+      type: storedWallet.type
+    })
+  })
+
+  it('prefers prefixed storage LAST_SELECTED_WALLET over unprefixed localStorage fallback', async () => {
+    selectAccount()
+    await storage.set(StorageKey.LAST_SELECTED_WALLET, storedWallet)
+    localStorage.setItem(
+      StorageKey.LAST_SELECTED_WALLET,
+      JSON.stringify({
+        key: 'unprefixed',
+        name: 'Unprefixed Wallet',
+        icon: 'https://unprefixed.test/icon',
+        type: 'mobile'
+      })
+    )
+
+    await expect(client.getActiveWalletInfo()).resolves.toEqual({
+      name: storedWallet.name,
+      icon: storedWallet.icon,
+      type: storedWallet.type
+    })
+  })
+
+  it('populates walletKey in onNewAccount from unprefixed localStorage LAST_SELECTED_WALLET when prefixed storage is empty', async () => {
+    vi.spyOn(client, 'setActiveAccount').mockResolvedValue(undefined)
+    localStorage.setItem(StorageKey.LAST_SELECTED_WALLET, JSON.stringify(storedWallet))
+
+    const createdAccount = await client['onNewAccount'](
+      {
+        type: BeaconMessageType.PermissionResponse,
+        version: '2',
+        id: 'perm-response-id',
+        senderId: account.senderId,
+        appMetadata: {
+          senderId: account.senderId,
+          name: 'Example Wallet'
+        },
+        publicKey: 'edpktpzo8UZieYaJZgCHP6M6hKHPdWBSNqxvmEt6dwWRgxDh1EAFw9',
+        network: { type: NetworkType.MAINNET },
+        scopes: []
+      },
+      {
+        origin: Origin.P2P,
+        id: account.origin.id
+      }
+    )
+
+    expect(createdAccount.walletKey).toBe(storedWallet.key)
+  })
+
+  it.each([
+    '{bad json',
+    'null',
+    '[1,2]',
+    JSON.stringify({ name: 'Missing Key', type: 'web', icon: 'https://stored.test/icon' }),
+    JSON.stringify({ key: 123, name: 'Numeric Key', type: 'web', icon: 'https://stored.test/icon' }),
+    JSON.stringify({
+      key: 'invalid_type',
+      name: 'Invalid Type',
+      type: 'hardware',
+      icon: 'https://stored.test/icon'
+    }),
+    JSON.stringify({
+      key: 'invalid_name',
+      name: 42,
+      type: 'web',
+      icon: 'https://stored.test/icon'
+    })
+  ])(
+    'ignores invalid unprefixed localStorage LAST_SELECTED_WALLET payload (%s) safely',
+    async (rawPayload) => {
+      selectAccount()
+      vi.spyOn(client, 'setActiveAccount').mockResolvedValue(undefined)
+      localStorage.setItem(StorageKey.LAST_SELECTED_WALLET, rawPayload)
+
+      await expect(client.getActiveWalletInfo()).resolves.toBeUndefined()
+
+      const createdAccount = await client['onNewAccount'](
+        {
+          type: BeaconMessageType.PermissionResponse,
+          version: '2',
+          id: 'perm-response-invalid-wallet',
+          senderId: account.senderId,
+          appMetadata: {
+            senderId: account.senderId,
+            name: 'Example Wallet'
+          },
+          publicKey: 'edpktpzo8UZieYaJZgCHP6M6hKHPdWBSNqxvmEt6dwWRgxDh1EAFw9',
+          network: { type: NetworkType.MAINNET },
+          scopes: []
+        },
+        {
+          origin: Origin.P2P,
+          id: account.origin.id
+        }
+      )
+
+      expect(createdAccount.walletKey).toBeUndefined()
+    }
+  )
 
   it.each([undefined, '', '   '])(
     'uses the stored key when a legacy wallet selection has name %j',

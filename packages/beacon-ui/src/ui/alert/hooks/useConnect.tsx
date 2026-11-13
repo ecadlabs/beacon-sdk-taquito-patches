@@ -10,6 +10,25 @@ import { hasWalletConnectSymKey } from '../../../utils/walletconnect'
 
 const logger = new Logger('useConnect')
 
+const getInitialWalletType = (
+  wallet?: MergedWallet
+): 'extension' | 'mobile' | 'web' | 'desktop' => {
+  if (wallet?.types.length === 1) {
+    switch (wallet.types[0]) {
+      case 'web':
+        return 'web'
+      case 'extension':
+        return 'extension'
+      case 'desktop':
+        return 'desktop'
+      case 'ios':
+        return 'mobile'
+    }
+  }
+
+  return 'mobile'
+}
+
 const useConnect = (
   isMobile: boolean,
   wcPayload: PromiseLike<string>,
@@ -51,7 +70,7 @@ const useConnect = (
       JSON.stringify({
         key: selectedWallet?.key,
         name: selectedWallet?.name,
-        type: 'mobile',
+        type: getInitialWalletType(selectedWallet),
         icon: selectedWallet?.image
       })
     )

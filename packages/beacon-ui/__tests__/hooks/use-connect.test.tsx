@@ -792,6 +792,49 @@ describe('useConnect persisted wallet display names', () => {
     }
   )
 
+  it.each([
+    { types: ['extension'], expectedType: 'extension' },
+    { types: ['desktop'], expectedType: 'desktop' },
+    { types: ['web'], expectedType: 'web' },
+    { types: ['ios'], expectedType: 'mobile' },
+    { types: ['extension', 'ios'], expectedType: 'mobile' }
+  ] as const)(
+    'derives initial type $expectedType on wallet tile click when types is $types',
+    async ({ types, expectedType }) => {
+      const candidate: MergedWallet = {
+        ...wallet,
+        id: `wallet-${types.join('-')}`,
+        key: `key_${types.join('_')}`,
+        types: [...types]
+      }
+
+      const { result } = renderHook(() =>
+        useConnect(
+          false,
+          Promise.resolve('wc-payload'),
+          Promise.resolve('p2p-payload'),
+          Promise.resolve('post-payload'),
+          new Map([[candidate.id, candidate]]),
+          vi.fn()
+        )
+      )
+
+      await act(async () => {
+        await result.current[7](candidate.id, { title: 'Select wallet' })
+      })
+
+      const persisted: unknown = JSON.parse(
+        localStorage.getItem(StorageKey.LAST_SELECTED_WALLET) ?? 'null'
+      )
+      expect(persisted).toEqual({
+        key: candidate.key,
+        name: candidate.name,
+        type: expectedType,
+        icon: candidate.image
+      })
+    }
+  )
+
   it.each(['{bad json', 'null', 'undefined', '[1,2]'])(
     'does not throw when LAST_SELECTED_WALLET contains %s during deep-link URL update',
     async (corruptValue) => {

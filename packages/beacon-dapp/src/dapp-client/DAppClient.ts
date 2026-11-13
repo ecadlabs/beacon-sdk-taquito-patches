@@ -7,6 +7,7 @@ import {
   BlockchainAccountInfo,
   TransportType,
   StorageKey,
+  StorageKeyReturnType,
   BeaconMessageType,
   PermissionScope,
   PermissionResponse,
@@ -208,6 +209,39 @@ interface TimedOutRequest {
 interface DetachableTransport {
   cancelRequest(id: string): void
   detachRequest(id: string): void
+}
+
+type StoredWalletSelection = NonNullable<StorageKeyReturnType[StorageKey.LAST_SELECTED_WALLET]>
+
+const isStoredWalletType = (value: unknown): value is StoredWalletSelection['type'] =>
+  value === 'extension' || value === 'mobile' || value === 'web' || value === 'desktop'
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const parseStoredWalletSelection = (
+  value: unknown
+): StorageKeyReturnType[StorageKey.LAST_SELECTED_WALLET] => {
+  if (!isRecord(value) || typeof value.key !== 'string' || !isStoredWalletType(value.type)) {
+    return undefined
+  }
+  if (value.name !== undefined && typeof value.name !== 'string') {
+    return undefined
+  }
+  if (value.icon !== undefined && typeof value.icon !== 'string') {
+    return undefined
+  }
+  if (value.url !== undefined && typeof value.url !== 'string') {
+    return undefined
+  }
+
+  return {
+    key: value.key,
+    ...(value.name !== undefined ? { name: value.name } : {}),
+    type: value.type,
+    icon: value.icon ?? '',
+    ...(value.url !== undefined ? { url: value.url } : {})
+  }
 }
 
 const createLazyPromise = <T>(factory: () => Promise<T>): PromiseLike<T> => {
@@ -4145,12 +4179,38 @@ export class DAppClient extends Client {
       .catch((emitError) => console.warn(emitError))
   }
 
-  private async getWalletInfoFromStorage() {
-    return await this.storage.get(StorageKey.LAST_SELECTED_WALLET)
+  private async getWalletInfoFromStorage(): Promise<
+    StorageKeyReturnType[StorageKey.LAST_SELECTED_WALLET]
+  > {
+    const stored = parseStoredWalletSelection(
+      await this.storage.get(StorageKey.LAST_SELECTED_WALLET)
+    )
+    if (stored) {
+      return stored
+    }
+
+    if (
+      typeof localStorage === 'undefined' ||
+      this.storage.getPrefixedKey(StorageKey.LAST_SELECTED_WALLET) ===
+        StorageKey.LAST_SELECTED_WALLET
+    ) {
+      return undefined
+    }
+
+    try {
+      const raw = localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)
+      if (!raw) {
+        return undefined
+      }
+
+      return parseStoredWalletSelection(JSON.parse(raw))
+    } catch {
+      return undefined
+    }
   }
 
   private async updateStorageWallet(walletInfo: WalletInfo) {
-    const wallet = await this.storage.get(StorageKey.LAST_SELECTED_WALLET)
+    const wallet = await this.getWalletInfoFromStorage()
 
     if (!wallet) {
       return
@@ -5582,7 +5642,7 @@ export class DAppClient extends Client {
     logger.log('######## MESSAGE #######')
     logger.log('onNewAccount', message)
 
-    const walletKey = (await this.storage.get(StorageKey.LAST_SELECTED_WALLET))?.key
+    const walletKey = (await this.getWalletInfoFromStorage())?.key
 
     const accountInfo: AccountInfo = {
       accountIdentifier: await getAccountIdentifier(address, message.network),
