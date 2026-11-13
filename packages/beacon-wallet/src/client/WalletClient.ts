@@ -943,7 +943,7 @@ export class WalletClient extends Client {
     this.knownPeersByPublicKey.delete(peer.publicKey)
     this.evictPendingRequestsForPeer(extendedPeer)
 
-    await this.removePermissionsForPeers([peer])
+    await this.removePermissionsForPeers([extendedPeer])
 
     if (sendDisconnectToPeer) {
       await this.sendDisconnectToPeer(peer, transport)
@@ -1025,6 +1025,34 @@ export class WalletClient extends Client {
       (permissionInfo) => permissionInfo.accountIdentifier
     )
     await this.permissionManager.removePermissions(permissionIdentifiersToRemove)
+
+    const uniqueSenderIds = Array.from(new Set(peerIdsToRemove))
+    if (uniqueSenderIds.length > 0) {
+      const remainingPeers = await this.getPeers()
+      const activeSenderIds = new Set<string>()
+      for (const remainingPeer of remainingPeers) {
+        if ('senderId' in remainingPeer && typeof remainingPeer.senderId === 'string') {
+          activeSenderIds.add(remainingPeer.senderId)
+        } else {
+          const knownPeer = this.knownPeersByPublicKey.get(remainingPeer.publicKey)
+          if (knownPeer?.senderId) {
+            activeSenderIds.add(knownPeer.senderId)
+          }
+        }
+      }
+      for (const remainingPermission of permissions) {
+        if (!permissionIdentifiersToRemove.includes(remainingPermission.accountIdentifier)) {
+          activeSenderIds.add(remainingPermission.senderId)
+          activeSenderIds.add(remainingPermission.appMetadata.senderId)
+        }
+      }
+      for (const senderId of uniqueSenderIds) {
+        if (!activeSenderIds.has(senderId)) {
+          await this.appMetadataManager.removeAppMetadata(senderId)
+        }
+      }
+    }
+
     if (permissionIdentifiersToRemove.length > 0) {
       await this.emitPermissionsUpdated()
     }

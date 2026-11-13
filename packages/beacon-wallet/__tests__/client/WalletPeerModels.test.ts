@@ -219,8 +219,119 @@ describe('Wallet peer sender IDs', () => {
       expect(peers).toHaveLength(1)
       expect(peers[0].senderId).toBe(senderId)
       await wallet.removePeer(peers[0])
-      await wallet.removeAppMetadata(peers[0].senderId)
       await expect(wallet.getPeers()).resolves.toEqual([])
+      await expect(wallet.getAppMetadataList()).resolves.toEqual([])
+    } finally {
+      await wallet.destroy()
+    }
+  })
+
+  it('removePeer() and removeAllPeers() clean up orphaned AppMetadata when no remaining peer or permission references the senderId', async () => {
+    const storage = new LocalStorage('wallet-peer-appmetadata-cleanup')
+    const manager = new PeerManager(storage, StorageKey.TRANSPORT_P2P_PEERS_WALLET)
+    const peerA = new ExtendedP2PPairingRequest(
+      'peer-a',
+      'DApp A',
+      'pk-a',
+      '3',
+      'relay.example',
+      'sender-a'
+    )
+    const peerB = new ExtendedP2PPairingRequest(
+      'peer-b',
+      'DApp B',
+      'pk-b',
+      '3',
+      'relay.example',
+      'sender-b'
+    )
+    const peerC = new ExtendedP2PPairingRequest(
+      'peer-c',
+      'DApp C',
+      'pk-c',
+      '3',
+      'relay.example',
+      'sender-c'
+    )
+    localStorage.setItem(
+      storage.getPrefixedKey(StorageKey.TRANSPORT_P2P_PEERS_WALLET),
+      JSON.stringify([peerA, peerB, peerC])
+    )
+    await storage.set(StorageKey.APP_METADATA_LIST, [
+      { senderId: 'sender-a', name: 'DApp A' },
+      { senderId: 'sender-b', name: 'DApp B' },
+      { senderId: 'sender-c', name: 'DApp C' },
+      { senderId: 'sender-kept-by-permission', name: 'Kept DApp' }
+    ])
+    await storage.set(StorageKey.PERMISSION_LIST, [
+      permission('sender-a'),
+      permission('sender-b'),
+      permission('sender-kept-by-permission')
+    ])
+    const transport = new PeerTestTransport<
+      ExtendedP2PPairingRequest,
+      StorageKey.TRANSPORT_P2P_PEERS_WALLET
+    >(new RecordingPeerClient(), manager, TransportType.P2P)
+    const wallet = new WalletClient({ name: 'Cleanup wallet', storage })
+    try {
+      await Client.prototype.init.call(wallet, transport)
+
+      await wallet.removePeer(peerA)
+      await expect(wallet.getAppMetadataList()).resolves.toEqual([
+        { senderId: 'sender-b', name: 'DApp B' },
+        { senderId: 'sender-c', name: 'DApp C' },
+        { senderId: 'sender-kept-by-permission', name: 'Kept DApp' }
+      ])
+
+      await wallet.removeAllPeers()
+      await expect(wallet.getAppMetadataList()).resolves.toEqual([
+        { senderId: 'sender-kept-by-permission', name: 'Kept DApp' }
+      ])
+    } finally {
+      await wallet.destroy()
+    }
+  })
+
+  it('removePeer() preserves AppMetadata when another active peer still uses the same senderId', async () => {
+    const storage = new LocalStorage('wallet-peer-appmetadata-shared')
+    const manager = new PeerManager(storage, StorageKey.TRANSPORT_P2P_PEERS_WALLET)
+    const peer1 = new ExtendedP2PPairingRequest(
+      'peer-1',
+      'Shared DApp',
+      'pk-shared-1',
+      '3',
+      'relay.example',
+      'shared-sender'
+    )
+    const peer2 = new ExtendedP2PPairingRequest(
+      'peer-2',
+      'Shared DApp',
+      'pk-shared-2',
+      '3',
+      'relay.example',
+      'shared-sender'
+    )
+    localStorage.setItem(
+      storage.getPrefixedKey(StorageKey.TRANSPORT_P2P_PEERS_WALLET),
+      JSON.stringify([peer1, peer2])
+    )
+    await storage.set(StorageKey.APP_METADATA_LIST, [
+      { senderId: 'shared-sender', name: 'Shared DApp' }
+    ])
+    const transport = new PeerTestTransport<
+      ExtendedP2PPairingRequest,
+      StorageKey.TRANSPORT_P2P_PEERS_WALLET
+    >(new RecordingPeerClient(), manager, TransportType.P2P)
+    const wallet = new WalletClient({ name: 'Shared sender wallet', storage })
+    try {
+      await Client.prototype.init.call(wallet, transport)
+
+      await wallet.removePeer(peer1)
+      await expect(wallet.getAppMetadataList()).resolves.toEqual([
+        { senderId: 'shared-sender', name: 'Shared DApp' }
+      ])
+
+      await wallet.removePeer(peer2)
       await expect(wallet.getAppMetadataList()).resolves.toEqual([])
     } finally {
       await wallet.destroy()
