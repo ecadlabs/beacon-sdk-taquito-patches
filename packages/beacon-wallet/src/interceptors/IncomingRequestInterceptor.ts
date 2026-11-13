@@ -20,11 +20,6 @@ import { isRecord, isV3Envelope } from '../utils/message-guards'
 
 const logger = new Logger('IncomingRequestInterceptor')
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- The never parameter enforces exhaustive handling; its runtime value is intentionally unused.
-function assertNever(_message: never): never {
-  throw new Error('Function not implemented.')
-}
-
 interface IncomingRequestInterceptorOptions {
   message: BeaconRequestMessage | BeaconMessageEnvelopeV3
   connectionInfo: ConnectionContext
@@ -189,7 +184,8 @@ export class IncomingRequestInterceptor {
         break
       default:
         logger.log('intercept', 'Message not handled')
-        assertNever(message)
+        message satisfies never
+        throw new Error('Function not implemented.')
     }
   }
 

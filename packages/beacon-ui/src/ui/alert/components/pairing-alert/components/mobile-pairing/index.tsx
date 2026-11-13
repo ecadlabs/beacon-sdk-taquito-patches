@@ -3,7 +3,7 @@ import type { MergedWallet } from '../../../../../../utils/wallets'
 import Info from '../../../../../../components/info'
 import { AlertState, type ConfigurableAlertProps, type PairingPayload } from '../../../../../common'
 import { isIOS } from '../../../../../../utils/platform'
-import suffixMap from './utils/suffix-map'
+import { suffixMap } from './utils/suffix-map'
 
 interface MobilePairingProps {
   wallet: MergedWallet

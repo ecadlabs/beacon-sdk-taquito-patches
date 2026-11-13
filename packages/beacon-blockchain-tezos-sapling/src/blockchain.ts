@@ -13,12 +13,10 @@ import { extensionList, desktopList, webList, iOSList } from './ui/alert/wallet-
 export class TezosSaplingBlockchain implements Blockchain {
   public readonly identifier: string = 'tezos-sapling'
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Preserve the Blockchain method signature for this intentional no-op.
   public async validateRequest(_input: BlockchainMessage): Promise<void> {
     // No special validation required
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Preserve the Blockchain method signature for this intentional no-op.
   public async handleResponse(_input: ResponseInput): Promise<void> {
     // No special response handling required.
   }

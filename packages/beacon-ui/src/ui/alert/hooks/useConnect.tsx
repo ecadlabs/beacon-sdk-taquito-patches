@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { getTzip10Link } from '../../../utils/get-tzip10-link'
 import { isTwBrowser, isAndroid, isMobileOS, isIOS } from '../../../utils/platform'
 import { MergedWallet, OSLink } from '../../../utils/wallets'
-import getDefaultLogo from '../getDefautlLogo'
+import { getDefaultLogo } from '../getDefautlLogo'
 import { AlertConfig, AlertState } from '../../common'
 import { hasWalletConnectSymKey } from '../../../utils/walletconnect'
 

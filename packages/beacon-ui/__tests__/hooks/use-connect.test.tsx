@@ -3,7 +3,7 @@ import { renderHook, act, cleanup, waitFor } from '@testing-library/react'
 import useConnect from '../../src/ui/alert/hooks/useConnect'
 import { StorageKey, ExtensionMessageTarget, NetworkType } from '@ecadlabs/beacon-types'
 import { windowRef } from '@ecadlabs/beacon-core'
-import getDefaultLogo from '../../src/ui/alert/getDefautlLogo'
+import { getDefaultLogo } from '../../src/ui/alert/getDefautlLogo'
 import { type MergedWallet, OSLink } from '../../src/utils/wallets'
 import { AlertState } from '../../src/ui/common'
 
