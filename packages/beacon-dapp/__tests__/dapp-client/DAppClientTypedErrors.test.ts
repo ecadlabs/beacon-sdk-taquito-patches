@@ -14,7 +14,8 @@ import {
   PeerUnreachableBeaconError,
   TransactionInvalidBeaconError,
   UnknownBeaconError,
-  isBeaconError
+  isBeaconError,
+  getAccountIdentifier
 } from '@ecadlabs/beacon-core'
 import {
   AccountInfo,
@@ -23,6 +24,7 @@ import {
   BlockchainRequestV3,
   ConnectionContext,
   ExtendedPostMessagePairingResponse,
+  ErrorResponse,
   NetworkType,
   Origin,
   PeerInfoType,
@@ -81,6 +83,9 @@ class ControlledTransport extends Transport<
     )
   }
   async listen(): Promise<void> {}
+  async receive(message: ErrorResponse): Promise<void> {
+    await this.notifyListeners(await new Serializer().serialize(message), context)
+  }
 }
 
 const peer: ExtendedPostMessagePairingResponse = {
@@ -109,9 +114,10 @@ const account: AccountInfo = {
 describe('DAppClient typed error rejections', () => {
   let dapp: DAppClient
   let transport: ControlledTransport
+  let storage: LocalStorage
 
   async function createClient(requestTimeoutMs: number = 0): Promise<DAppClient> {
-    const storage = new LocalStorage('dapp-client-typed-errors')
+    storage = new LocalStorage('dapp-client-typed-errors')
     transport = new ControlledTransport(storage)
     const client = new DAppClient({
       name: 'Typed errors test',
@@ -205,6 +211,56 @@ describe('DAppClient typed error rejections', () => {
         errorType: BeaconErrorType.NOT_GRANTED_ERROR,
         errorOrigin: 'wallet'
       })
+    })
+
+    it('offers removal of only the requested account when the wallet cannot find its private key', async () => {
+      const requested = {
+        ...account,
+        accountIdentifier: await getAccountIdentifier(account.address, account.network)
+      }
+      const otherNetwork = { type: NetworkType.GHOSTNET }
+      const unrelated = {
+        ...account,
+        accountIdentifier: await getAccountIdentifier(account.address, otherNetwork),
+        network: otherNetwork
+      }
+      await storage.set(StorageKey.ACCOUNTS, [requested, unrelated])
+      vi.mocked(dapp.getActiveAccount).mockResolvedValue(requested)
+      const failed = vi.fn()
+      await dapp.subscribeToEvent(BeaconEvent.OPERATION_REQUEST_ERROR, failed)
+      const outcome = dapp.requestOperation({ operationDetails: [] }).then(
+        () => { throw new Error('Expected requestOperation to reject') },
+        (error: unknown) => error
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      const id = await getLastSentRequestId()
+      await transport.receive({
+        id,
+        version: '2',
+        senderId: peer.senderId,
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.NO_PRIVATE_KEY_FOUND_ERROR
+      })
+
+      const error = await outcome
+      expect(isBeaconError(error)).toBe(true)
+      expect(error).toMatchObject({ id, errorType: BeaconErrorType.NO_PRIVATE_KEY_FOUND_ERROR })
+      expect(failed).toHaveBeenCalledTimes(1)
+      const [info, buttons] = failed.mock.calls[0]
+      expect(info.errorResponse).not.toBeInstanceOf(Error)
+      expect(info.errorResponse).toEqual({
+        id,
+        version: '2',
+        senderId: peer.senderId,
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.NO_PRIVATE_KEY_FOUND_ERROR,
+        errorOrigin: 'wallet'
+      })
+      expect(buttons).toEqual([{ text: 'Remove account', actionCallback: expect.any(Function) }])
+      expect(await dapp.getAccounts()).toEqual([requested, unrelated])
+      await buttons[0].actionCallback()
+      expect(await dapp.getAccounts()).toEqual([unrelated])
+      expect(failed).toHaveBeenCalledTimes(1)
     })
 
     it('rejects with TransactionInvalidBeaconError carrying errorData when wallet replies with TRANSACTION_INVALID_ERROR', async () => {
