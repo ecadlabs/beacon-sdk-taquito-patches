@@ -12,7 +12,14 @@ import {
 import type { WalletInfo as PublicWalletInfo } from '../../src'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { BeaconEvent } from '../../src/events'
-import { getExtensionList, getWebList } from '@ecadlabs/beacon-ui'
+import {
+  getExtensionList,
+  getWebList,
+  getiOSList,
+  getDesktopList,
+  isBrowser,
+  isDesktop
+} from '@ecadlabs/beacon-ui'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { DappPostMessageTransport } from '../../src/transports/DappPostMessageTransport'
 import { DappP2PTransport } from '../../src/transports/DappP2PTransport'
@@ -45,11 +52,11 @@ vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
 vi.mock('@ecadlabs/beacon-ui', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@ecadlabs/beacon-ui')>()),
   getWebList: vi.fn(() => []),
-  getiOSList: () => [],
-  getDesktopList: () => [],
+  getiOSList: vi.fn(() => []),
+  getDesktopList: vi.fn(() => []),
   getExtensionList: vi.fn(() => []),
-  isBrowser: () => true,
-  isDesktop: () => false
+  isBrowser: vi.fn(() => true),
+  isDesktop: vi.fn(() => false)
 }))
 
 const account: AccountInfo = {
@@ -92,6 +99,10 @@ describe('DAppClient.getActiveWalletInfo', () => {
       configurable: true
     })
     vi.mocked(getWebList).mockReturnValue([])
+    vi.mocked(getiOSList).mockReturnValue([])
+    vi.mocked(getDesktopList).mockReturnValue([])
+    vi.mocked(isBrowser).mockReturnValue(true)
+    vi.mocked(isDesktop).mockReturnValue(false)
     vi.mocked(getExtensionList).mockReturnValue([])
     storage = new LocalStorage('active-wallet-info')
     client = new DAppClient({ name: 'Wallet info tests', storage, disableDefaultEvents: true })
@@ -736,6 +747,70 @@ describe('DAppClient.getActiveWalletInfo', () => {
       type: 'web'
     })
   })
+
+  it.each([
+    { web: true, browser: true, desktop: true, storedType: undefined, expected: 'web' },
+    { web: true, browser: false, desktop: true, storedType: undefined, expected: 'desktop' },
+    { web: true, browser: true, desktop: false, storedType: 'mobile', expected: 'mobile' },
+    { web: true, browser: false, desktop: false, storedType: undefined, expected: 'mobile' },
+    { web: false, browser: true, desktop: false, storedType: undefined, expected: 'extension' }
+  ] as const)(
+    'selects $expected for browser=$browser desktop=$desktop stored=$storedType',
+    async ({ web, browser, desktop, storedType, expected }) => {
+      selectAccount({ ...account, network: { type: NetworkType.GHOSTNET } })
+      vi.mocked(isBrowser).mockReturnValue(browser)
+      vi.mocked(isDesktop).mockReturnValue(desktop)
+      const app = {
+        key: 'EXAMPLE_wallet',
+        name: 'Example Wallet',
+        shortName: 'Example',
+        color: '#000',
+        logo: 'registry-icon'
+      }
+      vi.mocked(getWebList).mockReturnValue(
+        web
+          ? [
+              {
+                ...app,
+                links: { [NetworkType.MAINNET]: 'mainnet', [NetworkType.GHOSTNET]: 'ghostnet' }
+              }
+            ]
+          : []
+      )
+      vi.mocked(getExtensionList).mockReturnValue([{ ...app, id: 'extension-id', link: 'install' }])
+      vi.mocked(getDesktopList).mockReturnValue([
+        { ...app, downloadLink: 'download', deepLink: 'desktop-link' }
+      ])
+      vi.mocked(getiOSList).mockReturnValue([
+        { ...app, universalLink: 'universal', deepLink: 'mobile-link' }
+      ])
+      await storage.set(StorageKey.APP_METADATA_LIST, [
+        { senderId: account.senderId, name: 'Example' }
+      ])
+      if (storedType) {
+        await storage.set(StorageKey.LAST_SELECTED_WALLET, {
+          ...storedWallet,
+          key: 'example_mobile',
+          name: 'Example Wallet',
+          type: storedType
+        })
+      }
+      await expect(client.getActiveWalletInfo()).resolves.toEqual({
+        name: 'Example Wallet',
+        icon: 'registry-icon',
+        type: expected,
+        ...(expected === 'extension'
+          ? {}
+          : {
+              deeplink: {
+                web: 'ghostnet',
+                desktop: 'desktop-link',
+                mobile: 'mobile-link'
+              }[expected]
+            })
+      })
+    }
+  )
 
   it('returns undefined without a name even when the registry contains a wallet-prefixed key', async () => {
     selectAccount()
