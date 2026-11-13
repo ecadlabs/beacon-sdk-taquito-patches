@@ -913,6 +913,38 @@ export class WalletClient extends Client {
     return [...(p2pPeers ?? []), ...(postMessagePeers ?? []), ...(walletConnectPeers ?? [])]
   }
 
+  public async getPeer(publicKeyOrSenderId: string): Promise<ExtendedPeerInfo | undefined> {
+    await this.peersSeeded
+    const peers = await this.getPeers()
+    for (const peer of peers) {
+      const extended =
+        'senderId' in peer && typeof peer.senderId === 'string'
+          ? peer
+          : (this.knownPeersByPublicKey.get(peer.publicKey) ?? (await this.getPeerInfo(peer)))
+      if (
+        extended.publicKey === publicKeyOrSenderId ||
+        extended.senderId === publicKeyOrSenderId
+      ) {
+        return extended
+      }
+    }
+    const byPublicKey = this.knownPeersByPublicKey.get(publicKeyOrSenderId)
+    if (byPublicKey) {
+      return byPublicKey
+    }
+    for (const knownPeer of this.knownPeersByPublicKey.values()) {
+      if (knownPeer.senderId === publicKeyOrSenderId) {
+        return knownPeer
+      }
+    }
+
+    return undefined
+  }
+
+  public async hasPeer(publicKeyOrSenderId: string): Promise<boolean> {
+    return (await this.getPeer(publicKeyOrSenderId)) !== undefined
+  }
+
   /**
    * Add a new peer to the known peers
    * @param peer The new peer to add

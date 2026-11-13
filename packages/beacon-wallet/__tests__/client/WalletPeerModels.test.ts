@@ -4,6 +4,7 @@ import { Client, LocalStorage, PeerManager, windowRef, getSenderId } from '@ecad
 import {
   ExtendedP2PPairingRequest,
   ExtendedPostMessagePairingRequest,
+  ExtendedWalletConnectPairingRequest,
   NetworkType,
   P2PPairingRequest,
   PeerInfo,
@@ -333,6 +334,81 @@ describe('Wallet peer sender IDs', () => {
 
       await wallet.removePeer(peer2)
       await expect(wallet.getAppMetadataList()).resolves.toEqual([])
+    } finally {
+      await wallet.destroy()
+    }
+  })
+
+  it('getPeer() and hasPeer() resolve P2P and WalletConnect peers by publicKey and senderId both before and after init()', async () => {
+    const storage = new LocalStorage('wallet-get-has-peer')
+    const p2pPk = '11'.repeat(32)
+    const p2pSenderId = await getSenderId(p2pPk)
+    const wcPk = '22'.repeat(32)
+    const wcSenderId = await getSenderId(wcPk)
+
+    const p2pPeer = new ExtendedP2PPairingRequest(
+      'p2p-id',
+      'P2P DApp',
+      p2pPk,
+      '3',
+      'relay.example',
+      p2pSenderId
+    )
+    const wcPeer = new ExtendedWalletConnectPairingRequest(
+      'wc-id',
+      'WC DApp',
+      wcPk,
+      '3',
+      wcSenderId,
+      'wc-uri'
+    )
+
+    await storage.set(StorageKey.TRANSPORT_P2P_PEERS_WALLET, [p2pPeer])
+    await storage.set(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_WALLET, [wcPeer])
+
+    const wallet = new WalletClient({ name: 'Lookup wallet', storage })
+    try {
+      expect(wallet['_transport'].isResolved()).toBe(false)
+
+      // Before init(): lookup by publicKey and senderId
+      await expect(wallet.getPeer(p2pPk)).resolves.toEqual(p2pPeer)
+      await expect(wallet.getPeer(p2pSenderId)).resolves.toEqual(p2pPeer)
+      await expect(wallet.hasPeer(p2pPk)).resolves.toBe(true)
+      await expect(wallet.hasPeer(p2pSenderId)).resolves.toBe(true)
+
+      await expect(wallet.getPeer(wcPk)).resolves.toEqual(wcPeer)
+      await expect(wallet.getPeer(wcSenderId)).resolves.toEqual(wcPeer)
+      await expect(wallet.hasPeer(wcPk)).resolves.toBe(true)
+      await expect(wallet.hasPeer(wcSenderId)).resolves.toBe(true)
+
+      await expect(wallet.getPeer('unknown-id')).resolves.toBeUndefined()
+      await expect(wallet.hasPeer('unknown-id')).resolves.toBe(false)
+      expect(wallet['_transport'].isResolved()).toBe(false)
+
+      // After init() with P2P transport
+      const manager = new PeerManager(storage, StorageKey.TRANSPORT_P2P_PEERS_WALLET)
+      const transport = new PeerTestTransport<
+        ExtendedP2PPairingRequest,
+        StorageKey.TRANSPORT_P2P_PEERS_WALLET
+      >(new RecordingPeerClient(), manager, TransportType.P2P)
+      await Client.prototype.init.call(wallet, transport)
+
+      await expect(wallet.getPeer(p2pPk)).resolves.toEqual(p2pPeer)
+      await expect(wallet.getPeer(p2pSenderId)).resolves.toEqual(p2pPeer)
+      await expect(wallet.hasPeer(p2pPk)).resolves.toBe(true)
+      await expect(wallet.hasPeer(p2pSenderId)).resolves.toBe(true)
+
+      await expect(wallet.getPeer(wcPk)).resolves.toEqual(wcPeer)
+      await expect(wallet.getPeer(wcSenderId)).resolves.toEqual(wcPeer)
+      await expect(wallet.hasPeer(wcPk)).resolves.toBe(true)
+      await expect(wallet.hasPeer(wcSenderId)).resolves.toBe(true)
+
+      // After removing p2pPeer
+      await wallet.removePeer(p2pPeer)
+      await expect(wallet.getPeer(p2pPk)).resolves.toBeUndefined()
+      await expect(wallet.getPeer(p2pSenderId)).resolves.toBeUndefined()
+      await expect(wallet.hasPeer(p2pPk)).resolves.toBe(false)
+      await expect(wallet.hasPeer(p2pSenderId)).resolves.toBe(false)
     } finally {
       await wallet.destroy()
     }
