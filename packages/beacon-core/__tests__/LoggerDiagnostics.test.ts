@@ -1,16 +1,17 @@
 /** @vitest-environment node */
 
-import { getDebugEnabled, setDebugEnabled } from '../src/debug'
-import { MessageBasedClient } from '../src/transports/clients/MessageBasedClient'
-import { getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
+  getDebugEnabled,
+  setDebugEnabled,
+  MessageBasedClient,
   InternalLogger,
   Logger,
   reportDiagnostic,
   setLogger,
   type LoggerDiagnostic,
   type LoggerInterface
-} from '../src/utils/Logger'
+} from '../src'
+import { getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 
 const originalDebug = getDebugEnabled()
 const makeSink = (): LoggerInterface => ({

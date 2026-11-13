@@ -23,7 +23,7 @@ import { MessageBasedClient } from './transports/clients/MessageBasedClient'
 import { setDebugEnabled, getDebugEnabled } from './debug'
 // import { EncryptPayloadRequest } from './types/beacon/messages/EncryptPayloadRequest'
 // import { EncryptPayloadResponse } from './types/beacon/messages/EncryptPayloadResponse'
-import { getLogger, Logger, setLogger, reportDiagnostic } from './utils/Logger'
+import { getLogger, InternalLogger, Logger, setLogger, reportDiagnostic } from './utils/Logger'
 import { windowRef } from './MockWindow'
 import { CommunicationClient } from './transports/clients/CommunicationClient'
 import { ClientEvents } from './transports/clients/ClientEvents'
@@ -90,8 +90,8 @@ export { SDK_VERSION, BEACON_VERSION }
 export { getSenderId, getAccountIdentifier, windowRef, MultiTabChannel, observeMultiTabChannel }
 
 // Others
-export { Serializer, Logger, setLogger, getLogger, reportDiagnostic }
-export type { LoggerDiagnostic } from './utils/Logger'
+export { Serializer, InternalLogger, Logger, setLogger, getLogger, reportDiagnostic }
+export type { LoggerDiagnostic, LoggerInterface } from './utils/Logger'
 
 export { PendingPairingRequests } from './transports/clients/PendingPairingRequests'
 
