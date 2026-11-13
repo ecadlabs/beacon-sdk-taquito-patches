@@ -22,7 +22,7 @@ import {
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { BeaconEvent } from '../../src/events'
-import type { BeaconMessageRecord } from '../../src'
+import type { BeaconMessageDisposition, BeaconMessageRecord } from '../../src'
 
 vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
@@ -259,13 +259,21 @@ describe('DAppClient plaintext message observers (#149)', () => {
       await transport.receive(reply)
       await vi.advanceTimersByTimeAsync(0)
       expect(await outcome).toHaveProperty('value')
-      expect(records).toHaveLength(2)
+      expect(records).toHaveLength(3)
       expect(records[1]).toEqual({
         direction: 'incoming',
         transport: config.transportType,
         senderId: peer.senderId,
         ts: epoch + 100,
         message: reply
+      })
+      expect(records[2]).toEqual({
+        direction: 'incoming',
+        transport: config.transportType,
+        senderId: peer.senderId,
+        ts: epoch + 100,
+        message: reply,
+        disposition: 'handled'
       })
       expect(messageId(records[0].message)).toBe(messageId(records[1].message))
     }
@@ -304,6 +312,7 @@ describe('DAppClient plaintext message observers (#149)', () => {
       expect(metadataLookup).toHaveBeenCalled()
       expect(records).toHaveLength(2)
       expect(records[1]).toMatchObject({ direction: 'incoming', ts: epoch + 100, message: reply })
+      expect(records[1].disposition).toBeUndefined()
     } finally {
       vi.setSystemTime(epoch + 1000)
       gate.resolve({ name: peer.name })
@@ -311,7 +320,13 @@ describe('DAppClient plaintext message observers (#149)', () => {
     await handling
     await vi.advanceTimersByTimeAsync(0)
     expect(await outcome).toHaveProperty('value')
-    expect(records).toHaveLength(2)
+    expect(records).toHaveLength(3)
+    expect(records[2]).toMatchObject({
+      direction: 'incoming',
+      ts: epoch + 1000,
+      message: reply,
+      disposition: 'handled'
+    })
   })
 
   it('labels an incoming message with its delivering transport, not the selected transport', async () => {
@@ -324,10 +339,16 @@ describe('DAppClient plaintext message observers (#149)', () => {
     )
     await dapp['setTransport'](other)
     await transport.receive(signature('unknown'))
-    expect(records).toHaveLength(1)
+    expect(records).toHaveLength(2)
     expect(records[0]).toMatchObject({
       direction: 'incoming',
       transport: TransportType.POST_MESSAGE
+    })
+    expect(records[0].disposition).toBeUndefined()
+    expect(records[1]).toMatchObject({
+      direction: 'incoming',
+      transport: TransportType.POST_MESSAGE,
+      disposition: 'unknown-request'
     })
   })
 
@@ -366,15 +387,18 @@ describe('DAppClient plaintext message observers (#149)', () => {
     dapp.subscribeToMessages(next)
     await transport.receive(reply)
     await vi.advanceTimersByTimeAsync(0)
-    expect(mutationAttempts).toHaveBeenCalledTimes(1)
+    expect(mutationAttempts).toHaveBeenCalledTimes(2)
     expect(await pending.outcome).toMatchObject({
       value: { signature: 'wallet-signature', extension: { values: ['original'] } }
     })
-    expect(next).toHaveBeenCalledExactlyOnceWith(records[1])
+    expect(next).toHaveBeenCalledTimes(2)
+    expect(next).toHaveBeenNthCalledWith(1, records[1])
+    expect(next).toHaveBeenNthCalledWith(2, records[2])
     expect(Object.isFrozen(reply)).toBe(false)
     expect(Object.isFrozen(reply.extension.values)).toBe(false)
     reply.extension.values.push('later')
     expect(records[1].message).toMatchObject({ extension: { values: ['original'] } })
+    expect(records[2].message).toMatchObject({ extension: { values: ['original'] } })
   })
 
   it('detaches and freezes outgoing nested data before serialization without freezing caller input', async () => {
@@ -441,7 +465,11 @@ describe('DAppClient plaintext message observers (#149)', () => {
     await transport.receive(signature(pending.id))
     await vi.advanceTimersByTimeAsync(0)
     expect(await pending.outcome).toHaveProperty('value')
-    expect(records.map((record) => record.direction)).toEqual(['outgoing', 'incoming'])
+    expect(records.map((record) => [record.direction, record.disposition])).toEqual([
+      ['outgoing', undefined],
+      ['incoming', undefined],
+      ['incoming', 'handled']
+    ])
   })
 
   it('deduplicates listeners, removes them idempotently, and preserves a later subscription', async () => {
@@ -452,20 +480,20 @@ describe('DAppClient plaintext message observers (#149)', () => {
     const duplicate = dapp.subscribeToMessages(listener)
     dapp.subscribeToMessages(other)
     await transport.receive(signature('unknown-1'))
-    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledTimes(2)
     duplicate()
     duplicate()
     await transport.receive(signature('unknown-2'))
-    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledTimes(2)
     const current = dapp.subscribeToMessages(listener)
     first()
     duplicate()
     await transport.receive(signature('unknown-3'))
-    expect(listener).toHaveBeenCalledTimes(2)
+    expect(listener).toHaveBeenCalledTimes(4)
     current()
     await transport.receive(signature('unknown-4'))
-    expect(listener).toHaveBeenCalledTimes(2)
-    expect(other).toHaveBeenCalledTimes(4)
+    expect(listener).toHaveBeenCalledTimes(4)
+    expect(other).toHaveBeenCalledTimes(8)
   })
 
   it('allows self-unsubscription without skipping another observer', async () => {
@@ -478,7 +506,7 @@ describe('DAppClient plaintext message observers (#149)', () => {
     await transport.receive(signature('unknown-1'))
     await transport.receive(signature('unknown-2'))
     expect(first).toHaveBeenCalledTimes(1)
-    expect(second).toHaveBeenCalledTimes(2)
+    expect(second).toHaveBeenCalledTimes(4)
   })
 
   it.each(
@@ -493,16 +521,25 @@ describe('DAppClient plaintext message observers (#149)', () => {
   )('observes malformed deserialized input before routing: $malformed', async ({ malformed }) => {
     await start()
     subscribe()
-    // The observer must expose the value even when the existing router rejects its shape.
-    await transport.receive(malformed).catch(() => undefined)
-    expect(records).toHaveLength(1)
+    // The observer must expose the value at the boundary and then report disposition: 'invalid'.
+    await transport.receive(malformed)
+    expect(records).toHaveLength(2)
     expect(records[0]).toMatchObject({
       direction: 'incoming',
       transport: TransportType.POST_MESSAGE,
       ts: epoch
     })
+    expect(records[0].disposition).toBeUndefined()
     expect(records[0].message).toEqual(malformed)
     expect(records[0].senderId).toBeUndefined()
+    expect(records[1]).toMatchObject({
+      direction: 'incoming',
+      transport: TransportType.POST_MESSAGE,
+      ts: epoch,
+      disposition: 'invalid'
+    })
+    expect(records[1].message).toEqual(malformed)
+    expect(records[1].senderId).toBeUndefined()
   })
 
   it('observes a stale response after timeout without emitting success', async () => {
@@ -517,9 +554,65 @@ describe('DAppClient plaintext message observers (#149)', () => {
     })
     await transport.receive(signature(pending.id))
     await vi.advanceTimersByTimeAsync(0)
-    expect(records).toHaveLength(2)
+    expect(records).toHaveLength(3)
     expect(records[1].message).toEqual(signature(pending.id))
+    expect(records[1].disposition).toBeUndefined()
+    expect(records[2].message).toEqual(signature(pending.id))
+    expect(records[2].disposition).toBe('stale')
     expect(succeeded).not.toHaveBeenCalled()
+  })
+
+  it('emits boundary record followed by disposition record across handled, stale, unknown-request, and invalid outcomes', async () => {
+    await start(transports[0], 25)
+    subscribe()
+
+    // 1. handled (Acknowledge + SignPayloadResponse)
+    const pendingHandled = await sign()
+    const ackMsg = {
+      id: pendingHandled.id,
+      version: '2',
+      senderId: peer.senderId,
+      type: BeaconMessageType.Acknowledge
+    }
+    await transport.receive(ackMsg)
+    await vi.advanceTimersByTimeAsync(0)
+    await transport.receive(signature(pendingHandled.id))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await pendingHandled.outcome).toHaveProperty('value')
+
+    // 2. stale (timed out request)
+    const pendingStale = await sign()
+    await vi.advanceTimersByTimeAsync(25)
+    expect(await pendingStale.outcome).toMatchObject({
+      error: { errorType: BeaconErrorType.PEER_UNREACHABLE }
+    })
+    await transport.receive(signature(pendingStale.id))
+    await vi.advanceTimersByTimeAsync(0)
+
+    // 3. unknown-request (never sent request ID)
+    await transport.receive(signature('never-sent-request-id'))
+    await vi.advanceTimersByTimeAsync(0)
+
+    // 4. invalid (malformed message)
+    await transport.receive({ id: 'bad-msg', version: '2', senderId: peer.senderId, type: 'unknown_type' })
+    await vi.advanceTimersByTimeAsync(0)
+
+    const incomingDispositions: Array<BeaconMessageDisposition | undefined> = records
+      .filter((r) => r.direction === 'incoming')
+      .map((r) => r.disposition)
+
+    expect(incomingDispositions).toEqual([
+      undefined,
+      'handled',
+      undefined,
+      'handled',
+      undefined,
+      'stale',
+      undefined,
+      'unknown-request',
+      undefined,
+      'invalid'
+    ])
   })
 
   it.each(['serialization', 'send'])(

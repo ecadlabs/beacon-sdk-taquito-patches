@@ -1,5 +1,8 @@
 import { Logger } from '@ecadlabs/beacon-core'
-import { TransportType } from '@ecadlabs/beacon-types'
+import { BeaconMessageType, TransportType } from '@ecadlabs/beacon-types'
+import { type ResponseMessage, responseOutput } from './request-error'
+
+export type BeaconMessageDisposition = 'handled' | 'stale' | 'unknown-request' | 'invalid'
 
 /** A detached snapshot of a plaintext Beacon protocol message, before incoming validation. */
 export interface BeaconMessageRecord {
@@ -10,6 +13,33 @@ export interface BeaconMessageRecord {
   /** Epoch milliseconds at observation. Outgoing records describe attempts, not delivery. */
   readonly ts: number
   readonly message: unknown
+  /** Outcome classification for incoming wire messages after routing. */
+  readonly disposition?: BeaconMessageDisposition
+}
+
+const VALID_BEACON_MESSAGE_TYPES = new Set<unknown>(Object.values(BeaconMessageType))
+
+/** @internal Validates whether an incoming deserialized payload has a routable Beacon message shape. */
+export const isValidIncomingResponseMessage = (message: unknown): message is ResponseMessage => {
+  if (typeof message !== 'object' || message === null || Array.isArray(message)) {
+    return false
+  }
+  if (!('id' in message) || typeof message.id !== 'string' || message.id.length === 0) {
+    return false
+  }
+  if (
+    'senderId' in message &&
+    message.senderId !== undefined &&
+    typeof message.senderId !== 'string'
+  ) {
+    return false
+  }
+  const typedMessage = responseOutput(message as ResponseMessage)
+  if (typeof typedMessage !== 'object' || typedMessage === null || Array.isArray(typedMessage)) {
+    return false
+  }
+
+  return 'type' in typedMessage && VALID_BEACON_MESSAGE_TYPES.has(typedMessage.type)
 }
 
 const logger = new Logger('MessageObserver')
@@ -58,7 +88,8 @@ export class MessageObserver {
     direction: BeaconMessageRecord['direction'],
     transport: TransportType,
     message: unknown,
-    senderId?: string
+    senderId?: string,
+    disposition?: BeaconMessageDisposition
   ): void {
     if (this.listeners.size === 0) {
       return
@@ -70,7 +101,8 @@ export class MessageObserver {
         transport,
         senderId,
         ts: Date.now(),
-        message: deepFreeze(structuredClone(message))
+        message: deepFreeze(structuredClone(message)),
+        ...(disposition !== undefined ? { disposition } : {})
       })
     } catch (error: unknown) {
       // Unsupported caller-provided values must not turn tracing into a request failure.
@@ -86,5 +118,23 @@ export class MessageObserver {
         logger.error('listener', error)
       }
     }
+  }
+
+  public notifyIncoming(
+    transport: TransportType | undefined,
+    message: unknown,
+    disposition?: BeaconMessageDisposition
+  ): void {
+    if (transport === undefined) {
+      return
+    }
+    const senderId =
+      message !== null &&
+      typeof message === 'object' &&
+      'senderId' in message &&
+      typeof message.senderId === 'string'
+        ? message.senderId
+        : undefined
+    this.notify('incoming', transport, message, senderId, disposition)
   }
 }
