@@ -59,6 +59,7 @@ import {
   Origin
 } from '@ecadlabs/beacon-types'
 import type { SignClientTypes } from '@walletconnect/types'
+import { REGIONS_AND_SERVERS } from '@ecadlabs/beacon-transport-matrix'
 import {
   buildPermissionResponse,
   buildOperationResponse,
@@ -1273,11 +1274,15 @@ export class WalletClient extends Client {
       return undefined
     }
 
-    if (this.matrixNodes && typeof this.matrixNodes === 'object') {
-      const configuredServers = Object.values(this.matrixNodes).flatMap((servers) => servers ?? [])
-      if (configuredServers.length > 0) {
-        return configuredServers.includes(storedNode) ? storedNode : undefined
-      }
+    const effectiveMatrixNodes =
+      this.matrixNodes && typeof this.matrixNodes === 'object'
+        ? { ...REGIONS_AND_SERVERS, ...this.matrixNodes }
+        : REGIONS_AND_SERVERS
+    const configuredServers = Object.values(effectiveMatrixNodes).flatMap(
+      (servers) => servers ?? []
+    )
+    if (configuredServers.length > 0) {
+      return configuredServers.includes(storedNode) ? storedNode : undefined
     }
 
     return storedNode

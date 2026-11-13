@@ -1347,8 +1347,8 @@ describe('P2PCommunicationClient', () => {
     })
 
     it('falls through to server discovery when stored node is unreachable', async () => {
-      // Stored node exists but is dead
-      mockStorage.get.mockResolvedValue('dead-node.papers.tech')
+      // Stored node exists in default ENABLED_RELAY_SERVERS but is dead
+      mockStorage.get.mockResolvedValue('beacon-node-1.octez.io')
       mockStorage.delete.mockResolvedValue(undefined)
       mockStorage.set.mockResolvedValue(undefined)
 
@@ -1368,7 +1368,7 @@ describe('P2PCommunicationClient', () => {
     })
 
     it('uses stored node when it is reachable', async () => {
-      mockStorage.get.mockResolvedValue('healthy-node.papers.tech')
+      mockStorage.get.mockResolvedValue('beacon-node-1.octez.io')
 
       vi.spyOn(freshClient, 'getBeaconInfo').mockResolvedValue({
         region: 'eu',
@@ -1378,7 +1378,7 @@ describe('P2PCommunicationClient', () => {
 
       const result = await freshClient.getRelayServer()
 
-      expect(result.server).toBe('healthy-node.papers.tech')
+      expect(result.server).toBe('beacon-node-1.octez.io')
       expect(result.timestamp).toBe(7777)
       // Should NOT have deleted the node
       expect(mockStorage.delete).not.toHaveBeenCalledWith(StorageKey.MATRIX_SELECTED_NODE)

@@ -49,7 +49,7 @@ const logger = new Logger('P2PCommunicationClient')
 
 const RESPONSE_WAIT_TIME_MS: number = 60_000 // total wait time for all the probes
 
-const REGIONS_AND_SERVERS: NodeDistributions = {
+export const REGIONS_AND_SERVERS: NodeDistributions = {
   [Regions.EUROPE_WEST]: [
     'beacon-node-1.octez.io',
     'beacon-node-2.octez.io',
@@ -157,7 +157,6 @@ export class P2PCommunicationClient extends CommunicationClient {
 
   private selectedRegion?: Regions
   private readonly ENABLED_RELAY_SERVERS: NodeDistributions
-  private readonly customMatrixNodes?: NodeDistributions
   public relayServer:
     ExposedPromise<{ server: string; timestamp: number; localTimestamp: number }> | undefined
   private activeRelayServer: string | undefined
@@ -208,7 +207,6 @@ export class P2PCommunicationClient extends CommunicationClient {
     logger.log('constructor', 'P2PCommunicationClient created')
 
     this.ENABLED_RELAY_SERVERS = REGIONS_AND_SERVERS
-    this.customMatrixNodes = matrixNodes
 
     if (matrixNodes) {
       this.ENABLED_RELAY_SERVERS = {
@@ -418,11 +416,10 @@ export class P2PCommunicationClient extends CommunicationClient {
       const node = await this.storage.get(StorageKey.MATRIX_SELECTED_NODE)
       this.assertRelaySession(session)
       if (node && node.length > 0) {
-        const customServers = this.customMatrixNodes
-          ? Object.values(this.customMatrixNodes).flatMap((servers) => servers ?? [])
-          : []
-        const hasCustomServers = customServers.length > 0
-        const isNodeAllowed = !hasCustomServers || customServers.includes(node)
+        const enabledServers = Object.values(this.ENABLED_RELAY_SERVERS).flatMap(
+          (servers) => servers ?? []
+        )
+        const isNodeAllowed = enabledServers.length === 0 || enabledServers.includes(node)
 
         if (!isNodeAllowed) {
           await this.writeSessionState(owner, () =>

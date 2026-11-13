@@ -133,9 +133,40 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     expect(result).toEqual({ server: 'custom-stored-node.example.com', timestamp: 333333 })
   })
 
-  it('uses stored MATRIX_SELECTED_NODE when ENABLED_RELAY_SERVERS is {} with no region keys', async () => {
+  it('deletes stale retired MATRIX_SELECTED_NODE without calling getBeaconInfo when matrixNodes is omitted (default ENABLED_RELAY_SERVERS)', async () => {
     const storage = new TestStorage()
-    await storage.set(StorageKey.MATRIX_SELECTED_NODE, 'empty-dict-stored-node.example.com')
+    await storage.set(StorageKey.MATRIX_SELECTED_NODE, 'beacon-node-1.sky.papers.tech')
+    const deleteSpy = vi.spyOn(storage, 'delete')
+
+    const keys = await getKeypairFromSeed('relay-validation-seed-default-stale')
+    const client = new P2PCommunicationClient('RelayTest', keys, 2, storage)
+
+    const getBeaconInfoSpy = vi
+      .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
+      .mockResolvedValue({
+        region: Regions.EUROPE_WEST,
+        known_servers: ['beacon-node-1.octez.io'],
+        timestamp: 444440
+      })
+
+    const findBestSpy = vi
+      .spyOn(client, 'findBestRegionAndGetServer')
+      .mockResolvedValue({ server: 'beacon-node-1.octez.io', timestamp: 444441 })
+
+    const result = await client.getRelayServer()
+
+    expect(deleteSpy).toHaveBeenCalledWith(StorageKey.MATRIX_SELECTED_NODE)
+    expect(getBeaconInfoSpy).not.toHaveBeenCalledWith('beacon-node-1.sky.papers.tech')
+    expect(findBestSpy).toHaveBeenCalledTimes(1)
+    expect(result).toEqual({ server: 'beacon-node-1.octez.io', timestamp: 444441 })
+    await expect(storage.get(StorageKey.MATRIX_SELECTED_NODE)).resolves.toBe(
+      'beacon-node-1.octez.io'
+    )
+  })
+
+  it('deletes stale retired MATRIX_SELECTED_NODE without calling getBeaconInfo when matrixNodes is {} (merged with default ENABLED_RELAY_SERVERS)', async () => {
+    const storage = new TestStorage()
+    await storage.set(StorageKey.MATRIX_SELECTED_NODE, 'beacon-node-1.sky.papers.tech')
     const deleteSpy = vi.spyOn(storage, 'delete')
 
     const keys = await getKeypairFromSeed('relay-validation-seed-4')
@@ -145,7 +176,35 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
       .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
       .mockResolvedValue({
         region: Regions.EUROPE_WEST,
-        known_servers: ['empty-dict-stored-node.example.com'],
+        known_servers: ['beacon-node-1.octez.io'],
+        timestamp: 444442
+      })
+
+    const findBestSpy = vi
+      .spyOn(client, 'findBestRegionAndGetServer')
+      .mockResolvedValue({ server: 'beacon-node-1.octez.io', timestamp: 444443 })
+
+    const result = await client.getRelayServer()
+
+    expect(deleteSpy).toHaveBeenCalledWith(StorageKey.MATRIX_SELECTED_NODE)
+    expect(getBeaconInfoSpy).not.toHaveBeenCalledWith('beacon-node-1.sky.papers.tech')
+    expect(findBestSpy).toHaveBeenCalledTimes(1)
+    expect(result).toEqual({ server: 'beacon-node-1.octez.io', timestamp: 444443 })
+  })
+
+  it('uses stored MATRIX_SELECTED_NODE when matrixNodes is omitted and stored node is in default ENABLED_RELAY_SERVERS', async () => {
+    const storage = new TestStorage()
+    await storage.set(StorageKey.MATRIX_SELECTED_NODE, 'beacon-node-1.octez.io')
+    const deleteSpy = vi.spyOn(storage, 'delete')
+
+    const keys = await getKeypairFromSeed('relay-validation-seed-default-valid')
+    const client = new P2PCommunicationClient('RelayTest', keys, 2, storage)
+
+    const getBeaconInfoSpy = vi
+      .spyOn(client as unknown as { getBeaconInfo: (server: string) => Promise<{ region: string; known_servers: string[]; timestamp: number }> }, 'getBeaconInfo')
+      .mockResolvedValue({
+        region: Regions.EUROPE_WEST,
+        known_servers: ['beacon-node-1.octez.io'],
         timestamp: 444444
       })
 
@@ -154,9 +213,9 @@ describe('P2PCommunicationClient.getRelayServer() validation against ENABLED_REL
     const result = await client.getRelayServer()
 
     expect(deleteSpy).not.toHaveBeenCalled()
-    expect(getBeaconInfoSpy).toHaveBeenCalledWith('empty-dict-stored-node.example.com')
+    expect(getBeaconInfoSpy).toHaveBeenCalledWith('beacon-node-1.octez.io')
     expect(findBestSpy).not.toHaveBeenCalled()
-    expect(result).toEqual({ server: 'empty-dict-stored-node.example.com', timestamp: 444444 })
+    expect(result).toEqual({ server: 'beacon-node-1.octez.io', timestamp: 444444 })
   })
 
   it('uses stored MATRIX_SELECTED_NODE when ENABLED_RELAY_SERVERS has an undefined region value', async () => {

@@ -629,26 +629,30 @@ describe('WalletClient observability, pending requests, changeAccount, and lifec
       await uninitStorage.set(StorageKey.MATRIX_SELECTED_NODE, 'stale-node.example.com')
       await expect(uninit.getSelectedMatrixNode()).resolves.toBeUndefined()
 
-      // Stored node when matrixNodes is empty/unconfigured -> returns stored node
+      // Stored node when matrixNodes is empty/unconfigured -> validates against default REGIONS_AND_SERVERS
       const { wallet: emptyNodesWallet, storage: emptyNodesStorage } = await createWallet({
         attachTransport: false,
         matrixNodes: {}
       })
-      await emptyNodesStorage.set(StorageKey.MATRIX_SELECTED_NODE, 'stored-default.example.com')
+      await emptyNodesStorage.set(StorageKey.MATRIX_SELECTED_NODE, 'beacon-node-1.sky.papers.tech')
+      await expect(emptyNodesWallet.getSelectedMatrixNode()).resolves.toBeUndefined()
+      await emptyNodesStorage.set(StorageKey.MATRIX_SELECTED_NODE, 'beacon-node-1.octez.io')
       await expect(emptyNodesWallet.getSelectedMatrixNode()).resolves.toBe(
-        'stored-default.example.com'
+        'beacon-node-1.octez.io'
       )
 
-      // Stored node when matrixNodes is completely omitted/default -> returns stored node
+      // Stored node when matrixNodes is completely omitted/default -> validates against default REGIONS_AND_SERVERS
       const { wallet: omittedNodesWallet, storage: omittedNodesStorage } = await createWallet({
         attachTransport: false
       })
       await omittedNodesStorage.set(
         StorageKey.MATRIX_SELECTED_NODE,
-        'omitted-stored-node.example.com'
+        'beacon-node-1.sky.papers.tech'
       )
+      await expect(omittedNodesWallet.getSelectedMatrixNode()).resolves.toBeUndefined()
+      await omittedNodesStorage.set(StorageKey.MATRIX_SELECTED_NODE, 'beacon-node-1.octez.io')
       await expect(omittedNodesWallet.getSelectedMatrixNode()).resolves.toBe(
-        'omitted-stored-node.example.com'
+        'beacon-node-1.octez.io'
       )
 
       // Stored node with multi-region matrixNodes where node is in non-first region
