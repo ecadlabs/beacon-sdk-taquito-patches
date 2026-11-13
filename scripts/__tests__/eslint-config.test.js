@@ -27,7 +27,7 @@ test('legacy arrow suppression comments remain valid in existing source files', 
   }
 })
 
-test('only underscore-prefixed arguments are exempt from unused-variable warnings', async () => {
+test('only underscore-prefixed arguments are exempt from unused-variable findings', async () => {
   const ruleId = '@typescript-eslint/no-unused-vars'
   const config = await eslint.calculateConfigForFile('packages/beacon-blockchain-tezos/src/blockchain.ts')
   const unusedVariables = new ESLint({
@@ -52,8 +52,8 @@ test('only underscore-prefixed arguments are exempt from unused-variable warning
       name: source.split('\n')[line - 1].slice(column - 1, endColumn - 1)
     })),
     [
-      { ruleId, severity: 1, name: 'input' },
-      { ruleId, severity: 1, name: '_local' }
+      { ruleId, severity: 2, name: 'input' },
+      { ruleId, severity: 2, name: '_local' }
     ]
   )
 })

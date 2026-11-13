@@ -149,7 +149,7 @@ export default [
       'no-unsafe-finally': 'error',
       'no-unused-expressions': 'off',
       '@typescript-eslint/no-unused-expressions': 'error',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'no-unused-labels': 'error',
       'no-var': 'error',
       'no-void': 'error',
