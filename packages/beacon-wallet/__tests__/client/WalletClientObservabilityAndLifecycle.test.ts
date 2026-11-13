@@ -12,10 +12,13 @@ import {
   ConnectionInfo,
   ExtendedP2PPairingRequest,
   ExtendedPeerInfo,
+  ExtendedWalletConnectPairingRequest,
   Network,
   NetworkType,
   Origin,
   PeerInfo,
+  PermissionInfo,
+  PermissionRequestOutput,
   PermissionScope,
   Regions,
   Storage,
@@ -1332,6 +1335,195 @@ describe('WalletClient observability, pending requests, changeAccount, and lifec
           source: 'storage'
         })
       ])
+    })
+
+    it('emits storage peer_added and peer_removed events for TRANSPORT_WALLETCONNECT_PEERS_WALLET without calling P2P transport.addPeer, and seeds pre-existing WalletConnect peers on startup', async () => {
+      const { wallet, storage, transport } = await createWallet()
+      const events: WalletPeerEvent[] = []
+      wallet.subscribeToPeers((event) => {
+        events.push(event)
+      })
+
+      const wcPeer: ExtendedWalletConnectPairingRequest = {
+        id: 'wc-peer-1',
+        name: 'WC DApp One',
+        publicKey: 'wc-pk-1',
+        version: '2',
+        uri: 'wc:topic-1@2?relay-protocol=irn&symKey=abc',
+        senderId: 'wc-sender-1',
+        type: 'walletconnect-pairing-request'
+      }
+
+      await storage.notifyStorageChanged({
+        eventType: 'entryModified',
+        key: storage.getPrefixedKey(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_WALLET),
+        oldValue: JSON.stringify([]),
+        newValue: JSON.stringify([wcPeer])
+      })
+
+      expect(transport.addPeerCalls).toEqual([])
+      expect(events).toEqual([
+        {
+          type: 'peer_added',
+          peer: expect.objectContaining({
+            publicKey: 'wc-pk-1',
+            senderId: 'wc-sender-1',
+            type: 'walletconnect-pairing-request'
+          }),
+          source: 'storage'
+        }
+      ])
+
+      await storage.notifyStorageChanged({
+        eventType: 'entryModified',
+        key: storage.getPrefixedKey(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_WALLET),
+        oldValue: JSON.stringify([wcPeer]),
+        newValue: JSON.stringify([])
+      })
+
+      expect(events).toHaveLength(2)
+      expect(events[1]).toEqual({
+        type: 'peer_removed',
+        peer: expect.objectContaining({
+          publicKey: 'wc-pk-1',
+          senderId: 'wc-sender-1'
+        }),
+        source: 'storage'
+      })
+
+      const seededStorage = new TabStorage('pre-seed-wc-test')
+      await seededStorage.set(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_WALLET, [wcPeer])
+      const { wallet: seededWallet } = await createWallet({
+        customStorage: seededStorage,
+        attachTransport: false
+      })
+      const seededEvents: WalletPeerEvent[] = []
+      seededWallet.subscribeToPeers((event) => {
+        seededEvents.push(event)
+      })
+
+      await seededStorage.notifyStorageChanged({
+        eventType: 'entryModified',
+        key: seededStorage.getPrefixedKey(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_WALLET),
+        oldValue: JSON.stringify([wcPeer]),
+        newValue: JSON.stringify([])
+      })
+
+      expect(seededEvents).toEqual([
+        {
+          type: 'peer_removed',
+          peer: expect.objectContaining({
+            publicKey: 'wc-pk-1',
+            senderId: 'wc-sender-1'
+          }),
+          source: 'storage'
+        }
+      ])
+    })
+
+    it('notifies subscribeToPermissions listeners on cross-tab PERMISSION_LIST and APP_METADATA_LIST storage changes, local permission mutations, and storageCleared', async () => {
+      const { wallet, storage, transport } = await createWallet()
+      const notifications: PermissionInfo[][] = []
+      const throwingListener = vi.fn(() => {
+        throw new Error('permission listener boom')
+      })
+      const unsubThrowing = wallet.subscribeToPermissions(throwingListener)
+      const listener = (permissions: PermissionInfo[]): void => {
+        notifications.push(permissions)
+      }
+      const unsub1 = wallet.subscribeToPermissions(listener)
+      const unsub2 = wallet.subscribeToPermissions(listener)
+      expect(unsub1).toBe(unsub2)
+
+      const samplePermission: PermissionInfo = {
+        accountIdentifier: 'acc-id-1',
+        senderId: 'sender-1',
+        appMetadata: { senderId: 'sender-1', name: 'DApp One' },
+        website: 'https://dapp.example',
+        address: 'tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb',
+        publicKey: validEdpk,
+        network,
+        scopes: [PermissionScope.SIGN],
+        connectedAt: 1700000000000
+      }
+
+      // 1. Cross-tab storage modification on PERMISSION_LIST
+      await storage.set(StorageKey.PERMISSION_LIST, [samplePermission])
+      await storage.notifyStorageChanged({
+        eventType: 'entryModified',
+        key: storage.getPrefixedKey(StorageKey.PERMISSION_LIST),
+        oldValue: JSON.stringify([]),
+        newValue: JSON.stringify([samplePermission])
+      })
+
+      expect(throwingListener).toHaveBeenCalledTimes(1)
+      expect(notifications).toHaveLength(1)
+      expect(notifications[0]).toEqual([expect.objectContaining({ accountIdentifier: 'acc-id-1' })])
+
+      // 2. Cross-tab storage modification on APP_METADATA_LIST
+      await storage.set(StorageKey.APP_METADATA_LIST, [
+        { senderId: 'sender-1', name: 'DApp One Updated' }
+      ])
+      await storage.notifyStorageChanged({
+        eventType: 'entryModified',
+        key: storage.getPrefixedKey(StorageKey.APP_METADATA_LIST),
+        oldValue: JSON.stringify([{ senderId: 'sender-1', name: 'DApp One' }]),
+        newValue: JSON.stringify([{ senderId: 'sender-1', name: 'DApp One Updated' }])
+      })
+
+      expect(notifications).toHaveLength(2)
+      expect(notifications[1]).toEqual([expect.objectContaining({ accountIdentifier: 'acc-id-1' })])
+
+      // 3. Local removePermission and removeAllPermissions notify listeners
+      await wallet.removePermission('acc-id-1', 'sender-1')
+      expect(notifications).toHaveLength(3)
+      expect(notifications[2]).toEqual([])
+
+      // 4. Local respondPermission notifies listeners
+      const peer = makePeer({ id: 'p-perm-1', publicKey: 'pk-perm-1', senderId: 'sender-perm-1' })
+      await wallet.addPeer(peer, false)
+      let receivedPermRequest: PermissionRequestOutput | undefined
+      await wallet.connect((msg) => {
+        if (msg.type === BeaconMessageType.PermissionRequest) {
+          receivedPermRequest = msg
+        }
+      })
+      await transport.deliver(makePermissionRequest('perm-req-1', 'sender-perm-1'), {
+        origin: Origin.P2P,
+        id: 'pk-perm-1'
+      })
+      expect(receivedPermRequest).toBeDefined()
+      await wallet.respondPermission(receivedPermRequest!, { publicKey: validEdpk })
+
+      expect(notifications).toHaveLength(4)
+      expect(notifications[3]).toEqual([
+        expect.objectContaining({ senderId: 'sender-perm-1', publicKey: validEdpk })
+      ])
+
+      await wallet.removeAllPermissions()
+      expect(notifications).toHaveLength(5)
+      expect(notifications[4]).toEqual([])
+
+      // 5. storageCleared notifies listeners with []
+      await storage.notifyStorageChanged({
+        eventType: 'storageCleared',
+        key: null,
+        oldValue: null,
+        newValue: null
+      })
+      expect(notifications).toHaveLength(6)
+      expect(notifications[5]).toEqual([])
+
+      // 6. Unsubscribe stops notifications
+      unsubThrowing()
+      unsub1()
+      await storage.notifyStorageChanged({
+        eventType: 'entryModified',
+        key: storage.getPrefixedKey(StorageKey.PERMISSION_LIST),
+        oldValue: JSON.stringify([]),
+        newValue: JSON.stringify([samplePermission])
+      })
+      expect(notifications).toHaveLength(6)
     })
   })
 })
