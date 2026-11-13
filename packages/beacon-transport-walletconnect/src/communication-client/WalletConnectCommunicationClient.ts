@@ -4,6 +4,7 @@ import {
   Serializer,
   ClientEvents,
   Logger,
+  reportDiagnostic,
   WCStorage,
   SDK_VERSION
 } from '@ecadlabs/beacon-core'
@@ -1164,7 +1165,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       return
     }
     logger.warn('init')
-    this.disconnectionEvents.size && this.disconnectionEvents.clear()
+    this.disconnectionEvents.clear()
 
     if (forceNewConnection) {
       await this.closePairings()
@@ -1533,7 +1534,12 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         this.getTezosNamespace(event.params.namespaces).accounts,
         session
       ).catch((error: unknown) =>
-        logger.warn('session_update active account', getErrorDiagnostic(error))
+        reportDiagnostic({
+          level: 'warn',
+          service: 'WalletConnectCommunicationClient',
+          method: 'session_update active account',
+          args: [getErrorDiagnostic(error)]
+        })
       )
     })
 
@@ -1626,67 +1632,65 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       this.session === session &&
       this.requestGeneration === sessionGeneration &&
       this.accountUpdateGeneration === generation
-    try {
+    if (!isCurrent()) {
+      return
+    }
+    if (accounts.length) {
+      const [, chainId, addressOrPbk] = accounts[0].split(':', 3)
+      let publicKey: string | undefined
+
+      if (!isPublicKeySC(addressOrPbk)) {
+        const token = accounts[1] ? accounts[1].split(':', 3)[2] : ''
+        if (isPublicKeySC(token)) {
+          publicKey = token
+        } else {
+          const result = await this.fetchAccounts(
+            session.topic,
+            `${TEZOS_PLACEHOLDER}:${chainId}`
+          )
+          publicKey = result?.find(({ address: _address }) => addressOrPbk === _address)?.pubkey
+        }
+      } else {
+        publicKey = addressOrPbk
+      }
+
       if (!isCurrent()) {
         return
       }
-      if (accounts.length) {
-        const [, chainId, addressOrPbk] = accounts[0].split(':', 3)
-        let publicKey: string | undefined
 
-        if (!isPublicKeySC(addressOrPbk)) {
-          const token = accounts[1] ? accounts[1].split(':', 3)[2] : ''
-          if (isPublicKeySC(token)) {
-            publicKey = token
-          } else {
-            const result = await this.fetchAccounts(
-              session.topic,
-              `${TEZOS_PLACEHOLDER}:${chainId}`
-            )
-            publicKey = result?.find(({ address: _address }) => addressOrPbk === _address)?.pubkey
-          }
-        } else {
-          publicKey = addressOrPbk
-        }
-
-        if (!isCurrent()) {
-          return
-        }
-
-        if (!publicKey) {
-          throw new Error('Public key for the new account not provided')
-        }
-
-        const id = await generateGUID()
-        if (!isCurrent()) {
-          return
-        }
-        this.activeNetwork = chainId
-        this.activeAccountOrPbk = addressOrPbk
-
-        await this.notifySessionUpdate(
-          session,
-          {
-            id,
-            type: BeaconMessageType.ChangeAccountRequest,
-            publicKey,
-            network: { type: chainId as NetworkType },
-            scopes: [PermissionScope.SIGN, PermissionScope.OPERATION_REQUEST],
-            walletType: 'implicit'
-          },
-          isCurrent
-        )
-      } else {
-        const response = await this.getPermissionResponse(
-          session,
-          {
-            type: this.wcOptions.network
-          },
-          'session_update'
-        )
-        await this.notifySessionUpdate(session, response, isCurrent)
+      if (!publicKey) {
+        throw new Error('Public key for the new account not provided')
       }
-    } catch {}
+
+      const id = await generateGUID()
+      if (!isCurrent()) {
+        return
+      }
+      this.activeNetwork = chainId
+      this.activeAccountOrPbk = addressOrPbk
+
+      await this.notifySessionUpdate(
+        session,
+        {
+          id,
+          type: BeaconMessageType.ChangeAccountRequest,
+          publicKey,
+          network: { type: chainId as NetworkType },
+          scopes: [PermissionScope.SIGN, PermissionScope.OPERATION_REQUEST],
+          walletType: 'implicit'
+        },
+        isCurrent
+      )
+    } else {
+      const response = await this.getPermissionResponse(
+        session,
+        {
+          type: this.wcOptions.network
+        },
+        'session_update'
+      )
+      await this.notifySessionUpdate(session, response, isCurrent)
+    }
   }
 
   private async disconnect(
