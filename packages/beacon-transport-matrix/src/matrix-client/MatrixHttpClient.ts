@@ -3,8 +3,12 @@ import { MatrixRequest, MatrixRequestParams } from './models/api/MatrixRequest'
 
 const logger = new Logger('MatrixHttpClient')
 
-interface HttpOptions {
+export const DEFAULT_HTTP_TIMEOUT_MS = 30_000
+
+export interface HttpOptions {
   accessToken?: string
+  timeoutMs?: number
+  signal?: AbortSignal
 }
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -80,28 +84,46 @@ export class MatrixHttpClient {
     }
 
     const url = this.buildUrl(this.apiUrl(CLIENT_API_R0), endpoint, requestParams)
+    const clientAbortSignal = this.abortController.signal
+    const requestAbortController = new AbortController()
+    const signal = AbortSignal.any(
+      config?.signal
+        ? [clientAbortSignal, requestAbortController.signal, config.signal]
+        : [clientAbortSignal, requestAbortController.signal]
+    )
+    const timeoutMs = config?.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS
+    const timeoutTimer = setTimeout(() => {
+      requestAbortController.abort(new DOMException('Matrix request timed out', 'AbortError'))
+    }, timeoutMs)
+    signal.addEventListener('abort', () => clearTimeout(timeoutTimer), { once: true })
 
-    let response: Response
     try {
-      response = await fetch(url, {
-        method,
-        headers,
-        body: data !== undefined ? JSON.stringify(data) : undefined,
-        signal: this.abortController.signal
-      })
-    } catch (error) {
-      logger.error('send', (error as Error).name, (error as Error).message)
-      throw error
+      let response: Response
+      try {
+        response = await fetch(url, {
+          method,
+          headers,
+          body: data !== undefined ? JSON.stringify(data) : undefined,
+          signal
+        })
+      } catch (error) {
+        if (!config?.signal?.aborted && !clientAbortSignal.aborted) {
+          logger.error('send', (error as Error).name, (error as Error).message)
+        }
+        throw error
+      }
+
+      const payload = await this.parseBody<T>(response)
+
+      if (!response.ok) {
+        logger.error('send', String(response.status), response.statusText, payload)
+        throw payload
+      }
+
+      return payload
+    } finally {
+      clearTimeout(timeoutTimer)
     }
-
-    const payload = await this.parseBody<T>(response)
-
-    if (!response.ok) {
-      logger.error('send', String(response.status), response.statusText, payload)
-      throw payload
-    }
-
-    return payload
   }
 
   private async parseBody<T>(response: Response): Promise<T> {

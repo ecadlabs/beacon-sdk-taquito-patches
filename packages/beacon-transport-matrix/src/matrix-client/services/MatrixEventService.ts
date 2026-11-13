@@ -20,9 +20,12 @@ type MatrixEventType = 'm.room.message'
 
 type CacheKeys = 'sync'
 
+export const SYNC_TIMEOUT_GRACE_MS = 10_000
+
 export interface MatrixSyncOptions {
   syncToken?: string
   pollingTimeout?: number
+  signal?: AbortSignal
 }
 
 /**
@@ -40,14 +43,21 @@ export class MatrixEventService {
    * @param options
    */
   public async sync(accessToken: string, options?: MatrixSyncOptions): Promise<MatrixSyncResponse> {
+    const pollingTimeout = options?.pollingTimeout
+
     return this.withCache('sync', () =>
       this.httpClient.get<MatrixSyncResponse>(
         '/sync',
         {
-          timeout: options ? options.pollingTimeout : undefined,
-          since: options ? options.syncToken : undefined
+          timeout: pollingTimeout,
+          since: options?.syncToken
         },
-        { accessToken }
+        {
+          accessToken,
+          timeoutMs:
+            pollingTimeout !== undefined ? pollingTimeout + SYNC_TIMEOUT_GRACE_MS : undefined,
+          signal: options?.signal
+        }
       )
     )
   }
