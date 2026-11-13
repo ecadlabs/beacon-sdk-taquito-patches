@@ -319,6 +319,22 @@ type PreparedAccountSelection =
       peer: PeerInfoType | undefined
     }
 
+type ReadyAccountSelection = Extract<PreparedAccountSelection, { kind: 'ready' }>
+
+interface PreparedAccountCommit {
+  readonly account: StoredAccountInfo | undefined
+  readonly transition: AbortSignal
+  readonly source: 'local' | 'storage'
+  readonly prepared: ReadyAccountSelection
+  readonly activeAccountAlreadyCleared: boolean
+  readonly hasPendingAccountWrite: boolean
+}
+
+type AccountSelectionPublication = Pick<
+  PreparedAccountCommit,
+  'account' | 'transition' | 'prepared' | 'activeAccountAlreadyCleared'
+>
+
 /**
  * @publicapi
  *
@@ -2266,15 +2282,44 @@ export class DAppClient extends Client {
     if (await this.resetDisconnectedWalletConnectSelection(transition)) {
       return false
     }
-    let prepared = await this.prepareAccountSelection(account, transition, source)
+    const prepared = await this.prepareAccountSelection(account, transition, source)
     if (prepared.kind === 'superseded' || !this.isCurrentAccountTransition(transition)) {
       return false
     }
+
+    return this.persistPreparedAccountSelection({
+      account,
+      transition,
+      source,
+      prepared,
+      activeAccountAlreadyCleared,
+      hasPendingAccountWrite
+    })
+  }
+
+  /**
+   * Filter out stale account transitions before committing transport selection.
+   * Observe active transport adapters whenever storage writes interleave.
+   * Reconcile replacement adapters before publishing the selected account.
+   * Keep active-account notifications deferred until the ready state is committed.
+   */
+  private async persistPreparedAccountSelection(selection: PreparedAccountCommit): Promise<boolean> {
+    const {
+      account,
+      transition,
+      source,
+      activeAccountAlreadyCleared,
+      hasPendingAccountWrite
+    } = selection
+    let prepared = selection.prepared
     if (source === 'local' && (!activeAccountAlreadyCleared || hasPendingAccountWrite)) {
       await this.persistActiveAccount(account, transition)
     }
     if (account) {
       // A role change can retire the prepared adapter while the account write is pending.
+      // A passive follower that clones leader state without contributing to liveness
+      // or transport maintenance cannot self-heal when an adapter is retired mid-write;
+      // re-run preparation here so upstream still absorbs the recovery cost cleanly.
       while (true) {
         await this.initialization.waitForTeardown()
         if (!this.isCurrentAccountTransition(transition)) {
@@ -2283,15 +2328,31 @@ export class DAppClient extends Client {
         if (prepared.transport === this.selectAccountTransport(account)) {
           break
         }
-        prepared = await this.prepareAccountSelection(account, transition, source)
-        if (prepared.kind === 'superseded') {
+        const replacement = await this.prepareAccountSelection(account, transition, source)
+        if (replacement.kind === 'superseded') {
           return false
         }
+        prepared = replacement
       }
     }
     if (!this.isCurrentAccountTransition(transition)) {
       return false
     }
+
+    return this.publishPreparedAccountSelection({
+      account,
+      transition,
+      prepared,
+      activeAccountAlreadyCleared
+    })
+  }
+
+  private async publishPreparedAccountSelection({
+    account,
+    transition,
+    prepared,
+    activeAccountAlreadyCleared
+  }: AccountSelectionPublication): Promise<boolean> {
     if (!activeAccountAlreadyCleared) {
       this.resolveActiveAccount(account)
       this.activeAccountNotificationPending = true
