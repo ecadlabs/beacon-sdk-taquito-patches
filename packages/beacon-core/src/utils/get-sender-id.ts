@@ -1,5 +1,6 @@
 import { hash } from '@stablelib/blake2b'
 import bs58check from 'bs58check'
+import { reportDiagnostic } from './Logger'
 
 const isHex = (str: string): boolean => /^[A-F0-9]+$/i.test(str)
 
@@ -12,8 +13,12 @@ const isHex = (str: string): boolean => /^[A-F0-9]+$/i.test(str)
  */
 export const getSenderId = async (publicKey: string): Promise<string> => {
   if (!isHex(publicKey)) {
-    // eslint-disable-next-line no-console -- Keep invalid public key diagnostics visible without debug logging.
-    console.error('PublicKey needs to be in hex format!')
+    reportDiagnostic({
+      level: 'error',
+      service: 'getSenderId',
+      method: 'validatePublicKey',
+      args: ['PublicKey needs to be in hex format!']
+    })
   }
 
   const buffer = Buffer.from(hash(Buffer.from(publicKey, 'hex'), 5))

@@ -8,6 +8,7 @@ import {
 } from '@ecadlabs/beacon-utils'
 import { PostMessagePairingRequest, PostMessagePairingResponse } from '@ecadlabs/beacon-types'
 import { BEACON_VERSION } from '../../constants'
+import { reportDiagnostic } from '../../utils/Logger'
 import { CommunicationClient } from './CommunicationClient'
 
 /**
@@ -26,8 +27,14 @@ export abstract class MessageBasedClient extends CommunicationClient {
     keyPair: KeyPair
   ) {
     super(keyPair)
-    // eslint-disable-next-line no-console -- Surface detached communication initialization failures without debug logging.
-    this.init().catch(console.error)
+    this.init().catch((error: unknown) =>
+      reportDiagnostic({
+        level: 'error',
+        service: 'MessageBasedClient',
+        method: 'init',
+        args: [error]
+      })
+    )
   }
 
   /**

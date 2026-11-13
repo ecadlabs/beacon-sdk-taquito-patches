@@ -9,6 +9,7 @@ import { AnalyticsInterface, Storage, StorageKey } from '@ecadlabs/beacon-types'
 import { SDK_VERSION } from '../../constants'
 import { windowRef } from '../../MockWindow'
 import { MockAnalytics } from '../../MockAnalytics'
+import { reportDiagnostic } from '../../utils/Logger'
 import { BeaconClientOptions } from './BeaconClientOptions'
 
 /**
@@ -68,16 +69,26 @@ export abstract class BeaconClient {
 
     // TODO: This is a temporary "workaround" to prevent users from creating multiple Client instances
     if (windowRef.beaconCreatedClientInstance) {
-      // eslint-disable-next-line no-console -- Report competing client instances even when debug logging is disabled.
-      console.error(
-        '[BEACON] It looks like you created multiple Beacon SDK Client instances. This can lead to problems. Only create one instance and re-use it everywhere.'
-      )
+      reportDiagnostic({
+        level: 'error',
+        service: 'BeaconClient',
+        method: 'constructor',
+        args: [
+          '[BEACON] It looks like you created multiple Beacon SDK Client instances. This can lead to problems. Only create one instance and re-use it everywhere.'
+        ]
+      })
     } else {
       windowRef.beaconCreatedClientInstance = true
     }
 
-    // eslint-disable-next-line no-console -- Surface detached constructor initialization failures without debug logging.
-    this.initSDK().catch(console.error)
+    this.initSDK().catch((error: unknown) =>
+      reportDiagnostic({
+        level: 'error',
+        service: 'BeaconClient',
+        method: 'initSDK',
+        args: [error]
+      })
+    )
   }
 
   /**
@@ -92,11 +103,25 @@ export abstract class BeaconClient {
    * This method initializes the SDK by setting some values in the storage and generating a keypair.
    */
   protected async initSDK(): Promise<void> {
-    // eslint-disable-next-line no-console -- Surface detached SDK version persistence failures without debug logging.
-    this.storage.set(StorageKey.BEACON_SDK_VERSION, SDK_VERSION).catch(console.error)
+    this.storage
+      .set(StorageKey.BEACON_SDK_VERSION, SDK_VERSION)
+      .catch((error: unknown) =>
+        reportDiagnostic({
+          level: 'error',
+          service: 'BeaconClient',
+          method: 'persistSDKVersion',
+          args: [error]
+        })
+      )
 
-    // eslint-disable-next-line no-console -- Surface detached SDK identity initialization failures without debug logging.
-    this.loadOrCreateBeaconSecret().catch(console.error)
+    this.loadOrCreateBeaconSecret().catch((error: unknown) =>
+      reportDiagnostic({
+        level: 'error',
+        service: 'BeaconClient',
+        method: 'loadOrCreateBeaconSecret',
+        args: [error]
+      })
+    )
 
     return this.keyPair.then((keyPair) => {
       this._beaconId.resolve(toHex(keyPair.publicKey))

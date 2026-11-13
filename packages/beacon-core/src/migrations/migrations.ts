@@ -1,5 +1,6 @@
 import { Storage, StorageKey } from '@ecadlabs/beacon-types'
 import { SDK_VERSION } from '../constants'
+import { reportDiagnostic } from '../utils/Logger'
 import { migrate_0_7_0 } from './migrate-0.7.0'
 
 const migrations: [string, (storage: Storage) => void | Promise<void>][] = [
@@ -26,8 +27,12 @@ export const migrate = async (storage: Storage): Promise<void> => {
       try {
         await migrationMethod(storage)
       } catch (migrationError) {
-        // eslint-disable-next-line no-console -- Keep caught migration failures visible without debug logging.
-        console.log(`Migration for ${version} failed!`, migrationError)
+        reportDiagnostic({
+          level: 'log',
+          service: 'Migration',
+          method: 'migrate',
+          args: [`Migration for ${version} failed!`, migrationError]
+        })
       }
     }
   }
