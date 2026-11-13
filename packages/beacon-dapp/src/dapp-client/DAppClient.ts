@@ -4171,34 +4171,15 @@ export class DAppClient extends Client {
 
     const selectedPeer = peer ? peer : await this.getPeer(selectedAccount)
 
-    let walletInfo: WalletInfo | undefined
+    let metadata: AppMetadata | undefined
     if (selectedAccount) {
-      walletInfo = await this.appMetadataManager.getAppMetadata(selectedAccount.senderId)
+      metadata = await this.appMetadataManager.getAppMetadata(selectedAccount.senderId)
     }
 
     let storageWallet
 
     if (readFromStorage) {
       storageWallet = await this.getWalletInfoFromStorage()
-    }
-
-    if (!walletInfo?.name.trim()) {
-      walletInfo = {
-        name:
-          selectedPeer?.name.trim() || storageWallet?.name?.trim() || storageWallet?.key.trim() || '',
-        icon: selectedPeer?.icon ?? storageWallet?.icon,
-        type: storageWallet?.type
-      }
-
-      if (updateStorage) {
-        this.updateStorageWallet(walletInfo).catch((error: unknown) =>
-          logger.warn('updateStorageWallet', error)
-        )
-      }
-    }
-
-    if (!walletInfo.name.trim()) {
-      return walletInfo
     }
 
     const lowerCaseCompare = (str1?: string, str2?: string): boolean => {
@@ -4209,7 +4190,48 @@ export class DAppClient extends Client {
       return false
     }
 
-    const getOrgName = (name: string) => name.split(/[_\s]+/)[0]
+    const getOrgName = (name?: string) => name?.trim().split(/[_\s]+/)[0]
+
+    const inferredPeerType: WalletInfo['type'] =
+      selectedAccount?.origin.type === Origin.EXTENSION ||
+      selectedPeer?.type === 'postmessage-pairing-response' ||
+      selectedPeer?.type === 'postmessage-pairing-request'
+        ? 'extension'
+        : undefined
+
+    const metadataName = metadata?.name.trim() ? metadata.name : undefined
+    const peerName = selectedPeer?.name.trim() || undefined
+    const storageWalletName = storageWallet?.name?.trim() || storageWallet?.key.trim() || undefined
+    const usedStorageWalletForName = !metadataName && !peerName && Boolean(storageWalletName)
+    const resolvedName = metadataName ?? peerName ?? storageWalletName ?? ''
+
+    const matchingStorageWallet =
+      storageWallet &&
+      (usedStorageWalletForName ||
+        lowerCaseCompare(selectedAccount?.walletKey?.trim(), storageWallet.key.trim()) ||
+        lowerCaseCompare(getOrgName(storageWallet.key), getOrgName(resolvedName)) ||
+        lowerCaseCompare(getOrgName(storageWallet.name), getOrgName(resolvedName)))
+        ? storageWallet
+        : undefined
+
+    const resolvedIcon = metadata?.icon ?? selectedPeer?.icon ?? matchingStorageWallet?.icon
+    const resolvedType = inferredPeerType ?? matchingStorageWallet?.type
+
+    const walletInfo: WalletInfo = {
+      name: resolvedName,
+      ...(resolvedIcon ? { icon: resolvedIcon } : {}),
+      ...(resolvedType ? { type: resolvedType } : {})
+    }
+
+    if (!metadataName && updateStorage) {
+      this.updateStorageWallet(walletInfo).catch((error: unknown) =>
+        logger.warn('updateStorageWallet', error)
+      )
+    }
+
+    if (!walletInfo.name.trim()) {
+      return walletInfo
+    }
 
     const apps: AppBase[] = [
       ...getiOSList(),
@@ -4257,7 +4279,9 @@ export class DAppClient extends Client {
       return { app: undefined, type: undefined }
     }
 
-    const { app, type } = storageWallet ? appTypeMap[storageWallet.type] : defaultType()
+    const preferredType = inferredPeerType ?? matchingStorageWallet?.type
+    const preferredMatch = preferredType ? appTypeMap[preferredType] : undefined
+    const { app, type } = preferredMatch?.app ? preferredMatch : defaultType()
 
     if (app) {
       let deeplink: string | undefined
@@ -4267,11 +4291,14 @@ export class DAppClient extends Client {
         deeplink = (app as App).deepLink
       }
 
+      const finalIcon = app.logo ?? walletInfo.icon
+      const finalType = inferredPeerType ?? type ?? walletInfo.type
+
       return {
-        name: app?.name ?? walletInfo.name,
-        icon: app?.logo ?? walletInfo.icon,
-        deeplink,
-        type
+        name: app.name ?? walletInfo.name,
+        ...(finalIcon ? { icon: finalIcon } : {}),
+        ...(deeplink ? { deeplink } : {}),
+        ...(finalType ? { type: finalType } : {})
       }
     }
 

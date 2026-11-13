@@ -11,7 +11,7 @@ import {
 import type { WalletInfo as PublicWalletInfo } from '../../src'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { BeaconEvent } from '../../src/events'
-import { getWebList } from '@ecadlabs/beacon-ui'
+import { getExtensionList, getWebList } from '@ecadlabs/beacon-ui'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { DappPostMessageTransport } from '../../src/transports/DappPostMessageTransport'
 import { DappP2PTransport } from '../../src/transports/DappP2PTransport'
@@ -46,7 +46,7 @@ vi.mock('@ecadlabs/beacon-ui', async (importOriginal) => ({
   getWebList: vi.fn(() => []),
   getiOSList: () => [],
   getDesktopList: () => [],
-  getExtensionList: () => [],
+  getExtensionList: vi.fn(() => []),
   isBrowser: () => true,
   isDesktop: () => false
 }))
@@ -91,6 +91,7 @@ describe('DAppClient.getActiveWalletInfo', () => {
       configurable: true
     })
     vi.mocked(getWebList).mockReturnValue([])
+    vi.mocked(getExtensionList).mockReturnValue([])
     storage = new LocalStorage('active-wallet-info')
     client = new DAppClient({ name: 'Wallet info tests', storage, disableDefaultEvents: true })
     await client.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, () => {})
@@ -483,6 +484,140 @@ describe('DAppClient.getActiveWalletInfo', () => {
     await storage.set(StorageKey.APP_METADATA_LIST, [
       { senderId: account.senderId, name: 'Example' }
     ])
+    await expect(client.getActiveWalletInfo()).resolves.toEqual({
+      name: 'Example Wallet',
+      icon: 'https://example.test/logo',
+      deeplink: 'https://example.test/mainnet',
+      type: 'web'
+    })
+  })
+
+  it('backfills icon from the matching peer, infers extension type from Origin.EXTENSION, and strips senderId when appMetadata has no icon', async () => {
+    selectAccount({ ...account, origin: { ...account.origin, type: Origin.EXTENSION } })
+    const { post } = await installPeers()
+    await post.addPeer({ ...peer, type: 'postmessage-pairing-response' })
+    await storage.set(StorageKey.LAST_SELECTED_WALLET, storedWallet)
+    await storage.set(StorageKey.APP_METADATA_LIST, [
+      { senderId: account.senderId, name: 'Custom Extension' }
+    ])
+
+    const info = await client.getActiveWalletInfo()
+    expect(info).toEqual({
+      name: 'Custom Extension',
+      icon: 'https://peer.test/icon',
+      type: 'extension'
+    })
+    expect(info).not.toHaveProperty('senderId')
+  })
+
+  it('backfills icon and type from a matching LAST_SELECTED_WALLET when appMetadata and peer have no icon', async () => {
+    selectAccount()
+    const { p2p } = await installPeers()
+    await p2p.addPeer({ ...peer, icon: undefined })
+    await storage.set(StorageKey.LAST_SELECTED_WALLET, {
+      key: 'custom_mobile',
+      name: 'Custom Wallet',
+      icon: 'https://stored-custom.test/icon',
+      type: 'mobile'
+    })
+    await storage.set(StorageKey.APP_METADATA_LIST, [
+      { senderId: account.senderId, name: 'Custom Wallet' }
+    ])
+
+    await expect(client.getActiveWalletInfo()).resolves.toEqual({
+      name: 'Custom Wallet',
+      icon: 'https://stored-custom.test/icon',
+      type: 'mobile'
+    })
+  })
+
+  it('selects the extension registry entry for an Origin.EXTENSION account even when web entry exists and LAST_SELECTED_WALLET is unrelated', async () => {
+    selectAccount({ ...account, origin: { ...account.origin, type: Origin.EXTENSION } })
+    vi.mocked(getWebList).mockReturnValue([
+      {
+        key: 'multi_web',
+        name: 'Multi Web Wallet',
+        shortName: 'Multi',
+        color: '#000',
+        logo: 'https://multi.test/web-logo',
+        links: { [NetworkType.MAINNET]: 'https://multi.test/mainnet' }
+      }
+    ])
+    vi.mocked(getExtensionList).mockReturnValue([
+      {
+        key: 'multi_chrome',
+        id: 'multi-ext-id',
+        name: 'Multi Extension Wallet',
+        shortName: 'Multi',
+        color: '#000',
+        logo: 'https://multi.test/ext-logo',
+        link: 'https://multi.test/extension'
+      }
+    ])
+    await storage.set(StorageKey.LAST_SELECTED_WALLET, storedWallet)
+    await storage.set(StorageKey.APP_METADATA_LIST, [
+      { senderId: account.senderId, name: 'Multi Wallet' }
+    ])
+
+    await expect(client.getActiveWalletInfo()).resolves.toEqual({
+      name: 'Multi Extension Wallet',
+      icon: 'https://multi.test/ext-logo',
+      type: 'extension'
+    })
+  })
+
+  it('ignores an unrelated LAST_SELECTED_WALLET and falls back to defaultType() when enriching a known wallet', async () => {
+    selectAccount()
+    vi.mocked(getWebList).mockReturnValue([
+      {
+        key: 'example_web',
+        name: 'Example Wallet',
+        shortName: 'Example',
+        color: '#000',
+        logo: 'https://example.test/logo',
+        links: { [NetworkType.MAINNET]: 'https://example.test/mainnet' }
+      }
+    ])
+    await storage.set(StorageKey.LAST_SELECTED_WALLET, {
+      key: 'other_mobile',
+      name: 'Other Mobile Wallet',
+      icon: 'https://other.test/icon',
+      type: 'mobile'
+    })
+    await storage.set(StorageKey.APP_METADATA_LIST, [
+      { senderId: account.senderId, name: 'Example Wallet' }
+    ])
+
+    await expect(client.getActiveWalletInfo()).resolves.toEqual({
+      name: 'Example Wallet',
+      icon: 'https://example.test/logo',
+      deeplink: 'https://example.test/mainnet',
+      type: 'web'
+    })
+  })
+
+  it('falls back to defaultType() when matching LAST_SELECTED_WALLET has a type not present in the wallet registry entries', async () => {
+    selectAccount()
+    vi.mocked(getWebList).mockReturnValue([
+      {
+        key: 'example_web',
+        name: 'Example Wallet',
+        shortName: 'Example',
+        color: '#000',
+        logo: 'https://example.test/logo',
+        links: { [NetworkType.MAINNET]: 'https://example.test/mainnet' }
+      }
+    ])
+    await storage.set(StorageKey.LAST_SELECTED_WALLET, {
+      key: 'example_ios',
+      name: 'Example Wallet',
+      icon: 'https://example.test/stored-icon',
+      type: 'mobile'
+    })
+    await storage.set(StorageKey.APP_METADATA_LIST, [
+      { senderId: account.senderId, name: 'Example Wallet' }
+    ])
+
     await expect(client.getActiveWalletInfo()).resolves.toEqual({
       name: 'Example Wallet',
       icon: 'https://example.test/logo',
