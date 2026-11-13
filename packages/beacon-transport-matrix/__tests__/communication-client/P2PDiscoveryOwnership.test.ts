@@ -1,5 +1,5 @@
 import { setImmediate } from 'node:timers/promises'
-import { LocalStorage } from '@ecadlabs/beacon-core'
+import { ClientEvents, LocalStorage } from '@ecadlabs/beacon-core'
 import { Regions, StorageKey } from '@ecadlabs/beacon-types'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import { P2PCommunicationClient } from '../../src/communication-client/P2PCommunicationClient'
@@ -65,6 +65,147 @@ describe('Matrix discovery ownership', () => {
     // Drain queued storage events before checking discovery timer disposal.
     await vi.advanceTimersByTimeAsync(0)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('retains stored relay recovery when a relay-change callback throws synchronously', async () => {
+    const { client, storage, fetch } = await create()
+    client.relayServer = ExposedPromise.resolve({
+      server: 'previous.example',
+      timestamp: 1,
+      localTimestamp: Date.now()
+    })
+    await client.getRelayServer()
+    client.relayServer = undefined
+    await storage.set(StorageKey.MATRIX_SELECTED_NODE, relay)
+    const remove = vi.spyOn(storage, 'delete')
+    const status = vi.fn(() => {
+      throw new Error('consumer callback failed')
+    })
+    client.eventHandlers.set(ClientEvents.TRANSPORT_STATUS, status)
+
+    await expect(client.getRelayServer()).resolves.toMatchObject({
+      server: relay,
+      timestamp: 12345
+    })
+
+    expect(status).toHaveBeenCalledTimes(1)
+    expect(status).toHaveBeenCalledWith({ reason: 'relay_changed', relayServer: relay })
+    expect(remove).toHaveBeenCalledWith(StorageKey.MATRIX_SELECTED_NODE)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(client.currentRelayServer).toBe(relay)
+    await expect(storage.get(StorageKey.MATRIX_SELECTED_NODE)).resolves.toBe(relay)
+  })
+
+  it('rejects both discovery callers and permits a successful retry', async () => {
+    const { client, storage, fetch } = await create()
+    const entered = new ExposedPromise<void>()
+    const response = new ExposedPromise<Response>()
+    fetch.mockImplementationOnce(() => {
+      entered.resolve()
+      return response.promise
+    })
+    let settled = 0
+    const observe = (call: ReturnType<P2PCommunicationClient['getRelayServer']>) =>
+      call.then(
+        (value) => {
+          settled += 1
+          return { status: 'resolved', value }
+        },
+        (reason: unknown) => {
+          settled += 1
+          return { status: 'rejected', reason }
+        }
+      )
+    const first = observe(client.getRelayServer())
+    await entered.promise
+    const second = observe(client.getRelayServer())
+    try {
+      response.reject(new Error('offline'))
+      await setImmediate()
+      // Observe settlement before awaiting either caller, so a missing rejection fails promptly.
+      expect(settled).toBe(2)
+      for (const call of [first, second]) {
+        await expect(call).resolves.toMatchObject({
+          status: 'rejected',
+          reason: { message: 'No server responded.' }
+        })
+      }
+      expect(fetch).toHaveBeenCalledTimes(1)
+
+      await expect(client.getRelayServer()).resolves.toEqual({ server: relay, timestamp: 12345 })
+      expect(fetch).toHaveBeenCalledTimes(2)
+      await expect(storage.get(StorageKey.MATRIX_SELECTED_NODE)).resolves.toBe(relay)
+    } finally {
+      response.reject(new Error('offline'))
+      await client.stop()
+    }
+  })
+
+  it('joins replacement discovery after two stale refreshes fail across queued deletions', async () => {
+    const { client, storage, fetch } = await create()
+    client.relayServer = ExposedPromise.resolve({
+      server: 'stale.example',
+      timestamp: 1,
+      localTimestamp: Date.now() - 60_001
+    })
+    const refreshesEntered = new ExposedPromise<void>()
+    const refreshes = [new ExposedPromise<Response>(), new ExposedPromise<Response>()]
+    let refreshCount = 0
+    for (const refresh of refreshes) {
+      fetch.mockImplementationOnce(() => {
+        refreshCount += 1
+        if (refreshCount === 2) refreshesEntered.resolve()
+        return refresh.promise
+      })
+    }
+    const replacementEntered = new ExposedPromise<void>()
+    const replacement = new ExposedPromise<Response>()
+    fetch.mockImplementationOnce(() => {
+      replacementEntered.resolve()
+      return replacement.promise
+    })
+    const releaseFirstDelete = new ExposedPromise<void>()
+    const releaseSecondDelete = new ExposedPromise<void>()
+    const secondDeleteEntered = new ExposedPromise<void>()
+    const remove = storage.delete.bind(storage)
+    let deletions = 0
+    vi.spyOn(storage, 'delete').mockImplementation(async (key) => {
+      if (key === StorageKey.MATRIX_SELECTED_NODE) {
+        deletions += 1
+        if (deletions === 1) await releaseFirstDelete.promise
+        if (deletions === 2) {
+          secondDeleteEntered.resolve()
+          await releaseSecondDelete.promise
+        }
+      }
+      await remove(key)
+    })
+    const calls = [client.getRelayServer(), client.getRelayServer()]
+    // Keep failures observable while the scheduled storage operations are held.
+    const outcomes = Promise.allSettled(calls)
+    try {
+      await refreshesEntered.promise
+      for (const refresh of refreshes) refresh.reject(new Error('stale relay offline'))
+      releaseFirstDelete.resolve()
+      await Promise.all([replacementEntered.promise, secondDeleteEntered.promise])
+      releaseSecondDelete.resolve()
+      await setImmediate()
+      expect(fetch).toHaveBeenCalledTimes(3)
+      replacement.resolve(relayResponse())
+
+      await expect(outcomes).resolves.toEqual([
+        { status: 'fulfilled', value: { server: relay, timestamp: 12345 } },
+        { status: 'fulfilled', value: { server: relay, timestamp: 12345 } }
+      ])
+      await expect(storage.get(StorageKey.MATRIX_SELECTED_NODE)).resolves.toBe(relay)
+    } finally {
+      for (const refresh of refreshes) refresh.reject(new Error('stale relay offline'))
+      releaseFirstDelete.resolve()
+      releaseSecondDelete.resolve()
+      replacement.resolve(relayResponse())
+      await client.stop()
+      await outcomes
+    }
   })
 
   it('aborts held discovery on stop and leaves a replacement unchanged after its late response', async () => {
