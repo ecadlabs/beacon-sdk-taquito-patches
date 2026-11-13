@@ -2327,6 +2327,7 @@ export class DAppClient extends Client {
     }
 
     if (!activeAccountAlreadyCleared && !this.isGetActiveAccountHandled) {
+      // eslint-disable-next-line no-console -- Keep account subscription migration guidance visible without debug logging.
       console.warn(
         `An active account has been received, but no active subscription was found for BeaconEvent.ACTIVE_ACCOUNT_SET.
         For more information, visit: https://docs.walletbeacon.io/guides/migration-guide`
@@ -3718,6 +3719,7 @@ export class DAppClient extends Client {
     // Add error message for deprecation of network
     // TODO: Remove when we remove deprecated preferredNetwork
     if (input.network !== undefined && this.network.type !== input.network?.type) {
+      // eslint-disable-next-line no-console -- Warn about deprecated broadcast network mismatches without debug logging.
       console.error(
         '[BEACON] The network specified in the DAppClient constructor does not match the network set in the broadcast request. Please set the network in the constructor. Setting it during the Broadcast Request is deprecated.'
       )

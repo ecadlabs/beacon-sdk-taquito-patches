@@ -26,6 +26,7 @@ export const migrate = async (storage: Storage): Promise<void> => {
       try {
         await migrationMethod(storage)
       } catch (migrationError) {
+        // eslint-disable-next-line no-console -- Keep caught migration failures visible without debug logging.
         console.log(`Migration for ${version} failed!`, migrationError)
       }
     }

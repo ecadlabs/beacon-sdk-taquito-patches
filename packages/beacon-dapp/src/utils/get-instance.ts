@@ -13,6 +13,7 @@ export const getDAppClientInstance = (config: DAppClientOptions, reset?: boolean
     // sync API — kick off cleanup but surface failures rather than swallow.
     _instance
       .disconnect()
+      // eslint-disable-next-line no-console -- Surface detached singleton reset cleanup failures without debug logging.
       .catch((error) => console.error('[DAppClient] disconnect on reset failed', error))
     _instance = undefined
   }

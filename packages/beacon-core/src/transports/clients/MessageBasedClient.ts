@@ -26,6 +26,7 @@ export abstract class MessageBasedClient extends CommunicationClient {
     keyPair: KeyPair
   ) {
     super(keyPair)
+    // eslint-disable-next-line no-console -- Surface detached communication initialization failures without debug logging.
     this.init().catch(console.error)
   }
 
