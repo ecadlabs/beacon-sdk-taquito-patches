@@ -182,8 +182,9 @@ export class PostMessageClient extends MessageBasedClient {
 
         if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
           try {
+            const keyPair = this.getKeyPair()
             const pairingResponse: PostMessagePairingResponse = JSON.parse(
-              await openCryptobox(payload, this.keyPair!.publicKey, this.keyPair!.secretKey)
+              await openCryptobox(payload, keyPair.publicKey, keyPair.secretKey)
             )
 
             if (

@@ -1302,7 +1302,7 @@ export class P2PCommunicationClient extends CommunicationClient {
   ): Promise<void> {
     const session = this.captureSession()
     this.assertSession(session)
-    const sharedKey = await this.createCryptoBoxClient(peer.publicKey, this.keyPair!)
+    const sharedKey = await this.createCryptoBoxClient(peer.publicKey, this.getKeyPair())
     this.assertSession(session)
     const recipientHash = await getHexHash(Buffer.from(peer.publicKey, 'hex'))
     this.assertSession(session)

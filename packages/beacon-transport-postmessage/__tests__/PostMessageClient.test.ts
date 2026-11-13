@@ -32,6 +32,9 @@ vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
 
   class MessageBasedClient {
     public keyPair: any
+    protected getKeyPair() {
+      return this.keyPair
+    }
     async getPairingRequestInfo() {
       return { id: 'id1' }
     }
