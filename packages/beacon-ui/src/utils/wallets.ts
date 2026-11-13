@@ -105,21 +105,15 @@ export function mergeWallets(wallets: Wallet[]): MergedWallet[] {
   const mergedWallets: MergedWallet[] = []
   for (let i = 0; i < wallets.length; i++) {
     const wallet = wallets[i]
-    const mergedWalletsNames = mergedWallets.map((_wallet) => _wallet.name)
-    if (mergedWalletsNames.includes(wallet.name)) {
-      const index = mergedWallets.findIndex((_wallet) => _wallet.name === wallet.name)
-      if (index < 0) {
-        console.error('There should be a wallet')
+    const existing = mergedWallets.find((entry) => entry.name === wallet.name)
+    if (existing) {
+      if (!existing.descriptions.includes(wallet.description)) {
+        setWallet(existing, wallet)
+        existing.descriptions.push(wallet.description)
       }
-      if (!mergedWallets[index].descriptions.includes(wallet.description)) {
-        setWallet(mergedWallets[index], wallet)
-        mergedWallets[index].descriptions.push(wallet.description)
-      }
-      mergedWallets[index].types.push(wallet.type)
-      mergedWallets[index].deepLink = wallet.deepLink
-      mergedWallets[index].firefoxId = wallet.key.includes('firefox')
-        ? wallet.id
-        : mergedWallets[index].firefoxId
+      existing.types.push(wallet.type)
+      existing.deepLink = wallet.deepLink
+      existing.firefoxId = wallet.key.includes('firefox') ? wallet.id : existing.firefoxId
     } else {
       const newWallet: MergedWallet = {
         ...wallet,

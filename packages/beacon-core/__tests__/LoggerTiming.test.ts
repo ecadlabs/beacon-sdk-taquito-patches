@@ -3,7 +3,7 @@
 import { Console } from 'node:console'
 import { Writable } from 'node:stream'
 import { getDebugEnabled, setDebugEnabled } from '../src/debug'
-import { InternalLogger, Logger, LoggerInterface, setLogger } from '../src/utils/Logger'
+import { InternalLogger, Logger, LoggerInterface, getLogger, setLogger } from '../src/utils/Logger'
 
 type TimingCall =
   | { kind: 'timer'; start: boolean; label: string | undefined }
@@ -88,5 +88,27 @@ describe('logger timing', () => {
 
     expect(console.timeLog).not.toHaveBeenCalled()
     expect(output).toEqual([])
+  })
+
+  it('keeps the shared logger facade attached to the current custom logger', () => {
+    const facade = getLogger()
+    const first = vi.fn()
+    const second = vi.fn()
+    const custom: LoggerInterface = {
+      debug: () => undefined,
+      log: first,
+      warn: () => undefined,
+      error: () => undefined,
+      time: () => undefined,
+      timeLog: () => undefined
+    }
+    const payload = { status: 'ready' }
+    setLogger(custom)
+    facade.log('first', payload)
+    setLogger({ ...custom, log: second })
+    expect(getLogger()).toBe(facade)
+    facade.log('second', payload)
+    expect(first).toHaveBeenCalledExactlyOnceWith('', 'first', [payload])
+    expect(second).toHaveBeenCalledExactlyOnceWith('', 'second', [payload])
   })
 })

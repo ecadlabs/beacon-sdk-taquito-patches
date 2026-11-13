@@ -13,8 +13,6 @@ export interface LoggerInterface {
  * The logger that is used internally
  */
 export class InternalLogger implements LoggerInterface {
-  constructor() {}
-
   public debug(name: string, method: string, ...args: unknown[]): void {
     this._log('debug', name, method, args)
   }
@@ -32,7 +30,11 @@ export class InternalLogger implements LoggerInterface {
   }
 
   public time(start: boolean, label?: string | undefined): void {
-    start ? console.time(label) : console.timeEnd(label)
+    if (start) {
+      console.time(label)
+    } else {
+      console.timeEnd(label)
+    }
   }
 
   public timeLog(method: string, ...args: unknown[]): void {
@@ -78,12 +80,10 @@ export class InternalLogger implements LoggerInterface {
         console.log(...data)
     }
     console.groupEnd()
-
-    // echo.group(echo.asWarning(`[BEACON] ${message}`))
-    // echo.log(echo.asWarning(`[${this.name}]`), echo.asAlert(`(${method})`), ...args)
-    // echo.groupEnd()
   }
 }
+
+let logger: LoggerInterface = new InternalLogger()
 
 export class Logger implements LoggerInterface {
   private readonly name: string
@@ -118,7 +118,6 @@ export class Logger implements LoggerInterface {
 }
 
 const loggerWrapper: LoggerInterface = new Logger('')
-let logger: LoggerInterface = new InternalLogger()
 
 export const setLogger = (newLogger: LoggerInterface): void => {
   logger = newLogger

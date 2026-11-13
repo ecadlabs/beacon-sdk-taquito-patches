@@ -19,16 +19,12 @@ export const getQrData = (payload: string, height?: number, width?: number): str
       'The size of the payload in the QR code is quite long and some devices might not be able to scan it anymore. To reduce the QR size, try using a shorter "name", "appUrl" and "iconUrl"'
     )
   }
-  try {
-    return render(create(payload, { errorCorrectionLevel: 'L' }), {
-      width: width ?? height,
-      color: {
-        dark: '#000000ff',
-        light: '#ffffffff'
-      }
-    })
-  } catch (qrError) {
-    console.error('error', qrError)
-    throw qrError
-  }
+
+  return render(create(payload, { errorCorrectionLevel: 'L' }), {
+    width: width ?? height,
+    color: {
+      dark: '#000000ff',
+      light: '#ffffffff'
+    }
+  })
 }

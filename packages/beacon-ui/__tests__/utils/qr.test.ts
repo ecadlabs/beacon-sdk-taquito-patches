@@ -20,4 +20,14 @@ describe('getQrData', () => {
 
     expect(svg).toContain('width="200"')
   })
+
+  it('propagates encoding errors without separately logging the payload failure', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(() => getQrData('x'.repeat(20_000))).toThrow()
+      expect(error).not.toHaveBeenCalled()
+    } finally {
+      error.mockRestore()
+    }
+  })
 })

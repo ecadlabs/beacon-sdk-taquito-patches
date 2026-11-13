@@ -275,4 +275,39 @@ describe('P2PTransport canceled startup', () => {
       await Promise.all([oldTransport.disconnect(), newTransport.disconnect()])
     }
   })
+
+  it('warns about identity recovery without logging the private seed', async () => {
+    const storage = new LocalStorage('deactivated-warning')
+    const seed = 'private-recovery-seed'
+    const transport = new P2PTransport(
+      'Recovering',
+      await getKeypairFromSeed('old-identity'),
+      storage,
+      {},
+      StorageKey.TRANSPORT_P2P_PEERS_DAPP
+    )
+    vi.mocked(generateGUID).mockResolvedValueOnce(seed)
+    vi.spyOn(P2PCommunicationClient.prototype, 'getRelayServer').mockResolvedValue({
+      server: 'relay.example',
+      timestamp: 12345
+    })
+    vi.spyOn(MatrixUserService.prototype, 'login')
+      .mockRejectedValueOnce({ errcode: 'M_USER_DEACTIVATED' })
+      .mockResolvedValue(loginResponse('recovered-token'))
+    vi.spyOn(MatrixEventService.prototype, 'sync').mockResolvedValue({
+      next_batch: 'recovered-sync',
+      rooms: {}
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await expect(transport.connect()).rejects.toThrow('The account is deactivated.')
+      await expect(storage.get(StorageKey.BEACON_SDK_SECRET_SEED)).resolves.toBe(seed)
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        '[BEACON] The Matrix user was deactivated. Rotating the SDK identity.'
+      )
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(seed)
+    } finally {
+      await transport.disconnect()
+    }
+  })
 })

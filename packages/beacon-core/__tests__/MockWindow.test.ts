@@ -49,6 +49,7 @@ describe('mock window listeners', () => {
     expect(listener).toHaveBeenCalledTimes(1)
     expect(listener).toHaveBeenCalledWith({ data: payload })
     expect(listener.mock.calls[0][0].data).toBe(payload)
+    expect(console.log).not.toHaveBeenCalled()
   })
 
   it('still calls other listeners when a listener removes itself during dispatch', () => {

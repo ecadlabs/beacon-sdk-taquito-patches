@@ -1675,7 +1675,8 @@ export class P2PCommunicationClient extends CommunicationClient {
       return
     }
 
-    console.warn(`The current user ID has been deactivated. Generating new ID: ${newSeed}`)
+    // eslint-disable-next-line no-console -- Identity recovery must remain visible with debug logging disabled.
+    console.warn('[BEACON] The Matrix user was deactivated. Rotating the SDK identity.')
 
     await this.storage.set(StorageKey.BEACON_SDK_SECRET_SEED, newSeed)
     if (session !== this.session) {

@@ -9,14 +9,13 @@ interface WindowRef {
   beaconSdkDebugEnabled?: unknown
 }
 
-const cbs: Callback[] = [(_: unknown): void => undefined]
+const cbs: Callback[] = []
 
 /**
  * A mock for postmessage if run in node.js environment
  */
 let windowRef: WindowRef = {
   postMessage: (message: unknown): void => {
-    console.log('GOT MOCK POST MESSAGE', message)
     cbs.slice().forEach((callbackElement: Callback) => {
       if (cbs.includes(callbackElement)) {
         callbackElement({ data: message })
@@ -41,8 +40,8 @@ try {
   if (typeof window !== 'undefined') {
     windowRef = window
   }
-} catch (windowError) {
-  console.log(`not defined: ${windowError}`)
+} catch {
+  // Keep the Node fallback if the browser window cannot be accessed.
 }
 
 const clearMockWindowState: () => void = (): void => {
