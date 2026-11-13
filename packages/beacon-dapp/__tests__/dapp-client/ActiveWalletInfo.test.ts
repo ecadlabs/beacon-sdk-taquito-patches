@@ -1,5 +1,13 @@
-import { LocalStorage } from '@ecadlabs/beacon-core'
-import { AccountInfo, NetworkType, Origin, StorageKey, WalletInfo } from '@ecadlabs/beacon-types'
+import { LocalStorage, PeerManager } from '@ecadlabs/beacon-core'
+import {
+  AccountInfo,
+  ExtendedPostMessagePairingResponse,
+  NetworkType,
+  Origin,
+  StorageKey,
+  TransportStatus,
+  WalletInfo
+} from '@ecadlabs/beacon-types'
 import type { WalletInfo as PublicWalletInfo } from '../../src'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { BeaconEvent } from '../../src/events'
@@ -8,6 +16,10 @@ import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { DappPostMessageTransport } from '../../src/transports/DappPostMessageTransport'
 import { DappP2PTransport } from '../../src/transports/DappP2PTransport'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
+import {
+  PeerTestTransport,
+  RecordingPeerClient
+} from '../../../beacon-core/__tests__/helpers/transport-peers'
 import { expectTypeOf } from 'vitest'
 
 vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
@@ -187,6 +199,165 @@ describe('DAppClient.getActiveWalletInfo', () => {
     await expect(client.getActiveWalletInfo()).resolves.toMatchObject({
       name: peer.name,
       icon: peer.icon
+    })
+  })
+
+  it.each([
+    {
+      kind: 'postmessage',
+      storageKey: StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP,
+      origin: Origin.EXTENSION,
+      type: 'postmessage-pairing-response'
+    },
+    {
+      kind: 'p2p',
+      storageKey: StorageKey.TRANSPORT_P2P_PEERS_DAPP,
+      origin: Origin.P2P,
+      type: 'p2p-pairing-request'
+    },
+    {
+      kind: 'walletconnect',
+      storageKey: StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP,
+      origin: Origin.WALLETCONNECT,
+      type: 'walletconnect-pairing-response'
+    }
+  ] as const)(
+    'falls back to $storageKey when transports are uninitialized',
+    async ({ storageKey, origin, type }) => {
+      expect(client['postMessageTransport']).toBeUndefined()
+      expect(client['p2pTransport']).toBeUndefined()
+      expect(client['walletConnectTransport']).toBeUndefined()
+
+      selectAccount({ ...account, origin: { ...account.origin, type: origin } })
+      await storage.set(storageKey, [
+        {
+          ...peer,
+          type,
+          id: 'other-id',
+          publicKey: 'other-key',
+          senderId: 'other-sender',
+          name: 'Wrong Wallet'
+        },
+        { ...peer, type }
+      ])
+      await storage.set(StorageKey.LAST_SELECTED_WALLET, storedWallet)
+
+      await expect(client.getActiveWalletInfo()).resolves.toMatchObject({
+        name: peer.name,
+        icon: peer.icon
+      })
+    }
+  )
+
+  it('falls back to WalletConnect peer storage when walletConnectTransport.getPeers() is empty', async () => {
+    selectAccount({ ...account, origin: { ...account.origin, type: Origin.WALLETCONNECT } })
+    const { wc } = await installPeers()
+    vi.spyOn(wc, 'getPeers').mockResolvedValue([])
+    await storage.set(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP, [
+      { ...peer, type: 'walletconnect-pairing-response' }
+    ])
+    await storage.set(StorageKey.LAST_SELECTED_WALLET, storedWallet)
+
+    await expect(client.getActiveWalletInfo()).resolves.toMatchObject({
+      name: peer.name,
+      icon: peer.icon
+    })
+  })
+
+  it('prefers live walletConnectTransport.getPeers() over stale WalletConnect peer storage', async () => {
+    selectAccount({ ...account, origin: { ...account.origin, type: Origin.WALLETCONNECT } })
+    const { wc } = await installPeers()
+    await wc.addPeer({
+      ...peer,
+      type: 'walletconnect-pairing-response',
+      name: 'Live WC Wallet',
+      icon: 'https://live-wc.test/icon'
+    })
+    await storage.set(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP, [
+      {
+        ...peer,
+        type: 'walletconnect-pairing-response',
+        name: 'Stale Stored WC Wallet',
+        icon: 'https://stale-wc.test/icon'
+      }
+    ])
+
+    await expect(client.getActiveWalletInfo()).resolves.toMatchObject({
+      name: 'Live WC Wallet',
+      icon: 'https://live-wc.test/icon'
+    })
+  })
+
+  it('resolves peer from a custom active transport when internal transports and default storage are empty', async () => {
+    selectAccount({ ...account, origin: { ...account.origin, type: Origin.EXTENSION } })
+    const customStorage = new LocalStorage('custom-transport-peers')
+    const manager = new PeerManager(customStorage, StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
+    const customPeer = new ExtendedPostMessagePairingResponse(
+      peer.id,
+      'Custom Transport Wallet',
+      peer.publicKey,
+      peer.version,
+      peer.senderId,
+      peer.extensionId,
+      'https://custom.test/icon'
+    )
+    await manager.addPeer(customPeer)
+    const customTransport = new PeerTestTransport<
+      ExtendedPostMessagePairingResponse,
+      StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
+    >(new RecordingPeerClient(), manager)
+    await client.init(customTransport)
+
+    await expect(client.getActiveWalletInfo()).resolves.toMatchObject({
+      name: 'Custom Transport Wallet',
+      icon: 'https://custom.test/icon'
+    })
+  })
+
+  it('refreshes the selected WalletConnect peer after transport.connect() when storage held a pre-connect peer', async () => {
+    const wcAccount: AccountInfo = {
+      ...account,
+      origin: { ...account.origin, type: Origin.WALLETCONNECT }
+    }
+    const { wc } = await installPeers()
+    client['initInternalTransports'] = async () => {}
+    await storage.set(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP, [
+      {
+        ...peer,
+        type: 'walletconnect-pairing-response',
+        name: 'Pre-connect Stored Wallet',
+        icon: 'https://preconnect.test/icon'
+      }
+    ])
+    let connected = false
+    vi.spyOn(wc, 'getPeers').mockImplementation(async () =>
+      connected
+        ? [
+            {
+              ...peer,
+              type: 'walletconnect-pairing-response',
+              name: 'Connected Session Wallet',
+              icon: 'https://connected.test/icon'
+            }
+          ]
+        : []
+    )
+    vi.spyOn(wc, 'connect').mockImplementation(async () => {
+      connected = true
+      wc['_isConnected'] = TransportStatus.CONNECTED
+    })
+
+    const prepared = await client['prepareAccountSelection'](
+      wcAccount,
+      client['accountTransition'].signal,
+      'local'
+    )
+    expect(prepared).toMatchObject({
+      kind: 'ready',
+      peer: expect.objectContaining({
+        name: 'Connected Session Wallet',
+        icon: 'https://connected.test/icon'
+      })
     })
   })
 

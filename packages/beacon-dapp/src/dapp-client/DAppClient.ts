@@ -2461,11 +2461,9 @@ export class DAppClient extends Client {
       if (!this.isCurrentAccountTransition(transition)) {
         return { kind: 'superseded' }
       }
-      if (!peer) {
-        peer = await this.getPeer(account)
-        if (!this.isCurrentAccountTransition(transition)) {
-          return { kind: 'superseded' }
-        }
+      peer = (await this.getPeer(account)) ?? peer
+      if (!this.isCurrentAccountTransition(transition)) {
+        return { kind: 'superseded' }
       }
     }
     if (source === 'storage' && !(await this.isStoredAccountCurrent(account))) {
@@ -4285,12 +4283,7 @@ export class DAppClient extends Client {
 
     if (account) {
       logger.log('getPeer', 'We have an account', account)
-      const postMessagePeers: ExtendedPostMessagePairingResponse[] =
-        (await this.postMessageTransport?.getPeers()) ?? []
-      const p2pPeers: ExtendedP2PPairingResponse[] = (await this.p2pTransport?.getPeers()) ?? []
-      const walletConnectPeers: ExtendedWalletConnectPairingResponse[] =
-        (await this.walletConnectTransport?.getPeers()) ?? []
-      const peers = [...postMessagePeers, ...p2pPeers, ...walletConnectPeers]
+      const peers = await this.getPeers()
 
       logger.log('getPeer', 'Found peers', peers, account)
 
