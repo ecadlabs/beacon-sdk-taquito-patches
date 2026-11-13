@@ -436,6 +436,38 @@ describe('P2PCommunicationClient', () => {
       expect((client as any).initialEvent).toBeUndefined()
     })
 
+    it.each([StorageKey.TRANSPORT_P2P_PEERS_DAPP, StorageKey.TRANSPORT_P2P_PEERS_WALLET])(
+      'ignores a message after reset during peer preparation at %s',
+      async (storageKey) => {
+        const gate = createDeferred<never[]>()
+        let preparing = false
+        mockStorage.get.mockImplementation(async (key: StorageKey) => {
+          if (key === storageKey) {
+            preparing = true
+            return gate.promise
+          }
+          return []
+        })
+        vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+        const relay = vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+        const room = vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+        const handler = vi.fn()
+        await client.listenForEncryptedMessage('sender-pub', handler)
+        const listener = fakeMatrixClient.subscribe.mock.calls.at(-1)![1]
+        const delivery = listener(initialMessage())
+        await waitFor(() => preparing)
+
+        await client.reset()
+        gate.resolve([])
+        await delivery
+
+        expect(decryptCryptoboxPayload).not.toHaveBeenCalled()
+        expect(relay).not.toHaveBeenCalled()
+        expect(room).not.toHaveBeenCalled()
+        expect(handler).not.toHaveBeenCalled()
+      }
+    )
+
     it.each(['sender', 'relay', 'decrypt'] as const)(
       'ignores a callback resumed after reset at the %s boundary',
       async (boundary) => {
@@ -661,18 +693,18 @@ describe('P2PCommunicationClient', () => {
         const message = { id: 'message', version: '2', type: 'disconnect', senderId }
         const payload =
           encoding === 'json' ? JSON.stringify(message) : await new Serializer().serialize(message)
+        for (const invalid of [null, {}, { senderId: 42 }, { ...message, senderId: 'another-wallet' }]) {
+          ;(decryptCryptoboxPayload as Mock).mockResolvedValue(
+            encoding === 'json' ? JSON.stringify(invalid) : await new Serializer().serialize(invalid)
+          )
+          await listener(event)
+          expect(callback).not.toHaveBeenCalled()
+          expect(room).not.toHaveBeenCalled()
+        }
+        // Invalid claims must not reserve the ciphertext or mask sender authentication with dedupe.
         ;(decryptCryptoboxPayload as Mock).mockResolvedValue(payload)
         await listener(event)
-        expect(callback).toHaveBeenCalledWith(payload)
-        callback.mockClear()
-        room.mockClear()
-        const mismatched = { ...message, senderId: 'another-wallet' }
-        ;(decryptCryptoboxPayload as Mock).mockResolvedValue(
-          encoding === 'json' ? JSON.stringify(mismatched) : await new Serializer().serialize(mismatched)
-        )
-        await listener(event)
-        expect(callback).not.toHaveBeenCalled()
-        expect(room).not.toHaveBeenCalled()
+        expect(callback).toHaveBeenCalledExactlyOnceWith(payload)
       }
     )
 

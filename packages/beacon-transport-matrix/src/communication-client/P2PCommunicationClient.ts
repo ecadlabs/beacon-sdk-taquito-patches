@@ -77,6 +77,31 @@ interface MatrixJoinSession extends MatrixSessionIdentity {
   readonly matrixClient: MatrixClient
 }
 
+interface InitialMessageReplay {
+  pending: number
+  buffered: WeakSet<MatrixClientEvent<MatrixClientEventType.MESSAGE>>
+  claimed: WeakSet<MatrixClientEvent<MatrixClientEventType.MESSAGE>>
+}
+
+const decodeEncryptedPayload = (
+  rawContent: unknown
+): { ciphertext: string; payload: Buffer } | undefined => {
+  if (
+    typeof rawContent !== 'string' ||
+    rawContent.length === 0 ||
+    rawContent.length % 2 !== 0 ||
+    !/^[0-9a-f]+$/i.test(rawContent)
+  ) {
+    return undefined
+  }
+  const ciphertext = rawContent.toLowerCase()
+  const payload = Buffer.from(ciphertext, 'hex')
+
+  return payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES
+    ? { ciphertext, payload }
+    : undefined
+}
+
 type PeerRoomIds = StorageKeyReturnType[StorageKey.MATRIX_PEER_ROOM_IDS]
 
 const isAbortError = (error: unknown): boolean =>
@@ -120,7 +145,7 @@ export class P2PCommunicationClient extends CommunicationClient {
 
   private sessionStateWrite: Promise<void> = Promise.resolve()
 
-  private initialReplay = {
+  private initialReplay: InitialMessageReplay = {
     pending: 0,
     buffered: new WeakSet(),
     claimed: new WeakSet()
@@ -1111,6 +1136,110 @@ export class P2PCommunicationClient extends CommunicationClient {
     this.initialListener = undefined
   }
 
+  private async isTrustedEncryptedSenderRelay(
+    sender: string,
+    senderPublicKey: string
+  ): Promise<boolean> {
+    const [, ...senderRelayParts] = sender.split(':')
+    const senderRelay = senderRelayParts.join(':')
+    const dappPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
+    const walletPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_WALLET)
+    const peers = [
+      ...(Array.isArray(dappPeers) ? dappPeers : []),
+      ...(Array.isArray(walletPeers) ? walletPeers : [])
+    ]
+    const matchingPeers = peers.filter((peer) => peer.publicKey === senderPublicKey)
+
+    return (
+      matchingPeers.length === 0 ||
+      matchingPeers.some((peer) => peer.relayServer === senderRelay) ||
+      this.isTrustedRelayServer(senderRelay)
+    )
+  }
+
+  private async prepareEncryptedMessage(
+    event: MatrixClientEvent<MatrixClientEventType.MESSAGE>,
+    senderPublicKey: string,
+    receiveKey: Uint8Array,
+    session: MatrixSessionIdentity,
+    replay: InitialMessageReplay
+  ): Promise<{ ciphertext: string; decryptedMessage: string } | undefined> {
+    if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
+      return
+    }
+    if (this.isTextMessage(event.content) && (await this.isSender(event, senderPublicKey))) {
+      if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
+        return
+      }
+      const trustedSenderRelay = await this.isTrustedEncryptedSenderRelay(
+        event.content.message.sender,
+        senderPublicKey
+      )
+      if (
+        !trustedSenderRelay ||
+        replay !== this.initialReplay ||
+        !this.isCurrentSession(session)
+      ) {
+        return
+      }
+      const encryptedPayload = decodeEncryptedPayload(event.content.message.content)
+      if (encryptedPayload) {
+        const { ciphertext, payload } = encryptedPayload
+        let decryptedMessage: string
+        try {
+          decryptedMessage = await decryptCryptoboxPayload(payload, receiveKey)
+          if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
+            return
+          }
+          const message: unknown = decryptedMessage.startsWith('{')
+            ? JSON.parse(decryptedMessage)
+            : await new Serializer().deserialize(decryptedMessage)
+          if (
+            typeof message !== 'object' ||
+            message === null ||
+            !('senderId' in message) ||
+            message.senderId !== (await getSenderId(senderPublicKey))
+          ) {
+            return
+          }
+        } catch {
+          // Some messages are encrypted for other recipients.
+          return
+        }
+
+        return { ciphertext, decryptedMessage }
+      }
+    }
+
+    return undefined
+  }
+
+  private claimEncryptedMessage(
+    event: MatrixClientEvent<MatrixClientEventType.MESSAGE>,
+    ciphertext: string,
+    replay: InitialMessageReplay,
+    seenCiphertexts: Set<string>
+  ): boolean {
+    if (replay.buffered.has(event)) {
+      if (replay.claimed.has(event)) {
+        return false
+      }
+      replay.claimed.add(event)
+      if (this.initialEvent === event) {
+        this.initialEvent = undefined
+      }
+    }
+    if (seenCiphertexts.size >= 1000) {
+      const oldest = seenCiphertexts.values().next().value
+      if (oldest !== undefined) {
+        seenCiphertexts.delete(oldest)
+      }
+    }
+    seenCiphertexts.add(ciphertext)
+
+    return true
+  }
+
   public async listenForEncryptedMessage(
     senderPublicKey: string,
     messageCallback: (message: string) => void | Promise<void>
@@ -1144,107 +1273,46 @@ export class P2PCommunicationClient extends CommunicationClient {
       const callbackFunction = async (
         event: MatrixClientEvent<MatrixClientEventType.MESSAGE>
       ): Promise<void> => {
+        const prepared = await this.prepareEncryptedMessage(
+          event,
+          senderPublicKey,
+          sharedKey.receive,
+          session,
+          replay
+        )
+        if (!prepared) {
+          return
+        }
+        const { ciphertext, decryptedMessage } = prepared
         if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
           return
         }
-        if (this.isTextMessage(event.content) && (await this.isSender(event, senderPublicKey))) {
+        if (seenCiphertexts.has(ciphertext) || inFlightCiphertexts.has(ciphertext)) {
+          return
+        }
+        inFlightCiphertexts.add(ciphertext)
+        try {
+          await this.updateRelayServer(event.content.message.sender)
           if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
             return
           }
-          const [, ...senderRelayParts] = event.content.message.sender.split(':')
-          const senderRelay = senderRelayParts.join(':')
-          const dappPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
-          const walletPeers = await this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_WALLET)
-          const peers = [
-            ...(Array.isArray(dappPeers) ? dappPeers : []),
-            ...(Array.isArray(walletPeers) ? walletPeers : [])
-          ]
-          const matchingPeers = peers.filter((peer) => peer.publicKey === senderPublicKey)
-          const trustedSenderRelay =
-            matchingPeers.length === 0 ||
-            matchingPeers.some((peer) => peer.relayServer === senderRelay) ||
-            (await this.isTrustedRelayServer(senderRelay))
-          if (
-            !trustedSenderRelay ||
-            replay !== this.initialReplay ||
-            !this.isCurrentSession(session)
-          ) {
+          await this.updatePeerRoom(event.content.message.sender, event.content.roomId)
+          if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
             return
           }
-          const rawContent = event.content.message.content
-          if (
-            typeof rawContent !== 'string' ||
-            rawContent.length === 0 ||
-            rawContent.length % 2 !== 0 ||
-            !/^[0-9a-f]+$/i.test(rawContent)
-          ) {
+          if (!this.claimEncryptedMessage(event, ciphertext, replay, seenCiphertexts)) {
             return
           }
-          const ciphertext = rawContent.toLowerCase()
-          const payload = Buffer.from(ciphertext, 'hex')
-          if (payload.length >= secretbox_NONCEBYTES + secretbox_MACBYTES) {
-            let decryptedMessage: string
-            try {
-              decryptedMessage = await decryptCryptoboxPayload(payload, sharedKey.receive)
-              if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
-                return
-              }
-              const message = (
-                decryptedMessage.startsWith('{')
-                  ? JSON.parse(decryptedMessage)
-                  : await new Serializer().deserialize(decryptedMessage)
-              ) as { senderId?: string }
-              if (message.senderId !== (await getSenderId(senderPublicKey))) {
-                return
-              }
-            } catch {
-              // Some messages are encrypted for other recipients.
-              return
-            }
-            if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
-              return
-            }
-            if (seenCiphertexts.has(ciphertext) || inFlightCiphertexts.has(ciphertext)) {
-              return
-            }
-            inFlightCiphertexts.add(ciphertext)
-            try {
-              await this.updateRelayServer(event.content.message.sender)
-              if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
-                return
-              }
-              await this.updatePeerRoom(event.content.message.sender, event.content.roomId)
-              if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
-                return
-              }
-              if (replay.buffered.has(event)) {
-                if (replay.claimed.has(event)) {
-                  return
-                }
-                replay.claimed.add(event)
-                if (this.initialEvent === event) {
-                  this.initialEvent = undefined
-                }
-              }
-              if (seenCiphertexts.size >= 1000) {
-                const oldest = seenCiphertexts.values().next().value
-                if (oldest !== undefined) {
-                  seenCiphertexts.delete(oldest)
-                }
-              }
-              seenCiphertexts.add(ciphertext)
-              logger.log(
-                'listenForEncryptedMessage',
-                `received a message from ${senderPublicKey}`,
-                decryptedMessage
-              )
-              if (this.isCurrentSession(session)) {
-                await messageCallback(decryptedMessage)
-              }
-            } finally {
-              inFlightCiphertexts.delete(ciphertext)
-            }
+          logger.log(
+            'listenForEncryptedMessage',
+            `received a message from ${senderPublicKey}`,
+            decryptedMessage
+          )
+          if (this.isCurrentSession(session)) {
+            await messageCallback(decryptedMessage)
           }
+        } finally {
+          inFlightCiphertexts.delete(ciphertext)
         }
       }
       this.activeListeners.set(senderPublicKey, callbackFunction)
