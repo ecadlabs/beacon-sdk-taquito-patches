@@ -1,6 +1,6 @@
 import type { Mock } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
-import useWallets from '../../src/ui/alert/hooks/useWallets'
+import { useWallets } from '../../src/ui/alert/hooks/useWallets'
 import { getAvailableExtensions } from '../../src/utils/extensions'
 import { NetworkType } from '@ecadlabs/beacon-types'
 
@@ -109,6 +109,7 @@ const mockRemoveEventListener = vi.fn((event, handler) => {
 
 // Defer access to listener mocks until the hook registers its callbacks.
 vi.mock('@ecadlabs/beacon-core', () => ({
+  reportDiagnostic: vi.fn(),
   windowRef: {
     addEventListener: (event: any, handler: any) => mockAddEventListener(event, handler),
     removeEventListener: (event: any, handler: any) => mockRemoveEventListener(event, handler)

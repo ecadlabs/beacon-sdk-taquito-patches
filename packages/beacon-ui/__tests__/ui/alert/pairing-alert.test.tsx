@@ -6,7 +6,7 @@ import { ConfigurableAlertProps } from '../../../src/ui/common'
 
 // --- Mocks for hooks and platform utilities ---
 import useIsMobile from '../../../src/ui/alert/hooks/useIsMobile'
-import useWallets from '../../../src/ui/alert/hooks/useWallets'
+import { useWallets } from '../../../src/ui/alert/hooks/useWallets'
 import useConnect from '../../../src/ui/alert/hooks/useConnect'
 
 vi.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({
@@ -14,8 +14,7 @@ vi.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({
   default: vi.fn()
 }))
 vi.mock('../../../src/ui/alert/hooks/useWallets', () => ({
-  __esModule: true,
-  default: vi.fn()
+  useWallets: vi.fn()
 }))
 vi.mock('../../../src/ui/alert/hooks/useConnect', () => ({
   __esModule: true,

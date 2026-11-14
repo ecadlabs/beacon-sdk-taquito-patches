@@ -3,11 +3,10 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NetworkType } from '@ecadlabs/beacon-types'
 import PairingAlert from '../../../src/ui/alert/components/pairing-alert'
 import { ConfigurableAlertProps } from '../../../src/ui/common'
-import useWallets from '../../../src/ui/alert/hooks/useWallets'
+import { useWallets } from '../../../src/ui/alert/hooks/useWallets'
 
 vi.mock('../../../src/ui/alert/hooks/useWallets', () => ({
-  __esModule: true,
-  default: vi.fn()
+  useWallets: vi.fn()
 }))
 
 vi.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({

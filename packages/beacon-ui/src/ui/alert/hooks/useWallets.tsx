@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
-import { arrangeTopWallets, mergeWallets, parseWallets } from '../../../utils/wallets'
+import { reportDiagnostic, windowRef } from '@ecadlabs/beacon-core'
 import { Extension, NetworkType } from '@ecadlabs/beacon-types'
-import { desktopList, extensionList, iOSList, webList } from '../wallet-lists'
-import { windowRef } from '@ecadlabs/beacon-core'
+import { useEffect, useMemo, useState } from 'react'
 import { getAvailableExtensions } from '../../../utils/extensions'
+import { arrangeTopWallets, mergeWallets, parseWallets } from '../../../utils/wallets'
+import { desktopList, extensionList, iOSList, webList } from '../wallet-lists'
 
 const isExtensionsUpdatedMessage = (event: unknown): boolean =>
   typeof event === 'object' &&
@@ -11,22 +11,47 @@ const isExtensionsUpdatedMessage = (event: unknown): boolean =>
   'data' in event &&
   event.data === 'extensionsUpdated'
 
-const useWallets = (networkType?: NetworkType, featuredWallets?: string[]) => {
+export const useWallets = (networkType?: NetworkType, featuredWallets?: string[]) => {
   const [availableExtensions, setAvailableExtensions] = useState<Extension[]>([])
 
   // Fetch and listen for extension updates
   useEffect(() => {
-    getAvailableExtensions().then(setAvailableExtensions)
+    let disposed = false
+    let latestRequest = 0
 
-    const handler = async (event: unknown) => {
+    const refreshExtensions = (): void => {
+      const request = ++latestRequest
+      getAvailableExtensions()
+        .then((extensions) => {
+          if (!disposed && request === latestRequest) {
+            // Discovery reuses a mutable cache; each accepted refresh needs its own array.
+            setAvailableExtensions([...extensions])
+          }
+        })
+        .catch((error: unknown) => {
+          reportDiagnostic({
+            level: 'error',
+            service: 'BeaconUIWallets',
+            method: 'getAvailableExtensions',
+            args: [error]
+          })
+        })
+    }
+
+    refreshExtensions()
+
+    const handler = (event: unknown): void => {
       if (isExtensionsUpdatedMessage(event)) {
-        const extensions = await getAvailableExtensions()
-        setAvailableExtensions(extensions)
+        refreshExtensions()
       }
     }
 
     windowRef.addEventListener('message', handler)
-    return () => windowRef.removeEventListener('message', handler)
+
+    return () => {
+      disposed = true
+      windowRef.removeEventListener('message', handler)
+    }
   }, [])
 
   // Memoize wallet list creation
@@ -76,6 +101,7 @@ const useWallets = (networkType?: NetworkType, featuredWallets?: string[]) => {
       ...webList
         .map((w) => {
           const link = w.links[networkType ?? NetworkType.MAINNET]
+
           return {
             id: w.key,
             key: w.key,
@@ -119,5 +145,3 @@ const useWallets = (networkType?: NetworkType, featuredWallets?: string[]) => {
 
   return { wallets: walletsMap, availableExtensions }
 }
-
-export default useWallets

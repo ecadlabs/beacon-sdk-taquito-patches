@@ -110,12 +110,6 @@
   "packages/beacon-ui/src/ui/alert/hooks/useIsMobile.tsx": {
     "import/no-default-export": 1
   },
-  "packages/beacon-ui/src/ui/alert/hooks/useWallets.tsx": {
-    "@typescript-eslint/no-floating-promises": 1,
-    "import/no-default-export": 1,
-    "import/order": 2,
-    "padding-line-between-statements": 2
-  },
   "packages/beacon-ui/src/ui/alert/index.tsx": {
     "@typescript-eslint/no-unused-expressions": 1,
     "@typescript-eslint/no-use-before-define": 1,
