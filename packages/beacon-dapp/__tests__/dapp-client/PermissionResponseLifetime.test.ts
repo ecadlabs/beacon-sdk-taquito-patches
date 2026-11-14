@@ -504,6 +504,85 @@ describe('Permission response lifetime', () => {
     expect(await dapp.getActiveAccount()).toBeUndefined()
   })
 
+  it('prepares a legacy hex key after wallet lookup before selecting the account', async () => {
+    await storage.set(StorageKey.LAST_SELECTED_WALLET, {
+      key: 'legacy-wallet',
+      name: 'Legacy wallet',
+      type: 'extension',
+      icon: ''
+    })
+    const pending = await request()
+    const wait = hold('get', StorageKey.LAST_SELECTED_WALLET)
+    const legacyResponse = {
+      ...response(pending.id),
+      publicKey: undefined,
+      pubkey: '11'.repeat(32)
+    }
+    await transport.receive(legacyResponse)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(wait.entered.isResolved()).toBe(true)
+    const connectedAt = Date.now() + 1_000
+    vi.setSystemTime(connectedAt)
+    wait.released.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+
+    const account = await dapp.getActiveAccount()
+    expect(account).toEqual(expect.objectContaining({
+      publicKey: 'edpktmjt7F16Lx9kCxWXRJBNAMQivK69385Y8FvgvxRpBV9Aj7Tpfg',
+      address: 'tz1X3Yj3tX8x5cgryzchRsytecqGm1hLh1Pd',
+      walletKey: 'legacy-wallet',
+      walletType: 'implicit',
+      connectedAt
+    }))
+    expect(await dapp.getAccounts()).toEqual([account])
+    expect(await pending.outcome).toEqual({
+      value: expect.objectContaining({ accountInfo: account })
+    })
+    expect(succeeded).toHaveBeenCalledTimes(1)
+    expect(failed).not.toHaveBeenCalled()
+  })
+
+  it('selects an abstracted account with its explicit contract address and permission fields', async () => {
+    vi.setSystemTime(1_700_000_000_000)
+    const pending = await request()
+    const threshold = { amount: '1000000', timeframe: '3600' }
+    const notification = { version: 1, apiUrl: 'https://notify.example', token: 'token' }
+    await transport.receive({
+      ...response(pending.id),
+      walletType: 'abstracted_account',
+      address: 'KT1TxqZ8QtKvLu3V3JH7Gx58n7Co8pgtpQU5',
+      verificationType: 'proof_of_event',
+      scopes: [PermissionScope.SIGN, PermissionScope.OPERATION_REQUEST],
+      threshold,
+      notification
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    const account = await dapp.getActiveAccount()
+    expect(account).toEqual({
+      accountIdentifier: 'NSZPvCxud792nYzcB8n',
+      senderId: peer.senderId,
+      origin: { type: Origin.EXTENSION, id: connectionInfo.id },
+      walletKey: undefined,
+      address: 'KT1TxqZ8QtKvLu3V3JH7Gx58n7Co8pgtpQU5',
+      publicKey,
+      network: { type: NetworkType.MAINNET },
+      scopes: [PermissionScope.SIGN, PermissionScope.OPERATION_REQUEST],
+      threshold,
+      notification,
+      connectedAt: 1_700_000_000_000,
+      walletType: 'abstracted_account',
+      verificationType: 'proof_of_event',
+      hasVerifiedChallenge: false
+    })
+    expect(await dapp.getAccounts()).toEqual([account])
+    expect(await pending.outcome).toEqual({
+      value: expect.objectContaining({ accountInfo: account })
+    })
+    expect(succeeded).toHaveBeenCalledTimes(1)
+    expect(failed).not.toHaveBeenCalled()
+  })
+
   it('completes after its own account selection and shares one success with coalesced callers', async () => {
     const send = vi.spyOn(transport, 'send')
     const pending = await request()

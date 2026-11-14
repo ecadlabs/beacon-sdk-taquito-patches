@@ -105,9 +105,6 @@ import {
   generateGUID,
   toHex,
   signMessage,
-  CONTRACT_PREFIX,
-  prefixPublicKey,
-  isValidAddress,
   getKeypairFromSeed
 } from '@ecadlabs/beacon-utils'
 
@@ -145,7 +142,7 @@ import {
   InvalidAccountDeactivatedReason,
   PermissionResponseInfo
 } from '../events'
-import { getLegacyPublicKey } from '../utils/legacy-public-key'
+import { prepareAccountPublicKey, assertValidAccountAddress } from './account-credentials'
 import { InitializationAttempt } from './InitializationAttempt'
 import { InitializationLifecycle } from './InitializationLifecycle'
 import { PairingAttempt } from './PairingAttempt'
@@ -5516,41 +5513,19 @@ export class DAppClient extends Client {
   ): Promise<AccountInfo> {
     owner?.assertCurrent()
     const generation = changeGeneration ?? ++this._accountChangeGeneration
-    // TODO: Migration code. Remove sometime after 1.0.0 release.
-    const tempPK = getLegacyPublicKey(message)
-
-    const publicKey = tempPK ? prefixPublicKey(tempPK) : undefined
-
-    if (!publicKey && !message.address) {
-      throw new Error('PublicKey or Address must be defined')
-    }
+    const publicKey = prepareAccountPublicKey(message)
 
     const derivedAddress =
       publicKey && message.walletType !== 'abstracted_account'
         ? await getAddressFromPublicKey(publicKey)
         : undefined
 
-    if (derivedAddress && message.address && message.address !== derivedAddress) {
-      throw new Error(`Address "${message.address}" does not match publicKey "${publicKey}"`)
-    }
-
     const address =
       derivedAddress ??
       message.address ??
       (publicKey ? await getAddressFromPublicKey(publicKey) : '')
 
-    if (!isValidAddress(address)) {
-      throw new Error(`Invalid address: "${address}"`)
-    }
-
-    if (
-      message.walletType === 'abstracted_account' &&
-      address.substring(0, 3) !== CONTRACT_PREFIX
-    ) {
-      throw new Error(
-        `Invalid abstracted account address "${address}", it should be a ${CONTRACT_PREFIX} address`
-      )
-    }
+    assertValidAccountAddress({ message, publicKey, derivedAddress, address })
 
     logger.log('######## MESSAGE #######')
     logger.log('onNewAccount', message)
