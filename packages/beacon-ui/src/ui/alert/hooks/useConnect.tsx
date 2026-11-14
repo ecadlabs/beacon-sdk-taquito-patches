@@ -1,6 +1,6 @@
 import { Logger, reportDiagnostic, windowRef } from '@ecadlabs/beacon-core'
 import { StorageKey, ExtensionMessage, ExtensionMessageTarget } from '@ecadlabs/beacon-types'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { getTzip10Link } from '../../../utils/get-tzip10-link'
 import { isTwBrowser, isAndroid, isMobileOS, isIOS } from '../../../utils/platform'
 import { MergedWallet, OSLink } from '../../../utils/wallets'
@@ -129,6 +129,17 @@ export const useConnect = (
   }
 
   useEffect(() => invalidateAction, [])
+
+  useLayoutEffect(() => {
+    invalidateAction()
+    setWallet(undefined)
+    setQRCode(undefined)
+    setState(AlertState.TOP_WALLETS)
+    setDisplayQRExtra(false)
+    setShowMoreContent(false)
+    setIsWCWorking(true)
+    setIsLoading(false)
+  }, [wcPayload, p2pPayload, postPayload])
 
   const isCurrentAction = (action: WalletAction) => currentAction.current === action
 

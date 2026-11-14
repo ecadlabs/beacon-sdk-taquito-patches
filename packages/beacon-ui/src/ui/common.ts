@@ -58,7 +58,7 @@ export interface PairOtherProps {
   walletList: MergedWallet[]
   p2pPayload: Promise<string>
   wcPayload: PromiseLike<string>
-  onClickLearnMore: () => void
+  onClickLearnMore?: () => void
 }
 
 export interface QRProps {

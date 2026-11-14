@@ -1,29 +1,83 @@
-import React, { useState, useEffect } from 'react'
-import QR from '../qr'
+import { reportDiagnostic } from '@ecadlabs/beacon-core'
+import React, { useState, useLayoutEffect, useRef } from 'react'
+import { QR } from '../qr'
 
 import { PairOtherProps } from '../../ui/common'
 
 export const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
-  const [uiState, setUiState] = useState<'selection' | 'p2p' | 'walletconnect'>('selection')
-  const [hasBeacon, setHasBeacon] = useState<boolean>(false)
-  const [hasWalletConnect, setHasWalletConnect] = useState<boolean>(false)
-  const [qrData, setQrData] = useState<string>('')
+  const { p2pPayload, wcPayload } = props
+  const [availability, setAvailability] = useState({
+    p2pPayload,
+    wcPayload,
+    beacon: false,
+    walletConnect: false
+  })
+  const [selection, setSelection] = useState<{
+    p2pPayload: PairOtherProps['p2pPayload']
+    wcPayload: PairOtherProps['wcPayload']
+    kind: 'p2p' | 'walletconnect'
+    code: string
+  }>()
+  const clickGeneration = useRef(0)
 
-  useEffect(() => {
-    props.p2pPayload
-      .then((p2p) => setHasBeacon(p2p && p2p.length > 0 ? true : false))
-      .catch(() => setHasBeacon(false))
-    Promise.resolve(props.wcPayload)
-      .then((wc) => setHasWalletConnect(wc && wc.length > 0 ? true : false))
-      .catch(() => setHasWalletConnect(false))
-    setUiState('selection')
-    setQrData('')
-  }, [])
+  useLayoutEffect(() => {
+    let current = true
+    clickGeneration.current += 1
+    setAvailability({ p2pPayload, wcPayload, beacon: false, walletConnect: false })
+    setSelection(undefined)
+    const updateBeacon = (beacon: boolean) => {
+      if (current) {
+        setAvailability((previous) => ({ ...previous, beacon }))
+      }
+    }
+    const updateWalletConnect = (walletConnect: boolean) => {
+      if (current) {
+        setAvailability((previous) => ({ ...previous, walletConnect }))
+      }
+    }
+    p2pPayload.then(
+      (payload) => updateBeacon(Boolean(payload.length)),
+      () => updateBeacon(false)
+    )
+    Promise.resolve(wcPayload).then(
+      (payload) => updateWalletConnect(Boolean(payload.length)),
+      () => updateWalletConnect(false)
+    )
 
-  const buttonClickHandler = async (state: 'p2p' | 'walletconnect') => {
-    const payload = state === 'p2p' ? await props.p2pPayload : await props.wcPayload
-    setQrData(payload)
-    setUiState(state)
+    return () => {
+      current = false
+      clickGeneration.current += 1
+    }
+  }, [p2pPayload, wcPayload])
+
+  const hasCurrentSources =
+    availability.p2pPayload === p2pPayload && availability.wcPayload === wcPayload
+  const hasBeacon = hasCurrentSources && availability.beacon
+  const hasWalletConnect = hasCurrentSources && availability.walletConnect
+  const currentSelection =
+    selection?.p2pPayload === p2pPayload && selection?.wcPayload === wcPayload
+      ? selection
+      : undefined
+  const uiState = currentSelection?.kind ?? 'selection'
+  const qrData = currentSelection?.code ?? ''
+
+  const buttonClickHandler = async (kind: 'p2p' | 'walletconnect') => {
+    const generation = ++clickGeneration.current
+    try {
+      const code = await (kind === 'p2p' ? p2pPayload : wcPayload)
+      if (generation === clickGeneration.current) {
+        setSelection({ p2pPayload, wcPayload, kind, code })
+      }
+    } catch (error: unknown) {
+      if (generation === clickGeneration.current) {
+        reportDiagnostic({
+          level: 'error',
+          service: 'PairOther',
+          method: 'selectQR',
+          args: [error]
+        })
+      }
+    }
   }
 
   return (

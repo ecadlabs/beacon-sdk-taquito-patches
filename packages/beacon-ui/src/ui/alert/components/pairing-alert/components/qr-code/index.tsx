@@ -1,9 +1,10 @@
+import { useLayoutEffect, useRef, useState } from 'react'
 import { QRCodeProps } from '../../../../../common'
-import QR from '../../../../../../components/qr'
+import { QR } from '../../../../../../components/qr'
 import WCInitError from '../wc-init-error'
-import { useEffect, useState } from 'react'
+import { runUICallback } from '../../../../../../utils/callback'
 
-const QRCode: React.FC<QRCodeProps> = ({
+export const QRCode: React.FC<QRCodeProps> = ({
   wallet,
   isWCWorking,
   isMobile,
@@ -11,43 +12,48 @@ const QRCode: React.FC<QRCodeProps> = ({
   defaultPairing,
   handleIsLoading
 }) => {
-  const [codeQr, setCodeQr] = useState(qrCode)
+  const [fallback, setFallback] = useState<{
+    wallet: QRCodeProps['wallet']
+    pairing: QRCodeProps['defaultPairing']
+    code: string
+  }>()
+  const loadingCallback = useRef(handleIsLoading)
+  useLayoutEffect(() => {
+    loadingCallback.current = handleIsLoading
+  }, [handleIsLoading])
   const supportsWalletConnect = wallet?.supportedInteractionStandards?.includes('wallet_connect')
   const isConnected = !supportsWalletConnect || isWCWorking
+  const codeQr =
+    qrCode ||
+    (fallback?.wallet === wallet && fallback?.pairing === defaultPairing
+      ? fallback?.code
+      : undefined)
 
-  useEffect(() => {
-    if (qrCode) {
-      setCodeQr(qrCode)
+  useLayoutEffect(() => {
+    let current = true
+    if (qrCode || supportsWalletConnect) {
+      return
     }
-  }, [qrCode])
-
-  useEffect(() => {
-    let isMounted = true
-
-    const pair = async () => {
-      if (codeQr || supportsWalletConnect) {
-        return
-      }
-
-      try {
-        const pairing = await defaultPairing
-        if (isMounted) {
-          setCodeQr(pairing)
-          handleIsLoading(false)
+    const finishLoading = () =>
+      runUICallback(() => loadingCallback.current(false), 'QRCode', 'handleIsLoading')
+    defaultPairing.then(
+      (code) => {
+        if (current) {
+          setFallback({ wallet, pairing: defaultPairing, code })
+          finishLoading()
         }
-      } catch {
-        if (isMounted) {
-          handleIsLoading(false)
+      },
+      () => {
+        if (current) {
+          finishLoading()
         }
       }
-    }
-
-    void pair()
+    )
 
     return () => {
-      isMounted = false
+      current = false
     }
-  }, [codeQr, defaultPairing, handleIsLoading, supportsWalletConnect])
+  }, [wallet, qrCode, defaultPairing, supportsWalletConnect])
 
   if (!isConnected) {
     return <WCInitError title={`Connect with ${wallet?.name} Mobile`} />
@@ -72,10 +78,6 @@ const QRCode: React.FC<QRCodeProps> = ({
       isMobile={isMobile}
       walletName={wallet?.name || 'AirGap'}
       code={codeQr}
-      onClickLearnMore={() => {}}
-      onClickQrCode={() => {}}
     />
   )
 }
-
-export default QRCode

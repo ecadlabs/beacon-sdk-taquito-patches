@@ -1,8 +1,14 @@
+import { reportDiagnostic } from '@ecadlabs/beacon-core'
 import type { Mock } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import QR from '../../src/components/qr/index'
+import { QR } from '../../src/components/qr/index'
 import { getTzip10Link } from '../../src/utils/get-tzip10-link'
 import { getQrData } from '../../src/utils/qr'
+
+vi.mock('@ecadlabs/beacon-core', async (importActual) => ({
+  ...(await importActual<typeof import('@ecadlabs/beacon-core')>()),
+  reportDiagnostic: vi.fn()
+}))
 
 // --- Mocks --- //
 vi.mock('../../src/utils/get-tzip10-link', () => ({
@@ -129,6 +135,49 @@ describe('QR Component', () => {
     // After the timeout, the UI should show "Copy to clipboard" again.
     expect(screen.getByText(/Copy to clipboard/i)).toBeInTheDocument()
   })
+
+  test.each(['callback throw', 'callback reject', 'clipboard reject', 'code change', 'unmount'])(
+    'owns clipboard completion and diagnostics across %s', async (outcome) => {
+      vi.useFakeTimers()
+      const failure = new Error('copy action failed')
+      let finishCopy: (() => void) | undefined
+      const write = vi.fn(() => outcome === 'clipboard reject'
+        ? Promise.reject(failure)
+        : new Promise<void>((resolve) => { finishCopy = resolve }))
+      navigator.clipboard.writeText = write
+      let remove: (() => void) | undefined
+      const onClickQrCode = vi.fn(() => {
+        if (outcome === 'unmount') remove?.()
+        if (outcome === 'callback throw') throw failure
+        return outcome === 'callback reject' ? Promise.reject(failure) : undefined
+      })
+      const view = render(<QR isWalletConnect={false} isMobile walletName={walletName}
+        code={code} onClickQrCode={onClickQrCode} />)
+      remove = () => view.unmount()
+      const copy = view.container.querySelector('.qr-right')
+      if (!copy) throw new Error('Copy action missing')
+      fireEvent.click(copy)
+      expect(onClickQrCode).toHaveBeenCalledTimes(1)
+      expect(write).toHaveBeenCalledExactlyOnceWith(code)
+      if (outcome === 'code change') view.rerender(
+        <QR isWalletConnect={false} isMobile walletName={walletName} code="new-code" />)
+      await act(async () => { finishCopy?.() })
+      const failed = outcome.includes('callback') || outcome === 'clipboard reject'
+      expect(reportDiagnostic).toHaveBeenCalledTimes(failed ? 1 : 0)
+      if (failed) {
+        expect(JSON.stringify(vi.mocked(reportDiagnostic).mock.calls)).not.toContain(code)
+      }
+      if (outcome === 'code change' || outcome === 'unmount') {
+        expect(view.queryByText('Copied!')).not.toBeInTheDocument()
+        expect(vi.getTimerCount()).toBe(0)
+      } else if (outcome !== 'clipboard reject') {
+        expect(screen.getByText('Copied!')).toBeInTheDocument()
+        expect(vi.getTimerCount()).toBe(1)
+        view.unmount()
+        expect(vi.getTimerCount()).toBe(0)
+      }
+    }
+  )
 
   test('uses getTzip10Link and getQrData correctly based on isMobile prop', async () => {
     // Render with isMobile true.

@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react'
+import { reportDiagnostic } from '@ecadlabs/beacon-core'
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { QRProps } from 'src/ui/common'
 import { getTzip10Link } from '../../utils/get-tzip10-link'
 import { getQrData } from '../../utils/qr'
-import { QRProps } from 'src/ui/common'
+import { runUICallback } from '../../utils/callback'
 
 const COPY_RESET_TIMEOUT = 3000
 
-const QR: React.FC<QRProps> = (props: QRProps) => {
+export const QR: React.FC<QRProps> = (props: QRProps) => {
   const [copied, setCopied] = useState<boolean>(false)
   const [qrSVG, setQrSVG] = useState<string>('')
 
@@ -18,20 +20,39 @@ const QR: React.FC<QRProps> = (props: QRProps) => {
     setQrSVG(svg)
   }, [props.code, props.isMobile])
 
-  const handleCopyClipboard = async () => {
-    if (props.onClickQrCode) {
-      props.onClickQrCode()
+  const copyEpoch = useRef(0)
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useLayoutEffect(() => {
+    setCopied(false)
+
+    return () => {
+      copyEpoch.current += 1
+      if (resetTimer.current !== undefined) {
+        clearTimeout(resetTimer.current)
+        resetTimer.current = undefined
+      }
     }
+  }, [props.code])
+
+  const handleCopyClipboard = async () => {
+    const epoch = copyEpoch.current
+    runUICallback(() => props.onClickQrCode?.(), 'QR', 'onClickQrCode')
     try {
       await navigator.clipboard.writeText(props.code)
-      if (!copied) {
-        setCopied(true)
-        setTimeout(() => {
+      if (epoch !== copyEpoch.current) {
+        return
+      }
+      setCopied(true)
+      if (resetTimer.current === undefined) {
+        resetTimer.current = setTimeout(() => {
+          resetTimer.current = undefined
           setCopied(false)
         }, COPY_RESET_TIMEOUT)
       }
-    } catch (error) {
-      console.error('Error copying text: ', error)
+    } catch (error: unknown) {
+      if (epoch === copyEpoch.current) {
+        reportDiagnostic({ level: 'error', service: 'QR', method: 'copyClipboard', args: [error] })
+      }
     }
   }
 
@@ -105,5 +126,3 @@ const QR: React.FC<QRProps> = (props: QRProps) => {
     </div>
   )
 }
-
-export default QR

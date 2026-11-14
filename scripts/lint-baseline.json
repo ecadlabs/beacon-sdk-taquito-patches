@@ -31,11 +31,6 @@
     "import/order": 1,
     "no-shadow": 3
   },
-  "packages/beacon-ui/src/components/qr/index.tsx": {
-    "import/no-default-export": 1,
-    "import/order": 1,
-    "no-console": 1
-  },
   "packages/beacon-ui/src/components/top-wallets/index.tsx": {
     "arrow-body-style": 1,
     "import/no-default-export": 1,
@@ -54,25 +49,9 @@
     "arrow-body-style": 1,
     "import/no-default-export": 1
   },
-  "packages/beacon-ui/src/ui/alert/components/pairing-alert/components/qr-code/index.tsx": {
-    "@typescript-eslint/no-empty-function": 2,
-    "import/no-default-export": 1,
-    "import/order": 1,
-    "no-void": 1
-  },
   "packages/beacon-ui/src/ui/alert/components/pairing-alert/components/wc-init-error/index.tsx": {
     "import/no-default-export": 1,
     "padding-line-between-statements": 1
-  },
-  "packages/beacon-ui/src/ui/alert/components/pairing-alert/index.tsx": {
-    "@typescript-eslint/no-empty-function": 1,
-    "@typescript-eslint/no-floating-promises": 1,
-    "@typescript-eslint/no-non-null-assertion": 3,
-    "@typescript-eslint/no-unnecessary-type-assertion": 2,
-    "complexity": 1,
-    "import/no-default-export": 1,
-    "import/order": 1,
-    "no-shadow": 1
   },
   "packages/beacon-ui/src/ui/alert/hooks/useIsMobile.tsx": {
     "import/no-default-export": 1

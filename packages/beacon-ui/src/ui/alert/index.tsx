@@ -4,7 +4,7 @@ import { getColorMode } from 'src/utils/colorMode'
 import { Subject, Subscription } from '../../utils/subject'
 import { runUICallback } from '../../utils/callback'
 import { AlertConfig, ConfigurableAlertProps } from '../common'
-import PairingAlert from './components/pairing-alert'
+import { PairingAlert } from './components/pairing-alert'
 import InfoAlert from './components/info-alert'
 
 // Import the bundled CSS as a raw string
@@ -66,7 +66,7 @@ const AlertRoot = (props: AlertConfig) => {
     <div className={`theme__${getColorMode()}`}>
       {mount &&
         (config.pairingPayload ? (
-          <PairingAlert {...filteredProps} />
+          <PairingAlert {...filteredProps} pairingPayload={config.pairingPayload} />
         ) : (
           <InfoAlert {...filteredProps} />
         ))}

@@ -1,9 +1,9 @@
-import { reportDiagnostic } from '@ecadlabs/beacon-core'
 import type { Mock } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NetworkType } from '@ecadlabs/beacon-types'
-import PairingAlert from '../../../src/ui/alert/components/pairing-alert'
-import { ConfigurableAlertProps } from '../../../src/ui/common'
+import { PairingAlert } from '../../../src/ui/alert/components/pairing-alert'
+import type { ComponentProps } from 'react'
+type PairingAlertProps = ComponentProps<typeof PairingAlert>
 import { useWallets } from '../../../src/ui/alert/hooks/useWallets'
 import useIsMobile from '../../../src/ui/alert/hooks/useIsMobile'
 import { isMobileOS, isAndroid } from '../../../src/utils/platform'
@@ -40,7 +40,7 @@ vi.mock('../../../src/components/alert', () => ({
 }))
 
 vi.mock('../../../src/components/qr', () => ({
-  default: (props: any) => (
+  QR: (props: any) => (
     <div data-testid="qr" data-walletconnect={props.isWalletConnect ? 'true' : 'false'}>
       {props.code}
     </div>
@@ -98,7 +98,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
     const wcPairing = deferred<string>()
     const openedTab = { opener: undefined as Window | null | undefined, location: { href: '' } }
     window.open = vi.fn(() => openedTab as unknown as Window)
-    const props: ConfigurableAlertProps = {
+    const props: PairingAlertProps = {
       open: true,
       closeOnBackdropClick: true,
       title: 'Pair wallet',
@@ -137,7 +137,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
   })
 
   it('shows the WalletConnect init error when Kukai WalletConnect pairing fails', async () => {
-    const props: ConfigurableAlertProps = {
+    const props: PairingAlertProps = {
       open: true,
       closeOnBackdropClick: true,
       title: 'Pair wallet',
@@ -159,14 +159,59 @@ describe('PairingAlert Kukai async pairing paths', () => {
     expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
   })
 
-  it('keeps the pending Use App launch owned until a QR gesture supersedes it', async () => {
-    vi.mocked(useIsMobile).mockReturnValue(true)
-    vi.mocked(isMobileOS).mockReturnValue(true)
-    vi.mocked(isAndroid).mockReturnValue(true)
-    const pendingPairing = deferred<string>()
-    const open = vi.fn(() => null)
-    window.open = open
-    const props: ConfigurableAlertProps = {
+  it.each(['QR wins', 'close wins'])(
+    'owns synchronous Use App and QR gestures before fulfilled-payload microtasks settle: %s',
+    async (outcome) => {
+      vi.mocked(useIsMobile).mockReturnValue(true)
+      vi.mocked(isMobileOS).mockReturnValue(true)
+      vi.mocked(isAndroid).mockReturnValue(true)
+      window.open = vi.fn(() => null)
+      const props: PairingAlertProps = {
+        open: true,
+        closeOnBackdropClick: true,
+        title: 'Pair wallet',
+        onClose: vi.fn(),
+        pairingPayload: {
+          p2pSyncCode: Promise.resolve('p2p-code'),
+          postmessageSyncCode: Promise.resolve('post-code'),
+          walletConnectSyncCode: Promise.resolve('wc:first@2?symKey=abc&relay-protocol=irn'),
+          networkType: NetworkType.GHOSTNET
+        }
+      }
+      try {
+        const view = render(<PairingAlert {...props} />)
+        fireEvent.click(screen.getByText('Kukai'))
+        await screen.findByRole('button', { name: 'Use App' })
+        fireEvent.click(screen.getByRole('button', { name: 'Use App' }))
+        expect(screen.getByTestId('alert')).toHaveAttribute('data-loading', 'true')
+        const qrButton = view.container.querySelector('button#qr-code-icon')
+        if (!qrButton) throw new Error('QR action was not rendered')
+        fireEvent.click(qrButton)
+        view.rerender(<PairingAlert {...props} title="Unrelated render" open={outcome === 'QR wins'} />)
+        await act(async () => { await Promise.resolve() })
+        if (outcome === 'QR wins') {
+          expect(screen.getByTestId('qr')).toHaveTextContent('wc:first@2?symKey=abc&relay-protocol=irn')
+        } else {
+          expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
+          expect(props.onClose).not.toHaveBeenCalled()
+        }
+        expect(window.open).not.toHaveBeenCalled()
+        expect(screen.getByTestId('alert')).toHaveAttribute('data-loading', 'false')
+      } finally {
+        vi.mocked(useIsMobile).mockReturnValue(false)
+        vi.mocked(isMobileOS).mockReturnValue(false)
+        vi.mocked(isAndroid).mockReturnValue(false)
+      }
+    }
+  )
+
+  it.each([1, 2])('dismisses the old resolved wallet QR on payload replacement with %s discovered wallets', async (walletCount) => {
+    const discovery = vi.mocked(useWallets).getMockImplementation()?.()
+    if (!discovery) throw new Error('Wallet discovery fixture missing')
+    vi.mocked(useWallets).mockReturnValue({ ...discovery,
+      wallets: new Map(Array.from(discovery.wallets).slice(0, walletCount)) })
+    const next = deferred<string>()
+    const props: PairingAlertProps = {
       open: true,
       closeOnBackdropClick: true,
       title: 'Pair wallet',
@@ -174,43 +219,24 @@ describe('PairingAlert Kukai async pairing paths', () => {
       pairingPayload: {
         p2pSyncCode: Promise.resolve('p2p-code'),
         postmessageSyncCode: Promise.resolve('post-code'),
-        walletConnectSyncCode: Promise.resolve('wc:first@2?symKey=abc&relay-protocol=irn'),
+        walletConnectSyncCode: Promise.resolve('wc:old@2?symKey=abc&relay-protocol=irn'),
         networkType: NetworkType.GHOSTNET
       }
     }
-    try {
-      const view = render(<PairingAlert {...props} />)
-      fireEvent.click(screen.getByText('Kukai'))
-      await screen.findByRole('button', { name: 'Use App' })
-      view.rerender(
-        <PairingAlert
-          {...props}
-          pairingPayload={{
-            ...props.pairingPayload!,
-            walletConnectSyncCode: pendingPairing.promise
-          }}
-        />
-      )
-      fireEvent.click(screen.getByRole('button', { name: 'Use App' }))
-      expect(screen.getByTestId('alert')).toHaveAttribute('data-loading', 'true')
-      const qrButton = view.container.querySelector('button#qr-code-icon')
-      if (!qrButton) throw new Error('QR action was not rendered')
-      fireEvent.click(qrButton)
-      await act(async () => {
-        pendingPairing.resolve('wc:requested@2?symKey=abc&relay-protocol=irn')
-      })
-      await waitFor(() =>
-        expect(screen.getByTestId('qr')).toHaveTextContent(
-          'wc:requested@2?symKey=abc&relay-protocol=irn'
-        )
-      )
-      expect(open).not.toHaveBeenCalled()
+    const view = render(<PairingAlert {...props} />)
+    if (walletCount > 1) fireEvent.click(screen.getByText('Kukai'))
+    expect(await screen.findByTestId('qr')).toHaveTextContent('wc:old@2')
+    view.rerender(<PairingAlert {...props}
+      pairingPayload={{ ...props.pairingPayload, walletConnectSyncCode: next.promise }} />)
+    expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
+    expect(screen.queryByText('Connect with Kukai Web')).not.toBeInTheDocument()
+    if (walletCount > 1) {
       expect(screen.getByTestId('alert')).toHaveAttribute('data-loading', 'false')
-    } finally {
-      vi.mocked(useIsMobile).mockReturnValue(false)
-      vi.mocked(isMobileOS).mockReturnValue(false)
-      vi.mocked(isAndroid).mockReturnValue(false)
+      fireEvent.click(screen.getByText('Kukai'))
     }
+    expect(screen.getByTestId('alert')).toHaveAttribute('data-loading', 'true')
+    await act(async () => next.resolve('wc:old@2?symKey=abc&relay-protocol=irn'))
+    expect(await screen.findByTestId('qr')).toHaveTextContent('wc:old@2')
   })
 
   it.each(['close button', 'closed prop', 'replacement payload'] as const)(
@@ -223,7 +249,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
         close: vi.fn()
       }
       window.open = vi.fn().mockReturnValue(tab)
-      const props: ConfigurableAlertProps = {
+      const props: PairingAlertProps = {
         open: true,
         closeOnBackdropClick: true,
         title: 'Pair wallet',
@@ -257,104 +283,4 @@ describe('PairingAlert Kukai async pairing paths', () => {
     }
   )
 
-  it.each(['Use App', 'Use App then QR', 'QR then Use App'] as const)(
-    'reports a rejected mobile pairing once after %s and never navigates',
-    async (gesture) => {
-      vi.mocked(useIsMobile).mockReturnValue(true)
-      vi.mocked(isMobileOS).mockReturnValue(true)
-      vi.mocked(isAndroid).mockReturnValue(true)
-      const pairing = deferred<string>()
-      const error = new Error('mobile pairing failed')
-      window.open = vi.fn(() => null)
-      const props: ConfigurableAlertProps = {
-        open: true,
-        closeOnBackdropClick: true,
-        title: 'Pair wallet',
-        onClose: vi.fn(),
-        pairingPayload: {
-          p2pSyncCode: Promise.resolve('p2p-code'),
-          postmessageSyncCode: Promise.resolve('post-code'),
-          walletConnectSyncCode: Promise.resolve('wc:initial@2?symKey=abc&relay-protocol=irn'),
-          networkType: NetworkType.GHOSTNET
-        }
-      }
-      try {
-        const view = render(<PairingAlert {...props} />)
-        fireEvent.click(screen.getByText('Kukai'))
-        await screen.findByRole('button', { name: 'Use App' })
-        view.rerender(
-          <PairingAlert
-            {...props}
-            pairingPayload={{ ...props.pairingPayload!, walletConnectSyncCode: pairing.promise }}
-          />
-        )
-        if (gesture !== 'QR then Use App')
-          fireEvent.click(screen.getByRole('button', { name: 'Use App' }))
-        if (gesture !== 'Use App') {
-          const qrButton = view.container.querySelector('button#qr-code-icon')
-          if (!qrButton) throw new Error('QR action was not rendered')
-          fireEvent.click(qrButton)
-        }
-        if (gesture === 'QR then Use App')
-          fireEvent.click(screen.getByRole('button', { name: 'Use App' }))
-        await act(async () => {
-          pairing.reject(error)
-        })
-        expect(window.open).not.toHaveBeenCalled()
-        expect(reportDiagnostic).toHaveBeenCalledTimes(1)
-        expect(reportDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ args: [error] }))
-        if (gesture !== 'Use App then QR')
-          expect(screen.getByText('A network error occurred.')).toBeInTheDocument()
-        expect(screen.getByTestId('alert')).toHaveAttribute('data-loading', 'false')
-      } finally {
-        vi.mocked(useIsMobile).mockReturnValue(false)
-        vi.mocked(isMobileOS).mockReturnValue(false)
-        vi.mocked(isAndroid).mockReturnValue(false)
-      }
-    }
-  )
-
-  it.each(['late-code', ''])(
-    'ignores a pending mobile QR payload %j while the alert is closed but mounted',
-    async (code) => {
-      vi.mocked(useIsMobile).mockReturnValue(true)
-      vi.mocked(isMobileOS).mockReturnValue(true)
-      const pairing = deferred<string>()
-      const onClose = vi.fn()
-      const props: ConfigurableAlertProps = {
-        open: true,
-        closeOnBackdropClick: true,
-        title: 'Pair wallet',
-        onClose,
-        pairingPayload: {
-          p2pSyncCode: Promise.resolve('p2p-code'),
-          postmessageSyncCode: Promise.resolve('post-code'),
-          walletConnectSyncCode: Promise.resolve('wc:initial@2?symKey=abc&relay-protocol=irn'),
-          networkType: NetworkType.GHOSTNET
-        }
-      }
-      try {
-        const view = render(<PairingAlert {...props} />)
-        fireEvent.click(screen.getByText('Kukai'))
-        await screen.findByRole('button', { name: 'Use App' })
-        const pendingProps = {
-          ...props,
-          pairingPayload: { ...props.pairingPayload!, walletConnectSyncCode: pairing.promise }
-        }
-        view.rerender(<PairingAlert {...pendingProps} />)
-        const qrButton = view.container.querySelector('button#qr-code-icon')
-        if (!qrButton) throw new Error('QR action was not rendered')
-        fireEvent.click(qrButton)
-        view.rerender(<PairingAlert {...pendingProps} open={false} />)
-        await act(async () => {
-          pairing.resolve(code)
-        })
-        expect(screen.queryByTestId('qr')).not.toBeInTheDocument()
-        expect(onClose).not.toHaveBeenCalled()
-      } finally {
-        vi.mocked(useIsMobile).mockReturnValue(false)
-        vi.mocked(isMobileOS).mockReturnValue(false)
-      }
-    }
-  )
 })

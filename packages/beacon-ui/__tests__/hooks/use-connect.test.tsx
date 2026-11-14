@@ -29,6 +29,16 @@ global.window.URL.createObjectURL = vi.fn()
 // Mock window.open properly
 const windowOpenMock = vi.fn()
 
+// Hook state renders must retain the same immutable resolved payload inputs.
+const resolvedPayloads = new Map<string, Promise<string>>()
+const resolvedPayload = (value: string): Promise<string> => {
+  const previous = resolvedPayloads.get(value)
+  if (previous) return previous
+  const payload = Promise.resolve(value)
+  resolvedPayloads.set(value, payload)
+  return payload
+}
+
 const deferred = <T,>() => {
   let resolve!: (value: T) => void
   let reject!: (reason?: unknown) => void
@@ -41,6 +51,7 @@ const deferred = <T,>() => {
 }
 
 beforeEach(() => {
+  resolvedPayloads.clear()
   window.open = windowOpenMock
   localStorage.clear()
 })
@@ -63,9 +74,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -87,9 +98,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -134,9 +145,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -148,9 +159,9 @@ describe('useConnect hook', () => {
         title: 'test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -186,9 +197,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve(postPayload),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload(postPayload),
         wallets,
         onCloseHandler
       )
@@ -199,9 +210,9 @@ describe('useConnect hook', () => {
         title: 'test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -255,9 +266,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -268,9 +279,9 @@ describe('useConnect hook', () => {
         title: 'test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -303,9 +314,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve(p2pPayload),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload(p2pPayload),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -316,9 +327,9 @@ describe('useConnect hook', () => {
         title: 'test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -356,9 +367,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -369,9 +380,9 @@ describe('useConnect hook', () => {
         title: 'test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -408,9 +419,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc:topic@2?symKey=abc&relay-protocol=irn'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc:topic@2?symKey=abc&relay-protocol=irn'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -421,9 +432,9 @@ describe('useConnect hook', () => {
         title: 'wc test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -453,8 +464,8 @@ describe('useConnect hook', () => {
       useConnect(
         false,
         wcPayload.promise,
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -466,9 +477,9 @@ describe('useConnect hook', () => {
         title: 'wc web fallback test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
       await Promise.resolve()
@@ -503,9 +514,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('invalid-wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('invalid-wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -516,9 +527,9 @@ describe('useConnect hook', () => {
         title: 'wc invalid test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -546,9 +557,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -559,9 +570,9 @@ describe('useConnect hook', () => {
         title: 'final test',
         pairingPayload: {
           networkType: NetworkType.GHOSTNET,
-          p2pSyncCode: Promise.resolve('test'),
-          postmessageSyncCode: Promise.resolve('test'),
-          walletConnectSyncCode: Promise.resolve('test')
+          p2pSyncCode: resolvedPayload('test'),
+          postmessageSyncCode: resolvedPayload('test'),
+          walletConnectSyncCode: resolvedPayload('test')
         }
       })
     })
@@ -590,9 +601,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('invalid-wc-payload'),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload('invalid-wc-payload'),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -604,9 +615,9 @@ describe('useConnect hook', () => {
           title: 'new tab test',
           pairingPayload: {
             networkType: NetworkType.GHOSTNET,
-            p2pSyncCode: Promise.resolve('test'),
-            postmessageSyncCode: Promise.resolve('test'),
-            walletConnectSyncCode: Promise.resolve('test')
+            p2pSyncCode: resolvedPayload('test'),
+            postmessageSyncCode: resolvedPayload('test'),
+            walletConnectSyncCode: resolvedPayload('test')
           }
         },
         newTabWallet
@@ -635,9 +646,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve(''),
-        Promise.resolve('p2p-payload'),
-        Promise.resolve('post-payload'),
+        resolvedPayload(''),
+        resolvedPayload('p2p-payload'),
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -684,9 +695,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve(wcPayload),
-        Promise.resolve(testUri), // Use testUri as the p2pPayload value
-        Promise.resolve('post-payload'),
+        resolvedPayload(wcPayload),
+        resolvedPayload(testUri), // Use testUri as the p2pPayload value
+        resolvedPayload('post-payload'),
         wallets,
         onCloseHandler
       )
@@ -714,9 +725,9 @@ describe('useConnect hook', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('initial-wc'),
-        Promise.resolve('initial-p2p'),
-        Promise.resolve('initial-post'),
+        resolvedPayload('initial-wc'),
+        resolvedPayload('initial-p2p'),
+        resolvedPayload('initial-post'),
         wallets,
         onCloseHandler
       )
@@ -769,9 +780,9 @@ describe('useConnect persisted wallet display names', () => {
       const { result } = renderHook(() =>
         useConnect(
           false,
-          Promise.resolve('wc-payload'),
-          Promise.resolve('p2p-payload'),
-          Promise.resolve('post-payload'),
+          resolvedPayload('wc-payload'),
+          resolvedPayload('p2p-payload'),
+          resolvedPayload('post-payload'),
           new Map([[wallet.id, wallet]]),
           vi.fn()
         )
@@ -816,9 +827,9 @@ describe('useConnect persisted wallet display names', () => {
       const { result } = renderHook(() =>
         useConnect(
           false,
-          Promise.resolve('wc-payload'),
-          Promise.resolve('p2p-payload'),
-          Promise.resolve('post-payload'),
+          resolvedPayload('wc-payload'),
+          resolvedPayload('p2p-payload'),
+          resolvedPayload('post-payload'),
           new Map([[candidate.id, candidate]]),
           vi.fn()
         )
@@ -860,9 +871,9 @@ describe('useConnect persisted wallet display names', () => {
         const { result } = renderHook(() =>
           useConnect(
             false,
-            Promise.resolve('wc-payload'),
-            Promise.resolve('p2p-payload'),
-            Promise.resolve('post-payload'),
+            resolvedPayload('wc-payload'),
+            resolvedPayload('p2p-payload'),
+            resolvedPayload('post-payload'),
             new Map([[mobileWallet.id, mobileWallet]]),
             vi.fn()
           )
@@ -896,9 +907,9 @@ describe('useConnect launch lifetime', () => {
     title: 'Pair wallet',
     pairingPayload: {
       networkType: NetworkType.GHOSTNET,
-      p2pSyncCode: Promise.resolve('unused'),
-      postmessageSyncCode: Promise.resolve('unused'),
-      walletConnectSyncCode: Promise.resolve('unused')
+      p2pSyncCode: resolvedPayload('unused'),
+      postmessageSyncCode: resolvedPayload('unused'),
+      walletConnectSyncCode: resolvedPayload('unused')
     }
   }
 
@@ -909,9 +920,9 @@ describe('useConnect launch lifetime', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('unused'),
+        resolvedPayload('unused'),
         pairing.promise,
-        Promise.resolve('unused'),
+        resolvedPayload('unused'),
         new Map([[webWallet.id, webWallet]]),
         vi.fn()
       )
@@ -952,9 +963,9 @@ describe('useConnect launch lifetime', () => {
       const { result } = renderHook(() =>
         useConnect(
           false,
-          path === 'WalletConnect web' ? pending.promise : Promise.resolve('unused'),
-          path === 'Beacon web' || path === 'desktop' ? pending.promise : Promise.resolve('unused'),
-          path === 'extension' ? pending.promise : Promise.resolve('unused'),
+          path === 'WalletConnect web' ? pending.promise : resolvedPayload('unused'),
+          path === 'Beacon web' || path === 'desktop' ? pending.promise : resolvedPayload('unused'),
+          path === 'extension' ? pending.promise : resolvedPayload('unused'),
           new Map([[selected.id, selected]]),
           vi.fn()
         )
@@ -998,9 +1009,9 @@ describe('useConnect launch lifetime', () => {
       const { result, unmount } = renderHook(() =>
         useConnect(
           false,
-          Promise.resolve('unused'),
-          Promise.resolve('code'),
-          Promise.resolve('unused'),
+          resolvedPayload('unused'),
+          resolvedPayload('code'),
+          resolvedPayload('unused'),
           new Map([[webWallet.id, webWallet]]),
           vi.fn()
         )
@@ -1038,7 +1049,7 @@ describe('useConnect launch lifetime', () => {
           false,
           newPairing.promise,
           oldPairing.promise,
-          Promise.resolve('unused'),
+          resolvedPayload('unused'),
           new Map([
             [webWallet.id, webWallet],
             [newerWallet.id, newerWallet]
@@ -1084,9 +1095,9 @@ describe('useConnect launch lifetime', () => {
       const { result, unmount } = renderHook(() =>
         useConnect(
           false,
-          Promise.resolve('unused'),
+          resolvedPayload('unused'),
           pairing.promise,
-          Promise.resolve('unused'),
+          resolvedPayload('unused'),
           new Map([[webWallet.id, webWallet]]),
           vi.fn()
         )
@@ -1117,9 +1128,9 @@ describe('useConnect launch lifetime', () => {
     const { result } = renderHook(() =>
       useConnect(
         false,
-        Promise.resolve('unused'),
-        Promise.resolve(''),
-        Promise.resolve('unused'),
+        resolvedPayload('unused'),
+        resolvedPayload(''),
+        resolvedPayload('unused'),
         new Map([[mobileWallet.id, mobileWallet]]),
         onClose
       )
