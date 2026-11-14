@@ -154,6 +154,7 @@ import { DAppClientOptions } from './DAppClientOptions'
 import { RequestTracker, RequestKey, RequestRoute } from './RequestTracker'
 import {
   classifyLateResponse,
+  errorEventResponse,
   isBeaconError,
   isErrorOrigin,
   isErrorResponse,
@@ -717,30 +718,7 @@ export class DAppClient extends Client {
       let appMetadata = responseAppMetadata(message)
 
       if (!appMetadata && isV3WrappedMessage) {
-        const storedMetadata = await Promise.all([
-          this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
-          this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP),
-          this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
-        ])
-
-        for (const peers of storedMetadata) {
-          const peer = peers.find(
-            (candidate) => 'senderId' in candidate && candidate.senderId === message.senderId
-          )
-          if (!peer) {
-            continue
-          }
-
-          const wallet = await this.getWalletInfo()
-
-          appMetadata = {
-            name: peer.name,
-            senderId: message.senderId,
-            icon: wallet.icon
-          }
-
-          break
-        }
+        appMetadata = await this.loadResponseAppMetadata(message)
       }
 
       if (!request || !this.isRequestCurrent(request.key)) {
@@ -762,89 +740,26 @@ export class DAppClient extends Client {
         return
       }
 
-      if (request.route === 'LeaderProxy') {
-        if (typedMessage.type === BeaconMessageType.Acknowledge) {
-          if (this.requestTracker.acknowledge(request.key)) {
-            this.markPendingRequestAcknowledged(message.id, request.key)
-            this.multiTabChannel.postMessage({
-              type: 'RESPONSE',
-              id: message.id,
-              data: { message, connectionInfo }
-            })
-          }
-        } else {
-          this.requestTracker.resolve(request.key, {
-            message: this.attributeForwardedMessage(message, fromAdapter),
-            connectionInfo
-          })
-        }
-        this.messageObserver.notifyIncoming(transportType, message, 'handled')
-
-        return
-      }
-
       if (typedMessage.type === BeaconMessageType.Acknowledge) {
-        this.messageObserver.notifyIncoming(transportType, message, 'handled')
-        if (!this.requestTracker.acknowledge(request.key)) {
-          return
-        }
-        this.markPendingRequestAcknowledged(message.id, request.key)
-        this.analytics.track('event', 'DAppClient', 'Acknowledge received from Wallet')
-        const walletInfo = await this.getWalletInfo()
-        if (!this.isRequestCurrent(request.key)) {
-          return
-        }
-        this.events
-          .emit(BeaconEvent.ACKNOWLEDGE_RECEIVED, {
-            correlated: true,
-            requestId: message.id,
-            receivedAt,
-            message: {
-              type: BeaconMessageType.Acknowledge,
-              id: message.id,
-              version: message.version,
-              senderId: message.senderId
-            },
-            extraInfo: {},
-            walletInfo
-          })
-          .catch((emitError) => logger.error('handleResponse', emitError))
-
-        return
+        return this.handleResponseAcknowledgement({
+          key: request.key,
+          route: request.route,
+          message,
+          connectionInfo,
+          receivedAt,
+          transportType
+        })
       }
 
-      // Routed on the message type alone: a wallet error without errorType is still an error.
-      const error = toRequestError(message, this.trustsClaimedOrigin(request.route, fromAdapter))
-      if (error) {
-        this.responseReceivedAt.set(error, receivedAt)
-      }
-      if (preparing) {
-        if (appMetadata) {
-          try {
-            await this.appMetadataManager.addAppMetadata(appMetadata)
-          } catch {
-            this.requestTracker.preparationFailed(
-              request.key,
-              localError({
-                id: message.id,
-                type: BeaconMessageType.Error,
-                errorType: BeaconErrorType.UNKNOWN_ERROR,
-                senderId: '',
-                version: '2'
-              })
-            )
-            this.messageObserver.notifyIncoming(transportType, message, 'handled')
-
-            return
-          }
-        }
-        this.requestTracker.prepared(request.key, { message, connectionInfo })
-      } else if (error) {
-        this.requestTracker.reject(request.key, error)
-      } else {
-        this.requestTracker.resolve(request.key, { message, connectionInfo })
-      }
-      this.messageObserver.notifyIncoming(transportType, message, 'handled')
+      return this.settleResponse({
+        key: request.key,
+        route: request.route,
+        response: { message, connectionInfo },
+        receivedAt,
+        fromAdapter,
+        preparation: preparing ? { kind: 'permission', appMetadata } : { kind: 'ordinary' },
+        transportType
+      })
     }
 
     this.storageValidated = this.storageValidator
@@ -4045,17 +3960,7 @@ export class DAppClient extends Client {
       (beaconError instanceof UnknownBeaconError &&
         beaconError.description === 'BeaconID not defined')
     if (beaconError.errorType && !isPreconditionError) {
-      const errorResponse: ErrorResponse = isBeaconError(beaconError)
-        ? {
-            id: beaconError.id,
-            type: BeaconMessageType.Error,
-            errorType: beaconError.errorType,
-            version: beaconError.version,
-            senderId: beaconError.senderId,
-            ...(beaconError.errorOrigin ? { errorOrigin: beaconError.errorOrigin } : {}),
-            ...(beaconError.errorData !== undefined ? { errorData: beaconError.errorData } : {})
-          }
-        : beaconError
+      const errorResponse = errorEventResponse(beaconError)
       const buttons: AlertButton[] = []
       if (beaconError.errorType === BeaconErrorType.NO_PRIVATE_KEY_FOUND_ERROR) {
         const actionCallback = async (): Promise<void> => {
@@ -5318,6 +5223,148 @@ export class DAppClient extends Client {
       }
       this.forgetTimedOutRequest(oldest.value)
     }
+  }
+
+  private async loadResponseAppMetadata(message: ResponseMessage): Promise<AppMetadata | undefined> {
+    const storedMetadata = await Promise.all([
+      this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
+      this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP),
+      this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
+    ])
+
+    for (const peers of storedMetadata) {
+      const peer = peers.find(
+        (candidate) => 'senderId' in candidate && candidate.senderId === message.senderId
+      )
+      if (!peer) {
+        continue
+      }
+      const wallet = await this.getWalletInfo()
+
+      return { name: peer.name, senderId: message.senderId, icon: wallet.icon }
+    }
+
+    return undefined
+  }
+
+  private async handleResponseAcknowledgement({
+    key,
+    route,
+    message,
+    connectionInfo,
+    receivedAt,
+    transportType
+  }: {
+    key: RequestKey
+    route: RequestRoute
+    message: ResponseMessage
+    connectionInfo: ConnectionContext
+    receivedAt: number
+    transportType: TransportType | undefined
+  }): Promise<void> {
+    if (route === 'LeaderProxy') {
+      if (this.requestTracker.acknowledge(key)) {
+        this.markPendingRequestAcknowledged(message.id, key)
+        this.multiTabChannel.postMessage({
+          type: 'RESPONSE',
+          id: message.id,
+          data: { message, connectionInfo }
+        })
+      }
+      this.messageObserver.notifyIncoming(transportType, message, 'handled')
+
+      return
+    }
+
+    this.messageObserver.notifyIncoming(transportType, message, 'handled')
+    if (!this.requestTracker.acknowledge(key)) {
+      return
+    }
+    this.markPendingRequestAcknowledged(message.id, key)
+    this.analytics.track('event', 'DAppClient', 'Acknowledge received from Wallet')
+    const walletInfo = await this.getWalletInfo()
+    if (!this.isRequestCurrent(key)) {
+      return
+    }
+    this.events
+      .emit(BeaconEvent.ACKNOWLEDGE_RECEIVED, {
+        correlated: true,
+        requestId: message.id,
+        receivedAt,
+        message: {
+          type: BeaconMessageType.Acknowledge,
+          id: message.id,
+          version: message.version,
+          senderId: message.senderId
+        },
+        extraInfo: {},
+        walletInfo
+      })
+      .catch((emitError) => logger.error('handleResponse', emitError))
+  }
+
+  private async settleResponse({
+    key,
+    route,
+    response,
+    receivedAt,
+    fromAdapter,
+    preparation,
+    transportType
+  }: {
+    key: RequestKey
+    route: RequestRoute
+    response: RequestResponse
+    receivedAt: number
+    fromAdapter: boolean
+    preparation:
+      | { kind: 'permission'; appMetadata: AppMetadata | undefined }
+      | { kind: 'ordinary' }
+    transportType: TransportType | undefined
+  }): Promise<void> {
+    const { message, connectionInfo } = response
+    if (route === 'LeaderProxy') {
+      this.requestTracker.resolve(key, {
+        message: this.attributeForwardedMessage(message, fromAdapter),
+        connectionInfo
+      })
+      this.messageObserver.notifyIncoming(transportType, message, 'handled')
+
+      return
+    }
+
+    // Routed on the message type alone: a wallet error without errorType is still an error.
+    const error = toRequestError(message, this.trustsClaimedOrigin(route, fromAdapter))
+    if (error) {
+      this.responseReceivedAt.set(error, receivedAt)
+    }
+    if (preparation.kind === 'permission') {
+      if (preparation.appMetadata) {
+        try {
+          await this.appMetadataManager.addAppMetadata(preparation.appMetadata)
+        } catch {
+          this.requestTracker.preparationFailed(
+            key,
+            localError({
+              id: message.id,
+              type: BeaconMessageType.Error,
+              errorType: BeaconErrorType.UNKNOWN_ERROR,
+              senderId: '',
+              version: '2'
+            })
+          )
+          this.messageObserver.notifyIncoming(transportType, message, 'handled')
+
+          return
+        }
+      }
+      this.requestTracker.prepared(key, response)
+    } else if (error) {
+      this.requestTracker.reject(key, error)
+    } else {
+      this.requestTracker.resolve(key, response)
+    }
+    this.messageObserver.notifyIncoming(transportType, message, 'handled')
   }
 
   /** Takes the timed-out request a wallet response answers; acknowledges are not answers. */

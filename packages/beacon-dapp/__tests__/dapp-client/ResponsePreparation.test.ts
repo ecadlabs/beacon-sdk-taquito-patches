@@ -23,6 +23,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
+import type { BeaconMessageRecord } from '../../src'
 import { BeaconEvent } from '../../src/events'
 
 vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
@@ -338,6 +339,10 @@ describe('Response metadata preparation', () => {
     async (version) => {
       await start(0)
       const pending = await request(version)
+      const incoming: BeaconMessageRecord[] = []
+      dapp.subscribeToMessages((record) => {
+        if (record.direction === 'incoming') incoming.push(record)
+      })
       const storageError = new Error('Metadata write failed')
       const write = vi
         .spyOn(dapp['appMetadataManager'], 'addAppMetadata')
@@ -354,6 +359,7 @@ describe('Response metadata preparation', () => {
       expect(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expected })
       await expect(pending.outcome).resolves.toEqual({ error: expected })
       expect(deliveryErrors).toEqual([])
+      expect(incoming.map((record) => record.disposition)).toEqual([undefined, 'handled'])
       expect(failed).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ errorResponse: expected }),
         expect.any(Array)

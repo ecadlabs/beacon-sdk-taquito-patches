@@ -23,6 +23,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
+import type { BeaconMessageRecord } from '../../src'
 import { BeaconEvent } from '../../src/events'
 
 vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
@@ -263,6 +264,10 @@ describe('Request response ownership', () => {
     async (version) => {
       await start(25)
       const pending = await request(version)
+      const incoming: BeaconMessageRecord[] = []
+      dapp.subscribeToMessages((record) => {
+        if (record.direction === 'incoming') incoming.push(record)
+      })
       const write = holdMetadata()
       const first = transport.receive(response(version, pending.id))
       await vi.advanceTimersByTimeAsync(0)
@@ -270,6 +275,9 @@ describe('Request response ownership', () => {
       const second = transport.receive(response(version, pending.id))
       await vi.advanceTimersByTimeAsync(0)
       expect(pending.settled).not.toHaveBeenCalled()
+      expect(incoming.map((record) => record.disposition)).toEqual([
+        undefined, undefined, 'unknown-request'
+      ])
       const writeCount = write.mock.calls.length
 
       release.resolve()
@@ -281,6 +289,9 @@ describe('Request response ownership', () => {
       expect(succeeded).toHaveBeenCalledTimes(1)
       expect(failed).not.toHaveBeenCalled()
       expect(closed).not.toHaveBeenCalled()
+      expect(incoming.map((record) => record.disposition)).toEqual([
+        undefined, undefined, 'unknown-request', 'handled'
+      ])
     }
   )
 
@@ -430,6 +441,40 @@ describe('Request response ownership', () => {
       expect(closed).not.toHaveBeenCalled()
     }
   )
+
+  it('discards an ACK notification when permission success finishes before its wallet details', async () => {
+    await start(25)
+    const pending = await request('2')
+    const details = dapp['getWalletInfo'].bind(dapp)
+    let held = false
+    dapp['getWalletInfo'] = async (...args) => {
+      if (!held) {
+        held = true
+        await release.promise
+      }
+      return details(...args)
+    }
+    const acknowledging = transport.receive(
+      control('2', pending.id, BeaconMessageType.Acknowledge)
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(held).toBe(true)
+    expect(acknowledged).not.toHaveBeenCalled()
+
+    await transport.receive(response('2', pending.id))
+    await vi.advanceTimersByTimeAsync(0)
+    await expect(pending.outcome).resolves.toEqual({ value: expect.any(Object) })
+    expect(succeeded).toHaveBeenCalledTimes(1)
+
+    release.resolve()
+    await acknowledging
+    await vi.advanceTimersByTimeAsync(100)
+    expect(acknowledged).not.toHaveBeenCalled()
+    expect(pending.settled).toHaveBeenCalledTimes(1)
+    expect(succeeded).toHaveBeenCalledTimes(1)
+    expect(failed).not.toHaveBeenCalled()
+    expect(closed).not.toHaveBeenCalled()
+  })
 
   it.each(['2', '3'] as const)(
     'discards a V%s ACK notification when its wallet details finish after disconnect',

@@ -38,6 +38,20 @@ export const toBeaconError = (error: RequestErrorResponse): BeaconError =>
     errorOrigin: error.errorOrigin
   })
 
+/** Keeps request-error events plain while preserving existing wire error objects. */
+export const errorEventResponse = (error: ErrorResponse): ErrorResponse =>
+  isBeaconError(error)
+    ? {
+        id: error.id,
+        type: BeaconMessageType.Error,
+        errorType: error.errorType,
+        version: error.version,
+        senderId: error.senderId,
+        ...(error.errorOrigin ? { errorOrigin: error.errorOrigin } : {}),
+        ...(error.errorData !== undefined ? { errorData: error.errorData } : {})
+      }
+    : error
+
 /**
  * An error as a wallet may put it on the wire. Responses are not validated before routing, and
  * wallets do not always fill `errorType`.
