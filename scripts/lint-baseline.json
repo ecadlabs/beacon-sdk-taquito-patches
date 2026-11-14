@@ -69,13 +69,6 @@
     "arrow-body-style": 1,
     "import/no-default-export": 1
   },
-  "packages/beacon-ui/src/ui/alert/components/pairing-alert/components/mobile-pairing/index.tsx": {
-    "@typescript-eslint/no-floating-promises": 1,
-    "arrow-body-style": 1,
-    "import/no-default-export": 1,
-    "no-console": 1,
-    "padding-line-between-statements": 2
-  },
   "packages/beacon-ui/src/ui/alert/components/pairing-alert/components/qr-code/index.tsx": {
     "@typescript-eslint/no-empty-function": 2,
     "import/no-default-export": 1,
@@ -95,17 +88,6 @@
     "import/no-default-export": 1,
     "import/order": 1,
     "no-shadow": 1
-  },
-  "packages/beacon-ui/src/ui/alert/hooks/useConnect.tsx": {
-    "@typescript-eslint/no-floating-promises": 2,
-    "@typescript-eslint/no-unsafe-function-type": 1,
-    "@typescript-eslint/no-use-before-define": 3,
-    "complexity": 1,
-    "default-case": 1,
-    "import/no-default-export": 1,
-    "no-shadow": 6,
-    "padding-line-between-statements": 4,
-    "prefer-template": 1
   },
   "packages/beacon-ui/src/ui/alert/hooks/useIsMobile.tsx": {
     "import/no-default-export": 1

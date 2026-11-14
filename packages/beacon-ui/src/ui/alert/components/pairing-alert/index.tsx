@@ -1,5 +1,7 @@
+import { reportDiagnostic } from '@ecadlabs/beacon-core'
+import { useEffect, useLayoutEffect } from 'react'
 import Alert from '../../../../components/alert'
-import useConnect from '../../hooks/useConnect'
+import { useConnect } from '../../hooks/useConnect'
 import Info from '../../../../components/info'
 import PairOther from '../../../../components/pair-other'
 import TopWallets from '../../../../components/top-wallets'
@@ -8,10 +10,9 @@ import { isMobileOS } from '../../../../utils/platform'
 import { useWallets } from '../../hooks/useWallets'
 import { AlertState, ConfigurableAlertProps } from '../../../common'
 import useIsMobile from '../../hooks/useIsMobile'
-import { useEffect } from 'react'
 import WCInitError from './components/wc-init-error'
 import QRCode from './components/qr-code'
-import MobilePairing from './components/mobile-pairing'
+import { MobilePairing } from './components/mobile-pairing'
 
 const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
   const wcPayload = props.pairingPayload!.walletConnectSyncCode
@@ -42,18 +43,42 @@ const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
     handleUpdateQRCode,
     handleShowMoreContent,
     handleDisplayQRExtra,
-    handleIsLoading
+    handleIsLoading,
+    cancelPendingLaunch
   ] = useConnect(isMobile, wcPayload, p2pPayload, postPayload, wallets, props.onClose)
+  useLayoutEffect(() => {
+    if (!props.open) {
+      cancelPendingLaunch()
+    }
+
+    return cancelPendingLaunch
+  }, [props.open, wcPayload, p2pPayload, postPayload])
+
+  const handleClose = async () => {
+    cancelPendingLaunch()
+    try {
+      const onClose: () => void | PromiseLike<void> = props.onClose
+      await onClose()
+    } catch (error: unknown) {
+      reportDiagnostic({
+        level: 'error',
+        service: 'PairingAlert',
+        method: 'onClose',
+        args: [error]
+      })
+    }
+  }
+
   const isOnline = navigator.onLine
   const walletList = Array.from(wallets.values())
 
   useEffect(() => {
-    if (wallets.size !== 1) {
+    if (!props.open || wallets.size !== 1) {
       return
     }
 
     handleClickWallet(walletList[0].id, props)
-  }, [wallets])
+  }, [wallets, props.open])
 
   const QR: React.FC<{ isMobile: boolean }> = ({ isMobile }) => (
     <QRCode
@@ -66,33 +91,12 @@ const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
     />
   )
 
-  const MobileInfoCard = () => {
-    handleIsLoading(false)
-
-    if (!wallet) {
-      throw new Error('Wallet undefined')
-    }
-
-    return (
-      <MobilePairing
-        wallet={wallet}
-        handleUpdateState={handleUpdateState}
-        handleDeepLinking={handleDeepLinking}
-        wcPayload={wcPayload}
-        p2pPayload={p2pPayload}
-        handleUpdateQRCode={handleUpdateQRCode}
-        handleDisplayQRExtra={handleDisplayQRExtra}
-        onClose={props.onClose}
-      />
-    )
-  }
-
   return (
     <Alert
       {...props}
       closeOnBackdropClick
       loading={isLoading}
-      onCloseClick={props.onClose}
+      onCloseClick={handleClose}
       open={props.open}
       showMore={showMoreContent}
       extraContent={
@@ -215,7 +219,18 @@ const PairingAlert: React.FC<ConfigurableAlertProps> = (props) => {
             {isMobileOS(window) &&
               wallet?.types.includes('ios') &&
               (isWCWorking && wallet?.supportedInteractionStandards?.includes('wallet_connect') ? (
-                <MobileInfoCard />
+                <MobilePairing
+                  open={props.open}
+                  wallet={wallet}
+                  handleUpdateState={handleUpdateState}
+                  handleDeepLinking={handleDeepLinking}
+                  cancelPendingLaunch={cancelPendingLaunch}
+                  wcPayload={wcPayload}
+                  p2pPayload={p2pPayload}
+                  handleUpdateQRCode={handleUpdateQRCode}
+                  handleDisplayQRExtra={handleDisplayQRExtra}
+                  onClose={props.onClose}
+                />
               ) : (
                 <WCInitError title={`Connect with ${wallet?.name} Mobile`} />
               ))}

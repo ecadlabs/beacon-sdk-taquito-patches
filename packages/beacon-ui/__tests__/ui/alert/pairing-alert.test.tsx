@@ -7,7 +7,7 @@ import { ConfigurableAlertProps } from '../../../src/ui/common'
 // --- Mocks for hooks and platform utilities ---
 import useIsMobile from '../../../src/ui/alert/hooks/useIsMobile'
 import { useWallets } from '../../../src/ui/alert/hooks/useWallets'
-import useConnect from '../../../src/ui/alert/hooks/useConnect'
+import { useConnect } from '../../../src/ui/alert/hooks/useConnect'
 
 vi.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({
   __esModule: true,
@@ -17,8 +17,7 @@ vi.mock('../../../src/ui/alert/hooks/useWallets', () => ({
   useWallets: vi.fn()
 }))
 vi.mock('../../../src/ui/alert/hooks/useConnect', () => ({
-  __esModule: true,
-  default: vi.fn()
+  useConnect: vi.fn()
 }))
 
 // Updated Alert mock: explicitly remove closeOnBackdropClick so it isn’t passed to the DOM
@@ -162,7 +161,8 @@ const defaultUseConnect = [
   vi.fn(), // handleUpdateQRCode
   vi.fn(), // handleShowMoreContent
   vi.fn(), // handleDisplayQRExtra
-  vi.fn() // handleIsLoading
+  vi.fn(), // handleIsLoading
+  vi.fn() // cancelPendingLaunch
 ]
 
 // Helper function to render PairingAlert and wait for async effects
@@ -408,7 +408,7 @@ describe('PairingAlert Component', () => {
   // --- QRCode LocalStorage Side Effect Tests ---
   describe('QRCode LocalStorage Side Effect', () => {
     test('sets LAST_SELECTED_WALLET when selecting a wallet and rendering its QR code', async () => {
-      const { default: realUseConnect } = await vi.importActual<
+      const { useConnect: realUseConnect } = await vi.importActual<
         typeof import('../../../src/ui/alert/hooks/useConnect')
       >('../../../src/ui/alert/hooks/useConnect')
       vi.mocked(useConnect).mockImplementation(realUseConnect)

@@ -1,6 +1,6 @@
-import { Logger, windowRef } from '@ecadlabs/beacon-core'
+import { Logger, reportDiagnostic, windowRef } from '@ecadlabs/beacon-core'
 import { StorageKey, ExtensionMessage, ExtensionMessageTarget } from '@ecadlabs/beacon-types'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getTzip10Link } from '../../../utils/get-tzip10-link'
 import { isTwBrowser, isAndroid, isMobileOS, isIOS } from '../../../utils/platform'
 import { MergedWallet, OSLink } from '../../../utils/wallets'
@@ -10,18 +10,31 @@ import { hasWalletConnectSymKey } from '../../../utils/walletconnect'
 
 const logger = new Logger('useConnect')
 
+interface WalletAction {
+  placeholder?: Window
+}
+
+const reportLaunchFailure = (method: string, error: unknown) =>
+  reportDiagnostic({ level: 'error', service: 'useConnect', method, args: [error] })
+
+const reportWalletConnectFailure = (error: unknown): string => {
+  reportLaunchFailure('walletConnectPayload', error)
+
+  return ''
+}
+
 const getInitialWalletType = (
-  wallet?: MergedWallet
+  selectedWallet?: MergedWallet
 ): 'extension' | 'mobile' | 'web' | 'desktop' => {
-  if (wallet?.types.length === 1) {
-    switch (wallet.types[0]) {
+  if (selectedWallet?.types.length === 1) {
+    switch (selectedWallet.types[0]) {
       case 'web':
         return 'web'
       case 'extension':
         return 'extension'
       case 'desktop':
         return 'desktop'
-      case 'ios':
+      default:
         return 'mobile'
     }
   }
@@ -29,13 +42,64 @@ const getInitialWalletType = (
   return 'mobile'
 }
 
-const useConnect = (
+const storeSelectedWallet = (
+  selectedWallet: MergedWallet | undefined,
+  type: ReturnType<typeof getInitialWalletType>
+) => {
+  localStorage.setItem(
+    StorageKey.LAST_SELECTED_WALLET,
+    JSON.stringify({
+      key: selectedWallet?.key,
+      name: selectedWallet?.name,
+      type,
+      icon: selectedWallet?.image
+    })
+  )
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const readLastSelectedWallet = (): Record<string, unknown> | undefined => {
+  try {
+    const raw = localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)
+    if (!raw) {
+      return undefined
+    }
+    const parsed: unknown = JSON.parse(raw)
+
+    return isRecord(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const updateSelectedWalletWithURL = (url: string) => {
+  const storedWallet = readLastSelectedWallet()
+  if (!storedWallet || typeof storedWallet.key !== 'string' || !storedWallet.key) {
+    return
+  }
+  localStorage.setItem(StorageKey.LAST_SELECTED_WALLET, JSON.stringify({ ...storedWallet, url }))
+}
+
+const openMobileLink = (link: string) => {
+  if (isAndroid(window)) {
+    window.open(link, '_blank', 'noopener')
+  } else {
+    const anchor = document.createElement('a')
+    anchor.setAttribute('href', link)
+    anchor.setAttribute('rel', 'noopener')
+    anchor.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }))
+  }
+}
+
+export const useConnect = (
   isMobile: boolean,
   wcPayload: PromiseLike<string>,
   p2pPayload: Promise<string>,
   postPayload: Promise<string>,
   wallets: Map<string, MergedWallet>,
-  onCloseHandler: Function
+  onCloseHandler: () => void | PromiseLike<void>
 ) => {
   const [wallet, setWallet] = useState<MergedWallet>()
   const [isLoading, setIsLoading] = useState(false)
@@ -44,320 +108,335 @@ const useConnect = (
   const [displayQRExtra, setDisplayQRExtra] = useState(false)
   const [showMoreContent, setShowMoreContent] = useState(false)
   const [isWCWorking, setIsWCWorking] = useState(true)
+  const currentAction = useRef<WalletAction | undefined>(undefined)
 
-  const setInstallState = (wallet?: MergedWallet) => {
+  const closePlaceholder = (action: WalletAction) => {
+    const placeholder = action.placeholder
+    action.placeholder = undefined
+    try {
+      placeholder?.close?.()
+    } catch (error: unknown) {
+      reportLaunchFailure('closePlaceholder', error)
+    }
+  }
+
+  const invalidateAction = () => {
+    const previousAction = currentAction.current
+    currentAction.current = undefined
+    if (previousAction) {
+      closePlaceholder(previousAction)
+    }
+  }
+
+  useEffect(() => invalidateAction, [])
+
+  const isCurrentAction = (action: WalletAction) => currentAction.current === action
+
+  const runWalletAction = async (
+    method: string,
+    launch: (action: WalletAction) => Promise<void>
+  ): Promise<void> => {
+    invalidateAction()
+    const action: WalletAction = {}
+    currentAction.current = action
+    setIsLoading(true)
+    try {
+      // Invoke synchronously so web-wallet placeholders retain the user gesture.
+      await launch(action)
+    } catch (error: unknown) {
+      if (isCurrentAction(action)) {
+        reportLaunchFailure(method, error)
+      }
+    } finally {
+      closePlaceholder(action)
+      if (isCurrentAction(action)) {
+        setIsLoading(false)
+      }
+    }
+  }
+
+  const setInstallState = (selectedWallet?: MergedWallet) => {
     if (
-      !wallet ||
-      (wallet.types.length <= 1 &&
-        !wallet.types.includes('ios') &&
-        !wallet.types.includes('desktop')) ||
-      (isMobileOS(window) && wallet.types.length === 1 && wallet.types.includes('desktop'))
+      !selectedWallet ||
+      (selectedWallet.types.length <= 1 &&
+        !selectedWallet.types.includes('ios') &&
+        !selectedWallet.types.includes('desktop')) ||
+      (isMobileOS(window) &&
+        selectedWallet.types.length === 1 &&
+        selectedWallet.types.includes('desktop'))
     ) {
       return
     }
-
     setState(AlertState.INSTALL)
   }
 
-  const handleClickWallet = async (id: string, config: AlertConfig) => {
-    setIsLoading(true)
-    setShowMoreContent(false)
-    const selectedWallet = wallets.get(id)
-    setWallet(selectedWallet)
-
-    localStorage.setItem(
-      StorageKey.LAST_SELECTED_WALLET,
-      JSON.stringify({
-        key: selectedWallet?.key,
-        name: selectedWallet?.name,
-        type: getInitialWalletType(selectedWallet),
-        icon: selectedWallet?.image
-      })
-    )
-
-    if (selectedWallet?.types.includes('web') && selectedWallet?.types.length === 1) {
-      handleNewTab(config, selectedWallet)
-      return
-    }
-
-    if (
-      selectedWallet &&
-      selectedWallet.supportedInteractionStandards?.includes('wallet_connect')
-    ) {
-      const payload = await wcPayload
-      const isValid = hasWalletConnectSymKey(payload)
-      setIsWCWorking(isValid)
-
-      if (!isValid && selectedWallet?.name.toLowerCase().includes('kukai')) {
-        setQRCode('error')
-        setInstallState(selectedWallet)
-        setIsLoading(false)
-        return
-      }
-
-      if (isValid) {
-        if (isMobile && selectedWallet.types.includes('ios') && selectedWallet.types.length === 1) {
-          handleDeepLinking(selectedWallet)
-        } else {
-          setQRCode(payload)
-          setInstallState(selectedWallet)
-        }
-      }
-      setIsLoading(false)
-    } else if (isMobileOS(window) && selectedWallet?.types.includes('ios') && isMobile) {
-      setQRCode('')
-
-      if (config.pairingPayload) {
-        const link = getTzip10Link(
-          isIOS(window) && selectedWallet.deepLink
-            ? selectedWallet.deepLink
-            : isAndroid(window)
-              ? selectedWallet.links[OSLink.IOS]
-              : 'tezos://',
-          await p2pPayload
-        )
-
-        updateSelectedWalletWithURL(link)
-
-        if (isAndroid(window)) {
-          window.open(link, '_blank', 'noopener')
-        } else {
-          const a = document.createElement('a')
-          a.setAttribute('href', link)
-          a.setAttribute('rel', 'noopener')
-          a.dispatchEvent(
-            new MouseEvent('click', { view: window, bubbles: true, cancelable: true })
-          )
-        }
-
-        setIsLoading(false)
-      }
-    } else {
-      setInstallState(selectedWallet)
-      if (config.pairingPayload) {
-        const payload = await p2pPayload
-        setQRCode(payload)
-      }
-      setIsLoading(false)
-    }
-  }
-
-  const isRecord = (value: unknown): value is Record<string, unknown> =>
-    typeof value === 'object' && value !== null && !Array.isArray(value)
-
-  const readLastSelectedWallet = (): Record<string, unknown> | undefined => {
-    try {
-      const raw = localStorage.getItem(StorageKey.LAST_SELECTED_WALLET)
-      if (!raw) {
-        return undefined
-      }
-      const parsed: unknown = JSON.parse(raw)
-
-      return isRecord(parsed) ? parsed : undefined
-    } catch {
-      return undefined
-    }
-  }
-
-  const updateSelectedWalletWithURL = (url: string) => {
-    const wallet = readLastSelectedWallet()
-
-    if (!wallet || typeof wallet.key !== 'string' || !wallet.key) {
-      return
-    }
-
-    localStorage.setItem(
-      StorageKey.LAST_SELECTED_WALLET,
-      JSON.stringify({
-        ...wallet,
-        url
-      })
-    )
-  }
-
-  const handleNewTab = async (config: AlertConfig, wallet: MergedWallet) => {
+  const launchWebWallet = async (
+    action: WalletAction,
+    config: AlertConfig,
+    selectedWallet: MergedWallet
+  ) => {
     if (!config.pairingPayload) {
       return
     }
-
-    setIsLoading(true)
-    // Noopener feature parameter cannot be used, because Chrome will open
-    // about:blank#blocked instead and it will no longer work.
+    // Noopener would make Chrome open about:blank#blocked instead.
     const newTab = window.open('', '_blank')
-
+    action.placeholder = newTab ?? undefined
     if (newTab) {
       newTab.opener = null
     }
-
-    let link = ''
-
+    let link: string
     if (
-      wallet.supportedInteractionStandards?.includes('wallet_connect') &&
-      !wallet.name.toLowerCase().includes('kukai')
+      selectedWallet.supportedInteractionStandards?.includes('wallet_connect') &&
+      !selectedWallet.name.toLowerCase().includes('kukai')
     ) {
-      const payload = await wcPayload
-      const isValid = hasWalletConnectSymKey(payload)
-      setIsWCWorking(isValid)
-
-      if (!isValid) {
-        newTab?.close?.()
-        setIsLoading(false)
+      let payload: string
+      try {
+        payload = await wcPayload
+      } catch (error: unknown) {
+        if (!isCurrentAction(action)) {
+          return
+        }
+        payload = reportWalletConnectFailure(error)
+      }
+      if (!isCurrentAction(action)) {
         return
       }
-
-      link = `${wallet.links[OSLink.WEB]}/wc?uri=${encodeURIComponent(payload)}`
+      const isValid = hasWalletConnectSymKey(payload)
+      setIsWCWorking(isValid)
+      if (!isValid) {
+        return
+      }
+      link = `${selectedWallet.links[OSLink.WEB]}/wc?uri=${encodeURIComponent(payload)}`
     } else {
       const payload = await p2pPayload
-      link = getTzip10Link(wallet.links[OSLink.WEB], payload)
+      if (!isCurrentAction(action)) {
+        return
+      }
+      link = getTzip10Link(selectedWallet.links[OSLink.WEB], payload)
     }
-
     if (newTab) {
       newTab.location.href = link
+      action.placeholder = undefined
     } else {
       window.open(link, '_blank', 'noopener')
     }
-
-    localStorage.setItem(
-      StorageKey.LAST_SELECTED_WALLET,
-      JSON.stringify({
-        key: wallet.key,
-        name: wallet.name,
-        type: 'web',
-        icon: wallet?.image
-      })
-    )
+    storeSelectedWallet(selectedWallet, 'web')
   }
 
-  const handleDeepLinking = async (wallet: MergedWallet) => {
-    localStorage.setItem(
-      StorageKey.LAST_SELECTED_WALLET,
-      JSON.stringify({
-        key: wallet?.key,
-        name: wallet.name,
-        type: 'mobile',
-        icon: wallet?.image
-      })
-    )
-
-    const syncCode = await (wallet?.supportedInteractionStandards?.includes('wallet_connect')
-      ? wcPayload
-      : p2pPayload)
-
-    if (!wallet?.links[OSLink.IOS]?.length) {
+  const launchMobileWallet = async (selectedWallet: MergedWallet, syncCode: string) => {
+    if (!selectedWallet.links[OSLink.IOS]?.length) {
       if (!syncCode.length) {
-        onCloseHandler()
+        await onCloseHandler()
+
         return
       }
-
       setQRCode(syncCode)
       setState(AlertState.QR)
       setDisplayQRExtra(true)
 
       return
     }
-
-    let link = getTzip10Link(wallet.links[OSLink.IOS], syncCode)
-
-    if (wallet?.supportedInteractionStandards?.includes('wallet_connect')) {
-      link = `${wallet.links[OSLink.IOS]}wc?uri=${encodeURIComponent(syncCode)}`
-    }
-
+    const link = selectedWallet.supportedInteractionStandards?.includes('wallet_connect')
+      ? `${selectedWallet.links[OSLink.IOS]}wc?uri=${encodeURIComponent(syncCode)}`
+      : getTzip10Link(selectedWallet.links[OSLink.IOS], syncCode)
     updateSelectedWalletWithURL(link)
-    logger.log('DO DEEPLINK WITH ' + link)
-
+    logger.log(`DO DEEPLINK WITH ${link}`)
     if (isTwBrowser(window) && isAndroid(window)) {
       window.location.href = `${syncCode}`
     }
-    if (isAndroid(window)) {
-      window.open(link, '_blank', 'noopener')
+    openMobileLink(link)
+  }
+
+  const selectWalletConnectWallet = async (action: WalletAction, selectedWallet: MergedWallet) => {
+    let payload: string
+    try {
+      payload = await wcPayload
+    } catch (error: unknown) {
+      if (!isCurrentAction(action)) {
+        return
+      }
+      payload = reportWalletConnectFailure(error)
+    }
+    if (!isCurrentAction(action)) {
+      return
+    }
+    const isValid = hasWalletConnectSymKey(payload)
+    setIsWCWorking(isValid)
+    if (!isValid && selectedWallet.name.toLowerCase().includes('kukai')) {
+      setQRCode('error')
+      setInstallState(selectedWallet)
+
+      return
+    }
+    if (!isValid) {
+      return
+    }
+    if (isMobile && selectedWallet.types.includes('ios') && selectedWallet.types.length === 1) {
+      storeSelectedWallet(selectedWallet, 'mobile')
+      await launchMobileWallet(selectedWallet, payload)
     } else {
-      const a = document.createElement('a')
-      a.setAttribute('href', link)
-      a.setAttribute('rel', 'noopener')
-      a.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }))
+      setQRCode(payload)
+      setInstallState(selectedWallet)
     }
   }
 
+  const selectBeaconMobileWallet = async (
+    action: WalletAction,
+    config: AlertConfig,
+    selectedWallet: MergedWallet
+  ) => {
+    setQRCode('')
+    if (!config.pairingPayload) {
+      return
+    }
+    const payload = await p2pPayload
+    if (!isCurrentAction(action)) {
+      return
+    }
+    const link = getTzip10Link(
+      isIOS(window) && selectedWallet.deepLink
+        ? selectedWallet.deepLink
+        : isAndroid(window)
+          ? selectedWallet.links[OSLink.IOS]
+          : 'tezos://',
+      payload
+    )
+    updateSelectedWalletWithURL(link)
+    openMobileLink(link)
+  }
+
+  const handleClickWallet = (id: string, config: AlertConfig): Promise<void> =>
+    runWalletAction('handleClickWallet', async (action) => {
+      setShowMoreContent(false)
+      const selectedWallet = wallets.get(id)
+      setWallet(selectedWallet)
+      storeSelectedWallet(selectedWallet, getInitialWalletType(selectedWallet))
+      if (selectedWallet?.types.includes('web') && selectedWallet.types.length === 1) {
+        await launchWebWallet(action, config, selectedWallet)
+      } else if (selectedWallet?.supportedInteractionStandards?.includes('wallet_connect')) {
+        await selectWalletConnectWallet(action, selectedWallet)
+      } else if (isMobileOS(window) && selectedWallet?.types.includes('ios') && isMobile) {
+        await selectBeaconMobileWallet(action, config, selectedWallet)
+      } else {
+        setInstallState(selectedWallet)
+        if (config.pairingPayload) {
+          const payload = await p2pPayload
+          if (isCurrentAction(action)) {
+            setQRCode(payload)
+          }
+        }
+      }
+    })
+
+  const handleNewTab = (config: AlertConfig, selectedWallet: MergedWallet): Promise<void> =>
+    runWalletAction('handleNewTab', (action) => launchWebWallet(action, config, selectedWallet))
+
+  const handleDeepLinking = (selectedWallet: MergedWallet): Promise<void> =>
+    runWalletAction('handleDeepLinking', async (action) => {
+      storeSelectedWallet(selectedWallet, 'mobile')
+      let syncCode: string
+      if (selectedWallet.supportedInteractionStandards?.includes('wallet_connect')) {
+        try {
+          syncCode = await wcPayload
+        } catch (error: unknown) {
+          if (!isCurrentAction(action)) {
+            return
+          }
+          reportWalletConnectFailure(error)
+          setIsWCWorking(false)
+          setInstallState(selectedWallet)
+          if (selectedWallet.name.toLowerCase().includes('kukai')) {
+            setQRCode('error')
+          }
+
+          return
+        }
+      } else {
+        syncCode = await p2pPayload
+      }
+      if (isCurrentAction(action)) {
+        await launchMobileWallet(selectedWallet, syncCode)
+      }
+    })
+
   const handleClickOther = () => {
+    invalidateAction()
+    setIsLoading(false)
     localStorage.setItem(
       StorageKey.LAST_SELECTED_WALLET,
       JSON.stringify({
         key: 'wallet',
         name: 'wallet',
-        type: 'web', // we cannot know the destination wallet type since the user can copy paste the QR code
+        type: 'web',
         icon: getDefaultLogo()
       })
     )
     setState(AlertState.QR)
   }
 
-  const handleClickConnectExtension = async () => {
-    setShowMoreContent(false)
-    const message: ExtensionMessage<string> = {
-      target: ExtensionMessageTarget.EXTENSION,
-      payload: await postPayload,
-      targetId: wallet?.id
-    }
-    windowRef.postMessage(message, windowRef.location.origin)
-
-    if (wallet?.firefoxId) {
+  const handleClickConnectExtension = (): Promise<void> =>
+    runWalletAction('handleClickConnectExtension', async (action) => {
+      setShowMoreContent(false)
+      const selectedWallet = wallet
+      const payload = await postPayload
+      if (!isCurrentAction(action)) {
+        return
+      }
       const message: ExtensionMessage<string> = {
         target: ExtensionMessageTarget.EXTENSION,
-        payload: await postPayload,
-        targetId: wallet?.firefoxId
+        payload,
+        targetId: selectedWallet?.id
       }
       windowRef.postMessage(message, windowRef.location.origin)
-    }
-
-    localStorage.setItem(
-      StorageKey.LAST_SELECTED_WALLET,
-      JSON.stringify({
-        key: wallet?.key,
-        name: wallet?.name,
-        type: 'extension',
-        icon: wallet?.image
-      })
-    )
-  }
+      if (selectedWallet?.firefoxId) {
+        windowRef.postMessage(
+          { ...message, targetId: selectedWallet.firefoxId },
+          windowRef.location.origin
+        )
+      }
+      storeSelectedWallet(selectedWallet, 'extension')
+    })
 
   const handleClickInstallExtension = () => {
+    invalidateAction()
+    setIsLoading(false)
     setShowMoreContent(false)
     window.open(wallet?.links[OSLink.EXTENSION] || '', '_blank', 'noopener')
   }
 
-  const handleClickOpenDesktopApp = async () => {
-    setShowMoreContent(false)
-
-    if (p2pPayload) {
-      const link = getTzip10Link(wallet?.deepLink || '', await p2pPayload)
+  const handleClickOpenDesktopApp = (): Promise<void> =>
+    runWalletAction('handleClickOpenDesktopApp', async (action) => {
+      setShowMoreContent(false)
+      const selectedWallet = wallet
+      const payload = await p2pPayload
+      if (!isCurrentAction(action)) {
+        return
+      }
+      const link = getTzip10Link(selectedWallet?.deepLink || '', payload)
       window.open(link, '_blank', 'noopener')
-    }
-
-    localStorage.setItem(
-      StorageKey.LAST_SELECTED_WALLET,
-      JSON.stringify({
-        key: wallet?.key,
-        name: wallet?.name,
-        type: 'desktop',
-        icon: wallet?.image
-      })
-    )
-  }
+      storeSelectedWallet(selectedWallet, 'desktop')
+    })
 
   const handleClickDownloadDesktopApp = () => {
+    invalidateAction()
+    setIsLoading(false)
     setShowMoreContent(false)
     window.open(wallet?.links[OSLink.DESKTOP] || '', '_blank', 'noopener')
   }
 
-  const handleUpdateState = (newState: AlertState) => setState(newState)
+  const cancelPendingLaunch = () => {
+    invalidateAction()
+    setIsLoading(false)
+  }
 
+  const handleUpdateState = (newState: AlertState) => {
+    cancelPendingLaunch()
+    setState(newState)
+  }
   const handleUpdateQRCode = (uri: string) => setQRCode(uri)
-
   const handleShowMoreContent = () => setShowMoreContent((prev) => !prev)
-
   const handleDisplayQRExtra = (show: boolean) => setDisplayQRExtra(show)
-
-  const handleIsLoading = (isLoading: boolean) => setIsLoading(isLoading)
+  const handleIsLoading = (loading: boolean) => setIsLoading(loading)
 
   return [
     wallet,
@@ -379,8 +458,7 @@ const useConnect = (
     handleUpdateQRCode,
     handleShowMoreContent,
     handleDisplayQRExtra,
-    handleIsLoading
+    handleIsLoading,
+    cancelPendingLaunch
   ] as const
 }
-
-export default useConnect
