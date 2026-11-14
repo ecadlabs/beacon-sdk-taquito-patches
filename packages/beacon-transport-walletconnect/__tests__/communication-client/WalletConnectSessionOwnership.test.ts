@@ -1,4 +1,4 @@
-import { Logger, Serializer } from '@ecadlabs/beacon-core'
+import { InternalLogger, Logger, Serializer, setLogger } from '@ecadlabs/beacon-core'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import {
   BeaconErrorType,
@@ -207,6 +207,85 @@ describe('WalletConnect session ownership', () => {
       expect(client.currentSession()).toBeUndefined()
       if (cleanupRejects) {
         expect(warn).toHaveBeenCalledWith('closeActiveSession cleanup', 'SDK disconnect failed')
+      }
+    }
+  )
+
+  it.each(['lookup', 'listener'] as const)(
+    'reports a failed session-update %s once and delivers the next account update',
+    async (source) => {
+      const failure = new Error(`${source} failed`)
+      const diagnostic = vi.fn()
+      setLogger({
+        diagnostic,
+        debug: vi.fn(),
+        log: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        time: vi.fn(),
+        timeLog: vi.fn()
+      })
+      try {
+        if (source === 'listener') {
+          await client.listenForEncryptedMessage(
+            'failing-update-listener',
+            vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined)
+          )
+        }
+        const current = client.currentSession()
+        const update = mockHandlers.get('session_update')
+        if (!current || !update) throw new Error('Missing active session or update registration')
+        const event = { topic: current.topic, params: { namespaces: current.namespaces } }
+        update(event)
+        await flush()
+        expect(mockRequests[0].input.request.method).toBe('tezos_getAccounts')
+        if (source === 'lookup') {
+          mockRequests[0].reply.reject(failure)
+        } else {
+          mockRequests[0].reply.resolve([
+            { algo: 'ed25519', address: account, pubkey: 'edpk-first-public-key' }
+          ])
+        }
+        await flush()
+
+        expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
+          level: 'warn',
+          service: 'WalletConnectCommunicationClient',
+          method: 'session_update active account',
+          args: [`${source} failed`]
+        })
+        expect(client.currentSession()).toBe(current)
+        expect(mockRemote.disconnect).not.toHaveBeenCalled()
+        expect(responses).toEqual(
+          source === 'lookup'
+            ? []
+            : [
+                expect.objectContaining({
+                  type: BeaconMessageType.ChangeAccountRequest,
+                  senderId: 'current',
+                  publicKey: 'edpk-first-public-key'
+                })
+              ]
+        )
+
+        responses.length = 0
+        update(event)
+        await flush()
+        mockRequests[1].reply.resolve([
+          { algo: 'ed25519', address: account, pubkey: 'edpk-recovered-public-key' }
+        ])
+        await flush()
+        expect(responses).toEqual([
+          expect.objectContaining({
+            type: BeaconMessageType.ChangeAccountRequest,
+            senderId: 'current',
+            publicKey: 'edpk-recovered-public-key',
+            network: { type: NetworkType.MAINNET }
+          })
+        ])
+        expect(diagnostic).toHaveBeenCalledTimes(1)
+      } finally {
+        setLogger(new InternalLogger())
       }
     }
   )

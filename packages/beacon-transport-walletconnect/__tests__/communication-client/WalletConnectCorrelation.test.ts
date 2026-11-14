@@ -341,11 +341,18 @@ describe('WalletConnect request ownership (#102)', () => {
     ])
   })
 
-  it('an obsolete session-delete event does not mark the replacement as disconnected', async () => {
-    restoreSession('replacement')
-    await client.init()
+  it('clears the disconnect marker on restart and ignores an obsolete session-delete event', async () => {
     const deleted = mockHandlers.get('session_delete')
     if (!deleted) throw new Error('Missing session-delete handler')
+    deleted({ topic: 'current' })
+    await flush()
+    expect(client.disconnectionEvents).toEqual(new Set(['session_delete']))
+    expect(client.currentSession()).toBeUndefined()
+
+    restoreSession('replacement')
+    await client.init()
+    expect(client.disconnectionEvents.size).toBe(0)
+    responses.length = 0
     deleted({ topic: 'current' })
     await flush()
     expect(client.disconnectionEvents.size).toBe(0)

@@ -500,7 +500,7 @@ const showInvalidAccountDeactivated = async (
     return
   }
 
-  await openAlert({
+  openAlert({
     title: 'Error',
     body: `Your session has expired. Please pair with your wallet again.`
   })
