@@ -13,6 +13,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import { DAppClient } from '../../src/dapp-client/DAppClient'
+import { BeaconEvent } from '../../src/events'
 import { DappP2PTransport } from '../../src/transports/DappP2PTransport'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
 
@@ -473,6 +474,74 @@ describe('Leader proxy ownership', () => {
       ])
       expect(connectionStarted).toHaveBeenCalledTimes(2)
     } finally {
+      write.resolve()
+      await selection
+    }
+  })
+
+  it('publishes a fresh adapter when a role change retires the prepared selection during its account write', async () => {
+    boundary.elector.isLeader = false
+    await create()
+    reconnect = new ExposedPromise<void>()
+    await receive({ type: 'LEADER_DEAD' })
+    const selected = vi.fn()
+    await client.subscribeToEvent(BeaconEvent.ACTIVE_TRANSPORT_SET, selected)
+    const write = new ExposedPromise<void>()
+    const entered = new ExposedPromise<void>()
+    const set = storage.set.bind(storage)
+    const next: AccountInfo = { ...account, accountIdentifier: 'role-change-account' }
+    vi.spyOn(storage, 'set').mockImplementation(async (key, value) => {
+      if (key === StorageKey.ACTIVE_ACCOUNT && value === next.accountIdentifier) {
+        entered.resolve()
+        await write.promise
+      }
+      return set(key, value)
+    })
+    const selection = client.setActiveAccount(next)
+    await entered.promise
+    try {
+      boundary.elector.isLeader = false
+      boundary.elector.awaitLeadership.mockResolvedValue(undefined)
+      await receive({ type: 'LEADER_DEAD' })
+      reconnect.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(selected).toHaveBeenCalledWith(undefined, undefined)
+
+      class FollowerTransport extends DappWalletConnectTransport {
+        public override async connect(): Promise<void> {
+          this._isConnected = TransportStatus.SECONDARY_TAB_CONNECTED
+          this.isReady.resolve(true)
+        }
+        public override async getPeers(): Promise<ExtendedWalletConnectPairingResponse[]> {
+          return [peer]
+        }
+        public override async disconnect(): Promise<void> {
+          this._isConnected = TransportStatus.NOT_CONNECTED
+        }
+        public override async doClientCleanup(): Promise<void> {}
+        public override forceUpdate(): void {}
+      }
+      transport = new FollowerTransport(
+        'Replacement wallet',
+        await getKeypairFromSeed('leader-proxy'),
+        storage,
+        { network: NetworkType.MAINNET, opts: { projectId: 'offline' } },
+        async () => boundary.elector.isLeader
+      )
+      write.resolve()
+      await selection
+      await expect(client.getActiveAccount()).resolves.toEqual(next)
+      expect(selected).toHaveBeenLastCalledWith(
+        { type: transport.type, connectionStatus: TransportStatus.SECONDARY_TAB_CONNECTED },
+        undefined
+      )
+      expect(selected).not.toHaveBeenCalledWith(
+        { type: transport.type, connectionStatus: TransportStatus.CONNECTED },
+        undefined
+      )
+      expect(client.connectionStatus).toBe(TransportStatus.SECONDARY_TAB_CONNECTED)
+    } finally {
+      reconnect.resolve()
       write.resolve()
       await selection
     }
