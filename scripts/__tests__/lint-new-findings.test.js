@@ -8,26 +8,26 @@ const { execFileSync, spawnSync } = require('node:child_process')
 const gate = resolve(__dirname, '../lint-new-findings.mjs')
 const file = 'packages/sample/src/example.ts'
 
-function fixture(t) {
+function fixture(t, { source = file } = {}) {
   const cwd = mkdtempSync(join(tmpdir(), 'lint-gate-'))
   t.after(() => rmSync(cwd, { recursive: true, force: true }))
   mkdirSync(join(cwd, 'packages/sample/src'), { recursive: true })
   mkdirSync(join(cwd, 'scripts'))
   mkdirSync(join(cwd, 'bin'))
-  writeFileSync(join(cwd, file), 'export const first = 1\nexport const second = 2\n')
-  writeFileSync(join(cwd, 'scripts/lint-baseline.json'), JSON.stringify({ [file]: { debt: 1 } }))
+  writeFileSync(join(cwd, source), 'export const first = 1\nexport const second = 2\n')
+  writeFileSync(join(cwd, 'scripts/lint-baseline.json'), JSON.stringify({ [source]: { debt: 1 } }))
   const git = (...args) => execFileSync('git', args, { cwd, stdio: 'pipe' })
   git('init', '-q')
   git('add', '.')
   git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
   git('branch', 'base')
-  writeFileSync(join(cwd, file), 'export const first = 1\nexport const second = 3\n')
+  writeFileSync(join(cwd, source), 'export const first = 1\nexport const second = 3\n')
   writeFileSync(join(cwd, 'bin/npx'), `#!/usr/bin/env node
 if (process.env.FAKE_SIGNAL) process.kill(process.pid, 'SIGTERM')
 else { process.stdout.write(process.env.FAKE_REPORT); process.exit(Number(process.env.FAKE_EXIT)) }
 `, { mode: 0o755 })
   const run = (messages, { status = messages.some(m => m.severity === 2) ? 1 : 0, raw, transform = report => report, args = [], env = {} } = {}) => {
-    const report = [{ filePath: join(cwd, file), messages, errorCount: messages.filter(m => m.severity === 2).length, warningCount: messages.filter(m => m.severity === 1).length, fatalErrorCount: messages.filter(m => m.fatal).length }]
+    const report = [{ filePath: join(cwd, source), messages, errorCount: messages.filter(m => m.severity === 2).length, warningCount: messages.filter(m => m.severity === 1).length, fatalErrorCount: messages.filter(m => m.fatal).length }]
     return spawnSync(process.execPath, [gate, ...args], { cwd, encoding: 'utf8', env: { ...process.env, PATH: `${join(cwd, 'bin')}:${process.env.PATH}`, LINT_BASE_REF: 'base', FAKE_REPORT: raw ?? JSON.stringify(transform(report)), FAKE_EXIT: String(status), ...env } })
   }
   return { run, cwd, git }
@@ -113,7 +113,7 @@ test('new source files own every line even when a baseline allowance exists', t 
 
 test('reports cannot omit a source file', t => {
   const { run, cwd } = fixture(t)
-  writeFileSync(join(cwd, 'packages/sample/src/other.ts'), 'export const other = 1\n')
+  writeFileSync(join(cwd, 'packages/sample/src/other.tsx'), 'export const other = 1\n')
   const result = run([debt])
   assert.equal(result.status, 2, result.stdout + result.stderr)
   assert.match(result.stderr, /omitted source files/)
@@ -146,4 +146,33 @@ test('baseline update records reductions explicitly', t => {
   const result = run([], { args: ['--update-baseline'] })
   assert.equal(result.status, 0, result.stdout + result.stderr)
   assert.deepEqual(JSON.parse(readFileSync(join(cwd, 'scripts/lint-baseline.json'), 'utf8')), {})
+})
+
+test('TSX sources share the existing debt, touched-line and baseline-update policy', async t => {
+  const source = 'packages/sample/src/component.tsx'
+  for (const [name, messages, expected] of [
+    ['existing debt', [debt], 0],
+    ['touched finding', [{ ...debt, line: 2 }], 1],
+    ['count growth', [debt, debt], 1]
+  ]) await t.test(name, t => {
+    const { run } = fixture(t, { source })
+    const result = run(messages)
+    assert.equal(result.status, expected, result.stdout + result.stderr)
+  })
+  await t.test('new source owns every line', t => {
+    const { run, git } = fixture(t, { source })
+    git('rm', '--cached', source)
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'remove source')
+    const result = run([debt], { env: { LINT_BASE_REF: 'HEAD' } })
+    assert.equal(result.status, 1, result.stdout + result.stderr)
+  })
+  await t.test('baseline update retains TSX counts', t => {
+    const { readFileSync } = require('node:fs')
+    const { run, cwd } = fixture(t, { source })
+    const result = run([debt], { args: ['--update-baseline'] })
+    assert.equal(result.status, 0, result.stdout + result.stderr)
+    assert.deepEqual(JSON.parse(readFileSync(join(cwd, 'scripts/lint-baseline.json'), 'utf8')), {
+      [source]: { debt: 1 }
+    })
+  })
 })

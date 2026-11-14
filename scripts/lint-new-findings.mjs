@@ -22,7 +22,7 @@ function git(args) {
 }
 
 function sourceFile(file) {
-  return /^packages\/[^/]+\/src\/.*\.ts$/.test(file)
+  return /^packages\/[^/]+\/src\/.*\.tsx?$/.test(file)
 }
 
 function files(args) {
@@ -33,7 +33,7 @@ function sourceFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     const file = resolve(directory, entry.name)
     if (entry.isDirectory()) return sourceFiles(file)
-    return entry.isFile() && entry.name.endsWith('.ts') ? [relative(cwd, file)] : []
+    return entry.isFile() && sourceFile(relative(cwd, file)) ? [relative(cwd, file)] : []
   })
 }
 

@@ -3,12 +3,14 @@
 After `npm ci --include=optional`, run `npm run prebuild` and
 `npm run build:packages` before type-aware lint.
 
-`npm run lint:new` runs ESLint across every TypeScript source file under
+`npm run lint:new` runs ESLint across every `.ts` and `.tsx` source file under
 `packages/*/src`. Every per-file, per-rule count must stay at or below
 `scripts/lint-baseline.json`. Missing entries allow zero findings. Reductions
 pass without changing the baseline, so independent cleanup branches can merge.
-The initial baseline has no `no-explicit-any` findings and seven
-`no-floating-promises` findings.
+The baseline records measured findings at the current target branch, including
+existing TSX debt. It does not disable rules or exempt touched TSX lines.
+Remove allowances for resolved findings when recording the next baseline; retain
+findings from cleanup PRs that have not merged yet.
 
 The command also rejects findings on added or modified lines against the merge
 base with `LINT_BASE_REF`, which defaults to `origin/taquito-patches`. This catches
