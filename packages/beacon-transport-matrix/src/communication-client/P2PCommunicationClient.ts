@@ -68,6 +68,15 @@ interface BeaconInfoResponse {
   timestamp: number
 }
 
+interface RelayServer {
+  server: string
+  timestamp: number
+}
+
+interface CachedRelayServer extends RelayServer {
+  localTimestamp: number
+}
+
 interface MatrixSessionIdentity {
   readonly id: symbol
   readonly ready: ExposedPromise<MatrixClient>
@@ -157,8 +166,7 @@ export class P2PCommunicationClient extends CommunicationClient {
 
   private selectedRegion?: Regions
   private readonly ENABLED_RELAY_SERVERS: NodeDistributions
-  public relayServer:
-    ExposedPromise<{ server: string; timestamp: number; localTimestamp: number }> | undefined
+  public relayServer: ExposedPromise<CachedRelayServer> | undefined
   private activeRelayServer: string | undefined
 
   public get currentRelayServer(): string | undefined {
@@ -346,53 +354,15 @@ export class P2PCommunicationClient extends CommunicationClient {
     return { server: best.server, timestamp: best.timestamp }
   }
 
-  public async getRelayServer(): Promise<{ server: string; timestamp: number }> {
+  public async getRelayServer(): Promise<RelayServer> {
     const owner = this.captureSession()
     const session = owner.id
     this.assertRelaySession(session)
     if (this.relayServer) {
-      const currentPromise = this.relayServer
-      const relayServer = await currentPromise.promise
+      const cached = await this.reuseCachedRelay(owner, this.relayServer)
       this.assertRelaySession(session)
-      if (Date.now() - relayServer.localTimestamp < 60 * 1000) {
-        this.recordRelayServer(relayServer.server)
-
-        return { server: relayServer.server, timestamp: relayServer.timestamp }
-      }
-      try {
-        const info = await this.getBeaconInfo(relayServer.server)
-        this.assertRelaySession(session)
-        if (this.relayServer === currentPromise) {
-          this.relayServer = ExposedPromise.resolve({
-            server: relayServer.server,
-            timestamp: info.timestamp,
-            localTimestamp: Date.now()
-          })
-        }
-        this.recordRelayServer(relayServer.server)
-
-        return { server: relayServer.server, timestamp: info.timestamp }
-      } catch (error) {
-        this.assertRelaySession(session)
-        const replacement = this.relayServer
-        if (replacement && replacement !== currentPromise) {
-          const latest = await replacement.promise
-          this.assertRelaySession(session)
-          this.recordRelayServer(latest.server)
-
-          return { server: latest.server, timestamp: latest.timestamp }
-        }
-        logger.log('getRelayServer', `cached server ${relayServer.server} is unreachable`, error)
-        await this.writeSessionState(owner, () =>
-          this.storage
-            .delete(StorageKey.MATRIX_SELECTED_NODE)
-            .catch((failure) => logger.log(failure))
-        )
-        this.assertRelaySession(session)
-        if (this.relayServer === currentPromise) {
-          this.relayServer = undefined
-          this.selectedRegion = undefined
-        }
+      if (cached) {
+        return cached
       }
     }
 
@@ -404,61 +374,133 @@ export class P2PCommunicationClient extends CommunicationClient {
       return { server: relayServer.server, timestamp: relayServer.timestamp }
     }
 
-    const discovery = new ExposedPromise<{
-      server: string
-      timestamp: number
-      localTimestamp: number
-    }>()
+    const discovery = new ExposedPromise<CachedRelayServer>()
     // The initiating caller observes its own rejection; there may be no other waiters.
     discovery.promise.catch(() => undefined)
     this.relayServer = discovery
-    try {
-      const node = await this.storage.get(StorageKey.MATRIX_SELECTED_NODE)
-      this.assertRelaySession(session)
-      if (node && node.length > 0) {
-        const enabledServers = Object.values(this.ENABLED_RELAY_SERVERS).flatMap(
-          (servers) => servers ?? []
-        )
-        const isNodeAllowed = enabledServers.length === 0 || enabledServers.includes(node)
 
-        if (!isNodeAllowed) {
+    return this.discoverRelay(owner, discovery)
+  }
+
+  private async reuseCachedRelay(
+    owner: MatrixSessionIdentity,
+    currentPromise: ExposedPromise<CachedRelayServer>
+  ): Promise<RelayServer | undefined> {
+    const session = owner.id
+    const relayServer = await currentPromise.promise
+    this.assertRelaySession(session)
+    if (Date.now() - relayServer.localTimestamp < 60 * 1000) {
+      this.recordRelayServer(relayServer.server)
+
+      return { server: relayServer.server, timestamp: relayServer.timestamp }
+    }
+    try {
+      const info = await this.getBeaconInfo(relayServer.server)
+      this.assertRelaySession(session)
+      if (this.relayServer === currentPromise) {
+        this.relayServer = ExposedPromise.resolve({
+          server: relayServer.server,
+          timestamp: info.timestamp,
+          localTimestamp: Date.now()
+        })
+      }
+      this.recordRelayServer(relayServer.server)
+
+      return { server: relayServer.server, timestamp: info.timestamp }
+    } catch (error) {
+      this.assertRelaySession(session)
+      const replacement = this.relayServer
+      if (replacement && replacement !== currentPromise) {
+        const latest = await replacement.promise
+        this.assertRelaySession(session)
+        this.recordRelayServer(latest.server)
+
+        return { server: latest.server, timestamp: latest.timestamp }
+      }
+      logger.log('getRelayServer', `cached server ${relayServer.server} is unreachable`, error)
+      await this.writeSessionState(owner, () =>
+        this.storage.delete(StorageKey.MATRIX_SELECTED_NODE).catch((failure) => logger.log(failure))
+      )
+      this.assertRelaySession(session)
+      if (this.relayServer === currentPromise) {
+        this.relayServer = undefined
+        this.selectedRegion = undefined
+      }
+    }
+
+    return undefined
+  }
+
+  private async restoreStoredRelay(
+    owner: MatrixSessionIdentity,
+    discovery: ExposedPromise<CachedRelayServer>
+  ): Promise<RelayServer | undefined> {
+    const session = owner.id
+    const node = await this.storage.get(StorageKey.MATRIX_SELECTED_NODE)
+    this.assertRelaySession(session)
+    if (node && node.length > 0) {
+      const enabledServers = Object.values(this.ENABLED_RELAY_SERVERS).flatMap(
+        (servers) => servers ?? []
+      )
+      const isNodeAllowed = enabledServers.length === 0 || enabledServers.includes(node)
+
+      if (!isNodeAllowed) {
+        await this.writeSessionState(owner, () =>
+          this.storage
+            .delete(StorageKey.MATRIX_SELECTED_NODE)
+            .catch((failure) => logger.log(failure))
+        )
+        this.assertRelaySession(session)
+      } else {
+        try {
+          const info = await this.getBeaconInfo(node)
+          this.assertRelaySession(session)
+          this.selectStoredRelayRegion(node)
+          discovery.resolve({ server: node, timestamp: info.timestamp, localTimestamp: Date.now() })
+          this.recordRelayServer(node)
+
+          return { server: node, timestamp: info.timestamp }
+        } catch (error) {
+          this.assertRelaySession(session)
+          logger.log('getRelayServer', `stored node ${node} is unreachable`, error)
           await this.writeSessionState(owner, () =>
             this.storage
               .delete(StorageKey.MATRIX_SELECTED_NODE)
               .catch((failure) => logger.log(failure))
           )
           this.assertRelaySession(session)
-        } else {
-          try {
-            const info = await this.getBeaconInfo(node)
-            this.assertRelaySession(session)
-            if (!this.selectedRegion) {
-              const isRegionKey = (key: string): key is Regions =>
-                Object.values<string>(Regions).includes(key)
-              const matchingRegion = Object.entries(this.ENABLED_RELAY_SERVERS).find(
-                ([key, servers]) => isRegionKey(key) && servers?.includes(node)
-              )?.[0]
-              const fallbackRegion = Object.keys(this.ENABLED_RELAY_SERVERS).find(isRegionKey)
-              const candidate = matchingRegion ?? fallbackRegion
-              if (candidate && isRegionKey(candidate)) {
-                this.selectedRegion = candidate
-              }
-            }
-            discovery.resolve({ server: node, timestamp: info.timestamp, localTimestamp: Date.now() })
-            this.recordRelayServer(node)
-
-            return { server: node, timestamp: info.timestamp }
-          } catch (error) {
-            this.assertRelaySession(session)
-            logger.log('getRelayServer', `stored node ${node} is unreachable`, error)
-            await this.writeSessionState(owner, () =>
-              this.storage
-                .delete(StorageKey.MATRIX_SELECTED_NODE)
-                .catch((failure) => logger.log(failure))
-            )
-            this.assertRelaySession(session)
-          }
         }
+      }
+    }
+
+    return undefined
+  }
+
+  private selectStoredRelayRegion(server: string): void {
+    if (!this.selectedRegion) {
+      const isRegionKey = (key: string): key is Regions =>
+        Object.values<string>(Regions).includes(key)
+      const matchingRegion = Object.entries(this.ENABLED_RELAY_SERVERS).find(
+        ([key, servers]) => isRegionKey(key) && servers?.includes(server)
+      )?.[0]
+      const fallbackRegion = Object.keys(this.ENABLED_RELAY_SERVERS).find(isRegionKey)
+      const candidate = matchingRegion ?? fallbackRegion
+      if (candidate && isRegionKey(candidate)) {
+        this.selectedRegion = candidate
+      }
+    }
+  }
+
+  private async discoverRelay(
+    owner: MatrixSessionIdentity,
+    discovery: ExposedPromise<CachedRelayServer>
+  ): Promise<RelayServer> {
+    const session = owner.id
+    try {
+      const stored = await this.restoreStoredRelay(owner, discovery)
+      this.assertRelaySession(session)
+      if (stored) {
+        return stored
       }
       const server = await this.findBestRegionAndGetServer(session)
       this.assertRelaySession(session)
