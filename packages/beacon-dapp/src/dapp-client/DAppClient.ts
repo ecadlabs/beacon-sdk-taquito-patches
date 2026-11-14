@@ -4454,11 +4454,7 @@ export class DAppClient extends Client {
       const messageId = otherTabMessageId ?? (await generateGUID())
       const stillAdmitted = () => !delegated || this.isRequestCurrent(delegated.key)
 
-      await this.init()
-      if (!stillAdmitted()) {
-        return delegatedCompletion
-      }
-
+      // Check before init() so a rate-limited request never opens pairing.
       const rateLimited = await this.addRequestAndCheckIfRateLimited()
       if (!stillAdmitted()) {
         return delegatedCompletion
@@ -4468,6 +4464,11 @@ export class DAppClient extends Client {
           .emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
           .catch((emitError) => logger.warn('requestDispatch', emitError))
         throw new Error('rate limit reached')
+      }
+
+      await this.init()
+      if (!stillAdmitted()) {
+        return delegatedCompletion
       }
 
       const permitted = await this.checkPermissions(requestInput.type)
@@ -4544,10 +4545,7 @@ export class DAppClient extends Client {
     const prepare = async (): Promise<RequestResponse> => {
       const messageId = otherTabMessageId ?? (await generateGUID())
       const stillAdmitted = () => !delegated || this.isRequestCurrent(delegated.key)
-      await this.init()
-      if (delegated && !stillAdmitted()) {
-        return delegated.promise
-      }
+      // Check before init() so a rate-limited request never opens pairing.
       const rateLimited = await this.addRequestAndCheckIfRateLimited()
       if (delegated && !stillAdmitted()) {
         return delegated.promise
@@ -4557,6 +4555,10 @@ export class DAppClient extends Client {
           .emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
           .catch((emitError) => logger.warn('requestDispatch', emitError))
         throw new Error('rate limit reached')
+      }
+      await this.init()
+      if (delegated && !stillAdmitted()) {
+        return delegated.promise
       }
       if (!this.beaconId) {
         throw await this.sendInternalError('BeaconID not defined')

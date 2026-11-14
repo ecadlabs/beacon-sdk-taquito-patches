@@ -409,6 +409,19 @@ describe('DAppClient typed error rejections', () => {
       expect(onOperationError).not.toHaveBeenCalled()
     })
 
+    it('rejects a rate-limited permission request before pairing starts', async () => {
+      const init = vi.spyOn(dapp, 'init')
+      vi.spyOn(dapp as any, 'addRequestAndCheckIfRateLimited').mockResolvedValue(true)
+
+      const error: unknown = await dapp.requestPermissions().then(
+        () => { throw new Error('Expected requestPermissions to reject') },
+        (err: unknown) => err
+      )
+
+      expect(error).toBeInstanceOf(UnknownBeaconError)
+      expect(init).not.toHaveBeenCalled()
+    })
+
     it('rejects with ParametersInvalidBeaconError when sign payload does not start with 03 prefix for OPERATION', async () => {
       const error: any = await dapp.requestSignPayload({
         signingType: SigningType.OPERATION,
