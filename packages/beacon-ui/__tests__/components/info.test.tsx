@@ -50,11 +50,11 @@ describe('Info Component', () => {
     expect(screen.getByTestId('dummy-icon')).toBeInTheDocument()
 
     // Check if the icon container has the badge class
-    const iconContainer = container.querySelector('.info-icon')
+    const iconContainer = container.querySelector<HTMLElement>('.info-icon')
     expect(iconContainer).toHaveClass('info-badge')
 
     // Check if bigIcon style is applied (font size set to 3.4em)
-    expect(iconContainer).toHaveStyle('font-size: 3.4em')
+    expect(iconContainer?.style.fontSize).toBe('3.4em')
   })
 
   test('renders buttons and handles click events', () => {

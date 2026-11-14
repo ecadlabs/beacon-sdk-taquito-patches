@@ -77,7 +77,7 @@ jobs:
     # depends on Ubuntu's apt mirrors. scripts/check-playwright-image.mjs keeps
     # the tag in step with the locked @playwright/test version.
     container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      image: mcr.microsoft.com/playwright:v1.65.0-noble
       options: --user 1001 --ipc=host
 
     steps:
