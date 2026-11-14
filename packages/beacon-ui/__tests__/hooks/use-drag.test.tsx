@@ -1,7 +1,38 @@
 import { render, fireEvent } from '@testing-library/react'
-import useDrag from '../../src/components/toast/hooks/useDrag'
+import { useDrag } from '../../src/components/toast/hooks/useDrag'
 
 describe('useDrag hook', () => {
+  test('uses the current handler during a drag and stops after reset or unmount', () => {
+    const firstHandler = vi.fn()
+    const latestHandler = vi.fn()
+    const TestComponent = ({ handler, open }: {
+      handler: (state: { offset: [number, number] }) => void
+      open: boolean
+    }) => {
+      const bindDrag = useDrag(handler, open)
+      return <div data-testid="drag-element" {...bindDrag()} />
+    }
+    const { getByTestId, rerender, unmount } = render(
+      <TestComponent handler={firstHandler} open={true} />
+    )
+    fireEvent.mouseDown(getByTestId('drag-element'), { clientX: 100, clientY: 100 })
+    rerender(<TestComponent handler={latestHandler} open={true} />)
+    fireEvent.mouseMove(document, { clientX: 110, clientY: 120 })
+    expect(latestHandler).toHaveBeenCalledExactlyOnceWith({ offset: [10, 20] })
+    expect(firstHandler).not.toHaveBeenCalled()
+
+    rerender(<TestComponent handler={latestHandler} open={false} />)
+    fireEvent.mouseMove(document, { clientX: 200, clientY: 200 })
+    expect(latestHandler).toHaveBeenCalledTimes(1)
+    rerender(<TestComponent handler={latestHandler} open={true} />)
+    fireEvent.mouseDown(getByTestId('drag-element'), { clientX: 100, clientY: 100 })
+    fireEvent.mouseMove(document, { clientX: 105, clientY: 108 })
+    expect(latestHandler).toHaveBeenLastCalledWith({ offset: [5, 8] })
+    unmount()
+    fireEvent.mouseMove(document, { clientX: 300, clientY: 300 })
+    expect(latestHandler).toHaveBeenCalledTimes(2)
+  })
+
   test('handles dragging events correctly', () => {
     const handler = vi.fn()
 

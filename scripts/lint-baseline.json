@@ -26,11 +26,6 @@
     "arrow-body-style": 1,
     "import/no-default-export": 1
   },
-  "packages/beacon-ui/src/components/pair-other/index.tsx": {
-    "@typescript-eslint/no-unused-expressions": 1,
-    "import/no-default-export": 1,
-    "no-void": 2
-  },
   "packages/beacon-ui/src/components/pairing.tsx": {
     "arrow-body-style": 4,
     "import/order": 1,
@@ -40,16 +35,6 @@
     "import/no-default-export": 1,
     "import/order": 1,
     "no-console": 1
-  },
-  "packages/beacon-ui/src/components/toast/hooks/useDrag.tsx": {
-    "@typescript-eslint/no-use-before-define": 2,
-    "curly": 1,
-    "import/no-default-export": 1
-  },
-  "packages/beacon-ui/src/components/toast/index.tsx": {
-    "import/no-default-export": 1,
-    "import/order": 1,
-    "padding-line-between-statements": 2
   },
   "packages/beacon-ui/src/components/top-wallets/index.tsx": {
     "arrow-body-style": 1,
@@ -91,17 +76,5 @@
   },
   "packages/beacon-ui/src/ui/alert/hooks/useIsMobile.tsx": {
     "import/no-default-export": 1
-  },
-  "packages/beacon-ui/src/ui/alert/index.tsx": {
-    "@typescript-eslint/no-unused-expressions": 1,
-    "@typescript-eslint/no-use-before-define": 1,
-    "import/order": 1,
-    "padding-line-between-statements": 3
-  },
-  "packages/beacon-ui/src/ui/toast/index.tsx": {
-    "@typescript-eslint/no-use-before-define": 2,
-    "@typescript-eslint/unbound-method": 1,
-    "import/order": 2,
-    "padding-line-between-statements": 3
   }
 }

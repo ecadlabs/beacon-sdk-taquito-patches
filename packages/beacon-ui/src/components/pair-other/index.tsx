@@ -3,17 +3,17 @@ import QR from '../qr'
 
 import { PairOtherProps } from '../../ui/common'
 
-const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
+export const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
   const [uiState, setUiState] = useState<'selection' | 'p2p' | 'walletconnect'>('selection')
   const [hasBeacon, setHasBeacon] = useState<boolean>(false)
   const [hasWalletConnect, setHasWalletConnect] = useState<boolean>(false)
   const [qrData, setQrData] = useState<string>('')
 
   useEffect(() => {
-    void props.p2pPayload
+    props.p2pPayload
       .then((p2p) => setHasBeacon(p2p && p2p.length > 0 ? true : false))
       .catch(() => setHasBeacon(false))
-    void Promise.resolve(props.wcPayload)
+    Promise.resolve(props.wcPayload)
       .then((wc) => setHasWalletConnect(wc && wc.length > 0 ? true : false))
       .catch(() => setHasWalletConnect(false))
     setUiState('selection')
@@ -21,7 +21,8 @@ const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
   }, [])
 
   const buttonClickHandler = async (state: 'p2p' | 'walletconnect') => {
-    state === 'p2p' ? setQrData(await props.p2pPayload) : setQrData(await props.wcPayload)
+    const payload = state === 'p2p' ? await props.p2pPayload : await props.wcPayload
+    setQrData(payload)
     setUiState(state)
   }
 
@@ -60,5 +61,3 @@ const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
     </>
   )
 }
-
-export default PairOther

@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react'
-import PairOther from '../../src/components/pair-other'
+import { PairOther } from '../../src/components/pair-other'
 import { PairOtherProps } from '../../src/ui/common'
 
 // Mock the QR component so that we can inspect its rendered output.

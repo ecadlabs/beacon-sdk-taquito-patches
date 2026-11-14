@@ -1,4 +1,4 @@
-import { act } from '@testing-library/react'
+import { act, fireEvent } from '@testing-library/react'
 
 describe('Alert UI lifecycle (openAlert / closeAlert)', () => {
   beforeEach(() => {
@@ -27,6 +27,68 @@ describe('Alert UI lifecycle (openAlert / closeAlert)', () => {
       null
     )
   }
+
+  test.each(['success', 'throw', 'reject'] as const)(
+    'closes before starting the config callback and observes %s with its receiver',
+    async (outcome) => {
+      const { setLogger, InternalLogger } = await import('@ecadlabs/beacon-core')
+      const { openAlert, closeAlert } = await import('../../../src/ui/alert')
+      const diagnostic = vi.fn()
+      setLogger({
+        debug: vi.fn(),
+        log: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        time: vi.fn(),
+        timeLog: vi.fn(),
+        diagnostic
+      })
+      const failure = new Error('alert close failed')
+      const starts: string[] = []
+      const config = {
+        title: 'Callback alert',
+        closeButtonCallback() {
+          starts.push(this.title)
+          openAlert({ title: 'Follow-up alert' })
+          if (outcome === 'throw') {
+            throw failure
+          }
+          return outcome === 'reject' ? Promise.reject(failure) : Promise.resolve()
+        }
+      }
+      try {
+        await act(async () => openAlert(config))
+        const closeButton = document.querySelector('beacon-alert')?.shadowRoot
+          ?.querySelector<HTMLElement>('.alert-header .button-icon')
+        expect(closeButton).toBeTruthy()
+        await act(async () => {
+          if (closeButton) {
+            fireEvent.click(closeButton)
+          }
+          expect(starts).toEqual(['Callback alert'])
+        })
+        expect(getAlertWrapper()).toHaveClass('alert-wrapper-show')
+        expect(getAlertShadowText()).toContain('Follow-up alert')
+        expect(diagnostic).toHaveBeenCalledTimes(outcome === 'success' ? 0 : 1)
+        if (outcome !== 'success') {
+          expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
+            level: 'error',
+            service: 'Alert',
+            method: 'closeButtonCallback',
+            args: [failure]
+          })
+        }
+        await act(async () => {
+          closeAlert()
+        })
+        await act(async () => vi.advanceTimersByTime(300))
+        expect(getAlertWrapper()).toBeNull()
+      } finally {
+        await act(async () => closeAlert())
+        setLogger(new InternalLogger())
+      }
+    }
+  )
 
   test('renders synchronously on first openAlert and respects immediate closeAlert within 50ms', async () => {
     const { openAlert, closeAlert } = await import('../../../src/ui/alert')

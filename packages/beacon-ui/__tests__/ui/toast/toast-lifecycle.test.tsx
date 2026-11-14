@@ -1,4 +1,4 @@
-import { act } from '@testing-library/react'
+import { act, fireEvent } from '@testing-library/react'
 
 describe('Toast UI lifecycle (openToast / closeToast)', () => {
   beforeEach(() => {
@@ -27,6 +27,60 @@ describe('Toast UI lifecycle (openToast / closeToast)', () => {
       null
     )
   }
+
+  test.each(['success', 'throw', 'reject'] as const)(
+    'starts wallet and action callbacks synchronously with their receivers and observes %s',
+    async (outcome) => {
+      const { setLogger, InternalLogger } = await import('@ecadlabs/beacon-core')
+      const { openToast, closeToast } = await import('../../../src/ui/toast')
+      const diagnostic = vi.fn()
+      setLogger({
+        debug: vi.fn(), log: vi.fn(), warn: vi.fn(), error: vi.fn(),
+        time: vi.fn(), timeLog: vi.fn(), diagnostic
+      })
+      const failure = new Error('callback failed')
+      const starts: string[] = []
+      const finish = () => {
+        if (outcome === 'throw') throw failure
+        return outcome === 'reject' ? Promise.reject(failure) : Promise.resolve()
+      }
+      const config = {
+        body: 'Callback toast',
+        state: 'finished' as const,
+        openWalletAction() {
+          starts.push(this.body)
+          return finish()
+        },
+        actions: [{
+          text: 'Action label',
+          actionText: 'Run action',
+          actionCallback() {
+            starts.push(this.text)
+            return finish()
+          }
+        }]
+      }
+      try {
+        await act(async () => openToast(config))
+        const buttons = document.querySelector('beacon-toast')?.shadowRoot
+          ?.querySelectorAll<HTMLElement>('.toast-action-button')
+        expect(buttons).toHaveLength(2)
+        await act(async () => {
+          buttons?.forEach((button) => fireEvent.click(button))
+          expect(starts).toEqual(['Callback toast', 'Action label'])
+        })
+        expect(diagnostic).toHaveBeenCalledTimes(outcome === 'success' ? 0 : 2)
+        if (outcome !== 'success') {
+          expect(diagnostic).toHaveBeenCalledWith(expect.objectContaining({
+            level: 'error', service: 'Toast', args: [failure]
+          }))
+        }
+      } finally {
+        await act(async () => closeToast())
+        setLogger(new InternalLogger())
+      }
+    }
+  )
 
   test('renders synchronously on first openToast without a 50ms cold-start blank gap', async () => {
     const { openToast } = await import('../../../src/ui/toast')

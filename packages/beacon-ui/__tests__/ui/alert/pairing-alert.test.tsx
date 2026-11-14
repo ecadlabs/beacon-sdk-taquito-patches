@@ -65,7 +65,7 @@ vi.mock('../../../src/components/info', () => ({
   )
 }))
 vi.mock('../../../src/components/pair-other', () => ({
-  default: () => <div data-testid="pair-other">PairOther</div>
+  PairOther: () => <div data-testid="pair-other">PairOther</div>
 }))
 vi.mock('../../../src/components/top-wallets', () => ({
   default: (props: any) => (

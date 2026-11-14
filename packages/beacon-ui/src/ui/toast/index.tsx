@@ -1,12 +1,12 @@
 import { createRoot } from 'react-dom/client'
 import { useEffect, useState } from 'react'
+import { Toast } from 'src/components/toast'
 import { Subject, Subscription } from '../../utils/subject'
-import Toast from 'src/components/toast'
 import { ToastConfig } from '../common'
 
 // Import the bundled CSS as a raw string
-import cssText from './aggregated.css'
 import { getColorMode } from '../../utils/colorMode'
+import cssText from './aggregated.css'
 
 let initDone: boolean = false
 const config$ = new Subject<ToastConfig | undefined>()
@@ -31,6 +31,73 @@ const clearAutoCloseTimer = () => {
     clearTimeout(lastTimer)
     lastTimer = undefined
   }
+}
+
+const closeToast = () => {
+  clearPendingTimers()
+  clearAutoCloseTimer()
+  requestCount = 0
+  lastCallTimestamp = 0
+  config$.next(undefined)
+  show$.next(false)
+}
+
+const ToastRoot = (props: ToastConfig) => {
+  const [config, setConfig] = useState<ToastConfig | undefined>(() =>
+    config$.hasEmitted() ? config$.getValue() : props
+  )
+  const [isOpen, setIsOpen] = useState<boolean>(() =>
+    show$.hasEmitted() ? Boolean(show$.getValue()) : true
+  )
+  const [mount, setMount] = useState<boolean>(() => {
+    const initialConfig = config$.hasEmitted() ? config$.getValue() : props
+    const initialOpen = show$.hasEmitted() ? Boolean(show$.getValue()) : true
+
+    return Boolean(initialConfig && initialOpen)
+  })
+
+  useEffect(() => {
+    const subs: Subscription[] = []
+    subs.push(
+      config$.subscribe((nextConfig) => {
+        setConfig(nextConfig)
+      })
+    )
+    subs.push(
+      show$.subscribe((value) => {
+        setIsOpen(value)
+      })
+    )
+
+    return () => subs.forEach((sub) => sub.unsubscribe())
+  }, [])
+
+  useEffect(() => {
+    // Unmount immediately if the toast is closed.
+    if (!config || !isOpen) {
+      setMount(false)
+
+      return
+    }
+    setMount(true)
+  }, [isOpen, config])
+
+  return (
+    <>
+      <div className={`theme__${getColorMode()}`}>
+        {mount && config && (
+          <Toast
+            label={config.body}
+            open={isOpen}
+            onClickClose={closeToast}
+            actions={config.actions}
+            walletInfo={config.walletInfo}
+            openWalletAction={config.openWalletAction ? () => config.openWalletAction?.() : undefined}
+          />
+        )}
+      </div>
+    </>
+  )
 }
 
 const applyToastConfig = (config: ToastConfig) => {
@@ -95,70 +162,6 @@ const openToast = (config: ToastConfig) => {
     }, timeoutDelay)
     pendingTimers.add(timerId)
   }
-}
-
-const closeToast = () => {
-  clearPendingTimers()
-  clearAutoCloseTimer()
-  requestCount = 0
-  lastCallTimestamp = 0
-  config$.next(undefined)
-  show$.next(false)
-}
-
-const ToastRoot = (props: ToastConfig) => {
-  const [config, setConfig] = useState<ToastConfig | undefined>(() =>
-    config$.hasEmitted() ? config$.getValue() : props
-  )
-  const [isOpen, setIsOpen] = useState<boolean>(() =>
-    show$.hasEmitted() ? Boolean(show$.getValue()) : true
-  )
-  const [mount, setMount] = useState<boolean>(() => {
-    const initialConfig = config$.hasEmitted() ? config$.getValue() : props
-    const initialOpen = show$.hasEmitted() ? Boolean(show$.getValue()) : true
-    return Boolean(initialConfig && initialOpen)
-  })
-
-  useEffect(() => {
-    const subs: Subscription[] = []
-    subs.push(
-      config$.subscribe((nextConfig) => {
-        setConfig(nextConfig)
-      })
-    )
-    subs.push(
-      show$.subscribe((value) => {
-        setIsOpen(value)
-      })
-    )
-    return () => subs.forEach((sub) => sub.unsubscribe())
-  }, [])
-
-  useEffect(() => {
-    // Unmount immediately if the toast is closed.
-    if (!config || !isOpen) {
-      setMount(false)
-      return
-    }
-    setMount(true)
-  }, [isOpen, config])
-
-  return (
-    <>
-      <div className={`theme__${getColorMode()}`}>
-        {mount && config && (
-          <Toast
-            label={config.body}
-            open={isOpen}
-            onClickClose={closeToast}
-            actions={config.actions}
-            walletInfo={config.walletInfo}
-            openWalletAction={config.openWalletAction}
-          />
-        )}
-      </div>
-    </>
-  )
 }
 
 export { closeToast, openToast }

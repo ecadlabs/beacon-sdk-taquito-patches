@@ -1,7 +1,7 @@
 import type { Mock } from 'vitest'
 // src/components/toast/index.test.tsx
 import { render, screen, fireEvent, act } from '@testing-library/react'
-import Toast from '../../src/components/toast/index'
+import { Toast } from '../../src/components/toast/index'
 
 // --- Mock external dependencies ---
 // Use the real useDrag hook so drag state and reset behavior are tested end-to-end with Toast.

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-const useDrag = (
+export const useDrag = (
   handler: (state: { offset: [number, number] }) => void,
   resetTrigger?: boolean
 ) => {
@@ -23,11 +23,11 @@ const useDrag = (
   })
   const positionRef = useRef<[number, number]>([0, 0])
 
+  const handlerRef = useRef(handler)
+
   useEffect(() => {
-    if (resetTrigger !== undefined) {
-      positionRef.current = [0, 0]
-    }
-  }, [resetTrigger])
+    handlerRef.current = handler
+  }, [handler])
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -54,33 +54,42 @@ const useDrag = (
       dragRef.current.minY = -Infinity
       dragRef.current.maxY = Infinity
     }
+  }
+
+  useEffect(() => {
+    dragRef.current.isDragging = false
+    if (resetTrigger !== undefined) {
+      positionRef.current = [0, 0]
+    }
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragRef.current.isDragging) {
+        return
+      }
+
+      const rawX = e.clientX - dragRef.current.startX
+      const rawY = e.clientY - dragRef.current.startY
+      const newX = Math.min(dragRef.current.maxX, Math.max(dragRef.current.minX, rawX))
+      const newY = Math.min(dragRef.current.maxY, Math.max(dragRef.current.minY, rawY))
+
+      positionRef.current = [newX, newY]
+      handlerRef.current({ offset: [newX, newY] })
+    }
+    const handleMouseUp = () => {
+      dragRef.current.isDragging = false
+    }
 
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-  }
 
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!dragRef.current.isDragging) return
-
-    const rawX = e.clientX - dragRef.current.startX
-    const rawY = e.clientY - dragRef.current.startY
-
-    const newX = Math.min(dragRef.current.maxX, Math.max(dragRef.current.minX, rawX))
-    const newY = Math.min(dragRef.current.maxY, Math.max(dragRef.current.minY, rawY))
-
-    positionRef.current = [newX, newY]
-    handler({ offset: [newX, newY] })
-  }
-
-  const handleMouseUp = () => {
-    dragRef.current.isDragging = false
-    document.removeEventListener('mousemove', handleMouseMove)
-    document.removeEventListener('mouseup', handleMouseUp)
-  }
+    return () => {
+      dragRef.current.isDragging = false
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [resetTrigger])
 
   const bindDrag = () => ({ onMouseDown: handleMouseDown })
 
   return bindDrag
 }
-
-export default useDrag

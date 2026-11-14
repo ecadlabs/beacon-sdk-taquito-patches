@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import useDrag from './hooks/useDrag'
 import { CloseIcon } from '../icons'
 import Loader from '../loader'
 import { isMobileOS } from '../../utils/platform'
 import { ToastProps } from '../../ui/common'
+import { runUICallback } from '../../utils/callback'
 import { ButtonIcon } from '../button-icon/button-icon'
+import { useDrag } from './hooks/useDrag'
 
 function parseWallet(
   inputString: string,
@@ -36,7 +37,7 @@ function parseWallet(
   })
 }
 
-const Toast: React.FC<ToastProps> = (props: ToastProps) => {
+export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
   const [showMoreInfo, setShowMoreInfo] = useState<boolean>(true)
   const hasWalletObject = props.label.includes('{{wallet}}') && props.walletInfo
   const isRequestSentToast = props.label.includes('Request sent to')
@@ -55,12 +56,14 @@ const Toast: React.FC<ToastProps> = (props: ToastProps) => {
   useEffect(() => {
     if (!isRequestSentToast) {
       setShowMoreInfo(true)
+
       return
     }
     setShowMoreInfo(false)
     const timer = setTimeout(() => {
       setShowMoreInfo(true)
     }, 3000)
+
     return () => clearTimeout(timer)
   }, [isRequestSentToast])
 
@@ -98,7 +101,10 @@ const Toast: React.FC<ToastProps> = (props: ToastProps) => {
         {!hasWalletObject && <p className="toast-label">{props.label}</p>}
 
         {!isMobileOS(window) && props.openWalletAction && (
-          <div className="toast-action-button" onClick={props.openWalletAction}>
+          <div
+            className="toast-action-button"
+            onClick={() => runUICallback(() => props.openWalletAction?.(), 'Toast', 'openWalletAction')}
+          >
             Open Wallet
           </div>
         )}
@@ -116,7 +122,10 @@ const Toast: React.FC<ToastProps> = (props: ToastProps) => {
                 {action.text}
               </p>
               {action.actionText && (
-                <div className="toast-action-button" onClick={action.actionCallback}>
+                <div
+                  className="toast-action-button"
+                  onClick={() => runUICallback(() => action.actionCallback?.(), 'Toast', 'actionCallback')}
+                >
                   {action.actionText}
                 </div>
               )}
@@ -127,5 +136,3 @@ const Toast: React.FC<ToastProps> = (props: ToastProps) => {
     </div>
   )
 }
-
-export default Toast
