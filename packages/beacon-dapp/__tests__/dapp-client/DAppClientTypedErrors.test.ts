@@ -411,7 +411,8 @@ describe('DAppClient typed error rejections', () => {
 
     it('rejects a rate-limited permission request before pairing starts', async () => {
       const init = vi.spyOn(dapp, 'init')
-      vi.spyOn(dapp as any, 'addRequestAndCheckIfRateLimited').mockResolvedValue(true)
+      await dapp.addRequestAndCheckIfRateLimited()
+      await dapp.addRequestAndCheckIfRateLimited()
 
       const error: unknown = await dapp.requestPermissions().then(
         () => { throw new Error('Expected requestPermissions to reject') },

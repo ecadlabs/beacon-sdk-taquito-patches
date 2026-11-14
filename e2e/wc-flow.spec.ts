@@ -53,8 +53,11 @@ test('should send 1 mutez', async () => {
 })
 
 test('should rate limit', async () => {
-  await dapp.click('#sendToSelf')
-  await dapp.click('#sendToSelf')
+  // Pairing can outlast the window. Exercise the limit with operations alone.
+  // Dispatch keeps an early rate-limit alert from intercepting a later click.
+  for (let request = 0; request < 3; request++) {
+    await dapp.dispatchEvent('#sendToSelf', 'click')
+  }
 
   await dapp.waitForSelector('div.alert-wrapper-show', { state: 'visible', timeout: 30_000 })
 
