@@ -1,10 +1,10 @@
 import { render, screen, fireEvent } from '@testing-library/react'
-import InfoAlert from '../../../src/ui/alert/components/info-alert'
+import { InfoAlert } from '../../../src/ui/alert/components/info-alert'
 import { ConfigurableAlertProps } from '../../../src/ui/common'
 
 vi.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({
   __esModule: true,
-  default: () => false
+  useIsMobile: () => false
 }))
 
 describe('InfoAlert Component', () => {

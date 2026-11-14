@@ -1,7 +1,7 @@
 import { reportDiagnostic } from '@ecadlabs/beacon-core'
 import { useLayoutEffect, useRef, type FC } from 'react'
 import type { MergedWallet } from '../../../../../../utils/wallets'
-import Info from '../../../../../../components/info'
+import { Info } from '../../../../../../components/info'
 import { AlertState, type PairingPayload } from '../../../../../common'
 import { isIOS } from '../../../../../../utils/platform'
 import { suffixMap } from './utils/suffix-map'

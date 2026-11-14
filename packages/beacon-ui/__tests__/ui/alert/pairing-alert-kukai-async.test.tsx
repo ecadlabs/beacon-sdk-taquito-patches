@@ -5,7 +5,7 @@ import { PairingAlert } from '../../../src/ui/alert/components/pairing-alert'
 import type { ComponentProps } from 'react'
 type PairingAlertProps = ComponentProps<typeof PairingAlert>
 import { useWallets } from '../../../src/ui/alert/hooks/useWallets'
-import useIsMobile from '../../../src/ui/alert/hooks/useIsMobile'
+import { useIsMobile } from '../../../src/ui/alert/hooks/useIsMobile'
 import { isMobileOS, isAndroid } from '../../../src/utils/platform'
 
 vi.mock('@ecadlabs/beacon-core', async (importActual) => ({
@@ -19,7 +19,7 @@ vi.mock('../../../src/ui/alert/hooks/useWallets', () => ({
 
 vi.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({
   __esModule: true,
-  default: vi.fn(() => false)
+  useIsMobile: vi.fn(() => false)
 }))
 
 vi.mock('../../../src/utils/platform', () => ({
@@ -30,7 +30,7 @@ vi.mock('../../../src/utils/platform', () => ({
 }))
 
 vi.mock('../../../src/components/alert', () => ({
-  default: (props: any) => (
+  Alert: (props: any) => (
     <div data-testid="alert" data-loading={props.loading ? 'true' : 'false'}>
       <button onClick={props.onCloseClick}>Close pairing</button>
       {props.children}

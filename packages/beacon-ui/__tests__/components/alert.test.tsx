@@ -1,13 +1,13 @@
 // index.test.tsx
 import { render, screen, fireEvent } from '@testing-library/react'
-import Alert from '../../src/components/alert'
+import { Alert } from '../../src/components/alert'
 
 // --- Mocks ---
 
 // Force useIsMobile to return false (simulate a desktop environment)
 vi.mock('../../src/ui/alert/hooks/useIsMobile', () => ({
   __esModule: true,
-  default: () => false
+  useIsMobile: () => false
 }))
 
 // Mock the icon components so we can easily query for them.
@@ -21,7 +21,7 @@ vi.mock('../../src/components/icons', () => ({
 // Mock the Loader component.
 vi.mock('../../src/components/loader', () => ({
   __esModule: true,
-  default: () => <div data-testid="loader">Loader</div>
+  Loader: () => <div data-testid="loader">Loader</div>
 }))
 
 // --- Tests ---

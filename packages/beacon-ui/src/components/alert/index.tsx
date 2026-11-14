@@ -1,8 +1,8 @@
 import React from 'react'
 import { CloseIcon, LeftIcon, LogoIcon } from '../icons'
-import Loader from '../loader'
+import { Loader } from '../loader'
 import { AlertProps } from '../../ui/common'
-import useIsMobile from '../../ui/alert/hooks/useIsMobile'
+import { useIsMobile } from '../../ui/alert/hooks/useIsMobile'
 import { ButtonIcon } from '../button-icon/button-icon'
 const Alert: React.FC<React.PropsWithChildren<AlertProps>> = (props) => {
   const isMobile = useIsMobile()
@@ -83,4 +83,4 @@ const Alert: React.FC<React.PropsWithChildren<AlertProps>> = (props) => {
   )
 }
 
-export default Alert
+export { Alert }

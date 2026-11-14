@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { QRCodeProps } from '../../../../../common'
 import { QR } from '../../../../../../components/qr'
-import WCInitError from '../wc-init-error'
+import { WCInitError } from '../wc-init-error'
 import { runUICallback } from '../../../../../../utils/callback'
 
 export const QRCode: React.FC<QRCodeProps> = ({

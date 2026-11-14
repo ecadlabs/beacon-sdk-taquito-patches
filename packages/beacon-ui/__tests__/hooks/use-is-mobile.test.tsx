@@ -1,6 +1,6 @@
 // useIsMobile.test.js
 import { renderHook, act } from '@testing-library/react'
-import useIsMobile from '../../src/ui/alert/hooks/useIsMobile'
+import { useIsMobile } from '../../src/ui/alert/hooks/useIsMobile'
 import * as platformUtils from '../../src/utils/platform'
 
 // Mock the external isMobileOS function.

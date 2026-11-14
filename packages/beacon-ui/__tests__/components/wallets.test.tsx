@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react'
-import Wallets from '../../src/components/wallets/index'
+import { Wallets } from '../../src/components/wallets/index'
 import { WalletsProps } from 'src/ui/common'
 
 // --- Mock the Wallet component ---
@@ -7,7 +7,7 @@ import { WalletsProps } from 'src/ui/common'
 // It receives props and renders the wallet name and description, and attaches the onClick handler.
 vi.mock('../../src/components/wallet/index', () => {
   return {
-    default: ({
+    Wallet: ({
       name,
       description,
       onClick

@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react'
-import TopWallets from '../../src/components/top-wallets/index'
+import { TopWallets } from '../../src/components/top-wallets/index'
 import { MergedWallet } from 'src/utils/wallets'
 
 // --- Mock the Wallet component ---
@@ -7,7 +7,7 @@ import { MergedWallet } from 'src/utils/wallets'
 // and displays the wallet name and description.
 vi.mock('../../src/components/wallet', () => {
   return {
-    default: ({
+    Wallet: ({
       name,
       description,
       onClick

@@ -1,5 +1,5 @@
-import { desktopList, extensionList, iOSList, webList } from '../ui/alert/wallet-lists'
 import { DesktopApp, App, ExtensionApp, WebApp } from '@ecadlabs/beacon-types'
+import { desktopList, extensionList, iOSList, webList } from '../ui/alert/wallet-lists'
 
 /**
  * Initialize with tezos wallets for backwards compatibility
@@ -9,33 +9,25 @@ let localExtensionList: ExtensionApp[] = extensionList
 let localWebList: WebApp[] = webList
 let localiOSList: App[] = iOSList
 
-export const getDesktopList = (): DesktopApp[] => {
-  return localDesktopList
+export const getDesktopList = (): DesktopApp[] => localDesktopList
+
+export const setDesktopList = (wallets: DesktopApp[]): void => {
+  localDesktopList = wallets
 }
 
-export const setDesktopList = (desktopList: DesktopApp[]): void => {
-  localDesktopList = desktopList
+export const getExtensionList = (): ExtensionApp[] => localExtensionList
+
+export const setExtensionList = (wallets: ExtensionApp[]): void => {
+  localExtensionList = wallets
 }
 
-export const getExtensionList = (): ExtensionApp[] => {
-  return localExtensionList
+export const getWebList = (): WebApp[] => localWebList
+
+export const setWebList = (wallets: WebApp[]): void => {
+  localWebList = wallets
 }
 
-export const setExtensionList = (extensionList: ExtensionApp[]): void => {
-  localExtensionList = extensionList
-}
-
-export const getWebList = (): WebApp[] => {
-  return localWebList
-}
-
-export const setWebList = (webList: WebApp[]): void => {
-  localWebList = webList
-}
-
-export const getiOSList = (): App[] => {
-  return localiOSList
-}
+export const getiOSList = (): App[] => localiOSList
 
 export const setiOSList = (iosList: App[]): void => {
   localiOSList = iosList

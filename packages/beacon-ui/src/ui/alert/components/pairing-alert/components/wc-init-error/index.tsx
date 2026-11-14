@@ -1,5 +1,5 @@
 import { StorageKey } from '@ecadlabs/beacon-types'
-import Info from '../../../../../../components/info'
+import { Info } from '../../../../../../components/info'
 import { WCInitErrorProps } from '../../../../../common'
 
 const WCInitError: React.FC<WCInitErrorProps> = ({ title }) => {
@@ -36,7 +36,8 @@ const WCInitError: React.FC<WCInitErrorProps> = ({ title }) => {
       {errorMessage && getErrorMessage(errorMessage)}
     </>
   )
+
   return <Info title={title} description={description} border />
 }
 
-export default WCInitError
+export { WCInitError }

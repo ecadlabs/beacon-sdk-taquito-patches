@@ -20,4 +20,4 @@ const useIsMobile = (breakpoint = 768) => {
   return isMobileOS(window) || isMobile
 }
 
-export default useIsMobile
+export { useIsMobile }

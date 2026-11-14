@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { CloseIcon } from '../icons'
-import Loader from '../loader'
+import { Loader } from '../loader'
 import { isMobileOS } from '../../utils/platform'
 import { ToastProps } from '../../ui/common'
 import { runUICallback } from '../../utils/callback'

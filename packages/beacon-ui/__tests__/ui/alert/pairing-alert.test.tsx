@@ -12,13 +12,13 @@ vi.mock('@ecadlabs/beacon-core', async (importActual) => ({
 }))
 
 // --- Mocks for hooks and platform utilities ---
-import useIsMobile from '../../../src/ui/alert/hooks/useIsMobile'
+import { useIsMobile } from '../../../src/ui/alert/hooks/useIsMobile'
 import { useWallets } from '../../../src/ui/alert/hooks/useWallets'
 import { useConnect } from '../../../src/ui/alert/hooks/useConnect'
 
 vi.mock('../../../src/ui/alert/hooks/useIsMobile', () => ({
   __esModule: true,
-  default: vi.fn()
+  useIsMobile: vi.fn()
 }))
 vi.mock('../../../src/ui/alert/hooks/useWallets', () => ({
   useWallets: vi.fn()
@@ -29,7 +29,7 @@ vi.mock('../../../src/ui/alert/hooks/useConnect', () => ({
 
 // Updated Alert mock: explicitly remove closeOnBackdropClick so it isn’t passed to the DOM
 vi.mock('../../../src/components/alert', () => ({
-  default: (props: any) => {
+  Alert: (props: any) => {
     const {
       pairingPayload,
       featuredWallets,
@@ -53,7 +53,7 @@ vi.mock('../../../src/components/alert', () => ({
 
 // Other mocks
 vi.mock('../../../src/components/info', () => ({
-  default: (props: any) => (
+  Info: (props: any) => (
     <div data-testid="info">
       <div>{props.title}</div>
       <div>{props.description}</div>
@@ -75,7 +75,7 @@ vi.mock('../../../src/components/pair-other', () => ({
   PairOther: () => <div data-testid="pair-other">PairOther</div>
 }))
 vi.mock('../../../src/components/top-wallets', () => ({
-  default: (props: any) => (
+  TopWallets: (props: any) => (
     <div data-testid="top-wallets">
       TopWallets
       {props.otherWallets && (
@@ -87,7 +87,7 @@ vi.mock('../../../src/components/top-wallets', () => ({
   )
 }))
 vi.mock('../../../src/components/wallets', () => ({
-  default: () => <div data-testid="wallets">Wallets</div>
+  Wallets: () => <div data-testid="wallets">Wallets</div>
 }))
 vi.mock('../../../src/components/qr', () => ({
   QR: (props: any) => (
