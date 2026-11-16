@@ -1,5 +1,6 @@
 .info-wrapper {
   box-sizing: border-box;
+  position: relative;
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -169,5 +170,34 @@ button#qr-code-icon svg {
     padding: 0.5em 1.6em;
     font-size: 16px;
     font-weight: bold;
+  }
+}
+
+@media only screen and (max-height: 500px) {
+  .info-wrapper {
+    padding: 0.65em 1em;
+    gap: 0.25rem;
+  }
+
+  .info-title {
+    font-size: 14px;
+    line-height: 1.15rem;
+  }
+
+  .info-description {
+    font-size: 0.72rem;
+    line-height: 1rem;
+    max-width: 380px;
+  }
+
+  .info-button,
+  .info-button-secondary {
+    margin-top: 0.25rem;
+    padding: 0.4em 1.2em;
+    font-size: 13px;
+  }
+
+  .downloadLink {
+    padding: 0.15rem;
   }
 }

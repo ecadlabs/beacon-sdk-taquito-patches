@@ -8,7 +8,9 @@ import {
   TransportHealth,
   TransportStatus,
   TransportStatusChangeReason,
-  TransportType
+  TransportType,
+  WalletConnectPairingFailureReason,
+  WalletConnectPairingResult
 } from '@ecadlabs/beacon-types'
 import { ClientEvents, CommunicationClient } from '@ecadlabs/beacon-core'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
@@ -191,3 +193,17 @@ export const storageChangeListeners: import('@ecadlabs/beacon-types').StorageCha
   () => {},
   async () => {}
 ]
+
+export async function pairInit(info: BeaconEventType[BeaconEvent.PAIR_INIT]): Promise<void> {
+  const result: WalletConnectPairingResult = await info.walletConnectPeerInfo
+  if (result.ok) {
+    const uri: string = result.uri
+    void uri
+  } else {
+    const reason: WalletConnectPairingFailureReason = result.reason
+    void reason
+  }
+  // @ts-expect-error walletConnectPeerInfo resolves to a tagged result, not a raw string.
+  const rawUri: string = await info.walletConnectPeerInfo
+  void rawUri
+}

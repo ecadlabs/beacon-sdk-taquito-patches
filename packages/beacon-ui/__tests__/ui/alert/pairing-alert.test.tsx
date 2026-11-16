@@ -400,17 +400,19 @@ describe('PairingAlert Component', () => {
   })
 
   describe('WalletConnect initialization errors', () => {
-    test('keeps local connection details without a retired reporting link', async () => {
+    test('renders structured failure details without reading localStorage or showing a retired reporting link', async () => {
       ;(platformUtils.isMobileOS as Mock).mockReturnValue(true)
       const connectReturn = [...defaultUseConnect]
       connectReturn[3] = 'install'
       connectReturn[6] = false
+      connectReturn[21] = 'timeout'
       ;(useConnect as Mock).mockReturnValue(connectReturn)
       localStorage.setItem(StorageKey.WC_INIT_ERROR, 'Network error details')
 
       await renderPairingAlert(defaultProps)
 
-      expect(screen.getByText('Network error details')).toBeInTheDocument()
+      expect(screen.getByText('WalletConnect connection timed out.')).toBeInTheDocument()
+      expect(screen.queryByText('Network error details')).not.toBeInTheDocument()
       expect(screen.queryByText(/report it|Beacon team|report a bug/i)).not.toBeInTheDocument()
     })
   })

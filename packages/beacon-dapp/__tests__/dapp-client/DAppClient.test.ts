@@ -862,9 +862,10 @@ describe('DAppClient: basic unit tests', () => {
       expect(walletConnectTransport.getPairingRequestInfo).not.toHaveBeenCalled()
 
       const pairInitPayload = pairInitHandler.mock.calls[0][0]
-      await expect(pairInitPayload.walletConnectPeerInfo).resolves.toBe(
-        'wc:test-topic@2?symKey=test'
-      )
+      await expect(pairInitPayload.walletConnectPeerInfo).resolves.toEqual({
+        ok: true,
+        uri: 'wc:test-topic@2?symKey=test'
+      })
       expect(walletConnectTransport.getPairingRequestInfo).toHaveBeenCalledTimes(1)
     } finally {
       ;(client as any)._initReject?.({ type: BeaconMessageType.Error })

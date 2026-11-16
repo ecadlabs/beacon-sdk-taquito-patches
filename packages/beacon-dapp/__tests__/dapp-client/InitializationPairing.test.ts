@@ -285,8 +285,14 @@ describe('Initialization pairing completion', () => {
       expect(first.settled).not.toHaveBeenCalled()
       const information = await pairing.p2pPeerInfo
       expect(information).not.toBe('')
-      await expect(Promise.resolve(pairing.walletConnectPeerInfo)).resolves.toBe('wc:pairing')
-      await expect(Promise.resolve(pairing.walletConnectPeerInfo)).resolves.toBe('wc:pairing')
+      await expect(Promise.resolve(pairing.walletConnectPeerInfo)).resolves.toEqual({
+        ok: true,
+        uri: 'wc:pairing'
+      })
+      await expect(Promise.resolve(pairing.walletConnectPeerInfo)).resolves.toEqual({
+        ok: true,
+        uri: 'wc:pairing'
+      })
       expect(group.wc.getPairingRequestInfo).toHaveBeenCalledTimes(1)
       await expect(group.accept(kind)).resolves.toBe(true)
       const type =
@@ -448,9 +454,47 @@ describe('Initialization pairing completion', () => {
     const group = await create()
     const { pairing } = await start()
     await dapp.disconnect({ notifyPeers: false })
-    await expect(Promise.resolve(pairing.walletConnectPeerInfo)).resolves.toBe('')
+    await expect(Promise.resolve(pairing.walletConnectPeerInfo)).resolves.toEqual({
+      ok: false,
+      reason: 'retired'
+    })
     expect(group.wc.getPairingRequestInfo).not.toHaveBeenCalled()
   })
+
+  it.each([
+    'superseded',
+    'client-replaced',
+    'retired',
+    'initialization-unavailable',
+    'relay-unreachable',
+    'origin-not-allowed',
+    'timeout'
+  ] as const)(
+    'propagates WalletConnect pairing failure reason "%s" through walletConnectPeerInfo',
+    async (reason) => {
+      const group = await create()
+      const info = await group.wc.getPairingRequestInfo()
+      vi.mocked(group.wc.getPairingRequestInfo).mockResolvedValueOnce({
+        ...info,
+        uri: '',
+        failureReason: reason
+      })
+      const { pairing } = await start()
+      await expect(Promise.resolve(pairing.walletConnectPeerInfo)).resolves.toEqual({
+        ok: false,
+        reason
+      })
+      if (reason === 'superseded') {
+        expect(pairInit).toHaveBeenCalledTimes(2)
+        const replacement = pairInit.mock.calls[1]?.[0]
+        await expect(Promise.resolve(replacement?.walletConnectPeerInfo)).resolves.toEqual({
+          ok: true,
+          uri: info.uri
+        })
+      }
+      await dapp.disconnect({ notifyPeers: false })
+    }
+  )
 
   it.each<{ kind: 'p2p' | 'post' | 'wc'; finish: 'resolve' | 'reject' }>([
     { kind: 'p2p', finish: 'resolve' },
@@ -496,10 +540,11 @@ describe('Initialization pairing completion', () => {
     await gate.entered.promise
     await dapp.disconnect({ notifyPeers: false })
     await vi.advanceTimersByTimeAsync(0)
-    expect.soft(information.settled).toHaveBeenCalledExactlyOnceWith({ value: '' })
+    const expectedRetired = kind === 'wc' ? { ok: false, reason: 'retired' } : ''
+    expect.soft(information.settled).toHaveBeenCalledExactlyOnceWith({ value: expectedRetired })
     gate.release.resolve()
     await vi.advanceTimersByTimeAsync(0)
-    expect(await information.outcome).toEqual({ value: '' })
+    expect(await information.outcome).toEqual({ value: expectedRetired })
     expect(information.settled).toHaveBeenCalledTimes(1)
     expect(pairSuccess).not.toHaveBeenCalled()
   })

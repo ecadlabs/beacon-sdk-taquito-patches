@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
-import { ClientEvents, Logger } from '@ecadlabs/beacon-core'
-import { NetworkType } from '@ecadlabs/beacon-types'
+import { ClientEvents, Logger, reportDiagnostic } from '@ecadlabs/beacon-core'
+import { NetworkType, StorageKey } from '@ecadlabs/beacon-types'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { SessionTypes } from '@walletconnect/types'
 import { WalletConnectCommunicationClient } from '../../src/communication-client/WalletConnectCommunicationClient'
@@ -10,12 +10,16 @@ const { initialize } = vi.hoisted(() => ({
 }))
 
 // Expose the source const enum for esbuild's dependency loader.
-vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@ecadlabs/beacon-core')>()),
-  ...(await vi.importActual<
-    typeof import('../../../beacon-core/src/transports/clients/ClientEvents')
-  >('../../../beacon-core/src/transports/clients/ClientEvents'))
-}))
+vi.mock('@ecadlabs/beacon-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@ecadlabs/beacon-core')>()
+  return {
+    ...actual,
+    ...(await vi.importActual<
+      typeof import('../../../beacon-core/src/transports/clients/ClientEvents')
+    >('../../../beacon-core/src/transports/clients/ClientEvents')),
+    reportDiagnostic: vi.fn(actual.reportDiagnostic)
+  }
+})
 
 vi.mock('@walletconnect/sign-client', () => ({ default: { init: initialize } }))
 vi.mock('@walletconnect/utils', () => ({
@@ -497,5 +501,156 @@ describe('WalletConnect startup ownership', () => {
     expect.soft(first.core.relayer.transportClose).toHaveBeenCalledTimes(1)
     expect(second.core.relayer.transportClose).not.toHaveBeenCalled()
     expect(current.settled).toHaveBeenCalledTimes(1)
+  })
+
+  describe('getPairingRequestInfo failure reasons and diagnostics', () => {
+    const expectFailure = (
+      pairing: { uri: string; failureReason?: string },
+      reason: string
+    ): void => {
+      expect(pairing.uri).toBe('')
+      expect(pairing.failureReason).toBe(reason)
+      expect(localStorage.getItem(StorageKey.WC_INIT_ERROR)).toBeNull()
+      expect(reportDiagnostic).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: 'WalletConnectCommunicationClient',
+          args: expect.arrayContaining([reason])
+        })
+      )
+    }
+
+    it('reports "superseded" when a second init(true) starts while getPairingRequestInfo() is pending', async () => {
+      first.connect.mockImplementationOnce(async () => {
+        await release.promise
+        return {
+          uri: 'wc:first-proposal@2?symKey=key',
+          approval: () => new Promise<SessionTypes.Struct>(() => {})
+        }
+      })
+      const firstPairing = observe(client.getPairingRequestInfo())
+      await vi.advanceTimersByTimeAsync(0)
+      initialize.mockResolvedValue(second)
+      const secondInit = client.init(true)
+      const firstResult = await firstPairing.outcome
+      expectFailure(
+        (firstResult as { value: { uri: string; failureReason?: string } }).value,
+        'superseded'
+      )
+      expect((await secondInit)?.uri).toBe('wc:second-proposal@2?symKey=key')
+    })
+
+    it('reports "client-replaced" when signClient is replaced while proposal creation is pending', async () => {
+      first.connect.mockImplementationOnce(async () => {
+        client.signClient = second as never
+        return {
+          uri: 'wc:first-proposal@2?symKey=key',
+          approval: () => new Promise<SessionTypes.Struct>(() => {})
+        }
+      })
+      expectFailure(await client.getPairingRequestInfo(), 'client-replaced')
+    })
+
+    it('reports "retired" when the client is retired while getPairingRequestInfo() is pending', async () => {
+      const owner = {}
+      const owned = WalletConnectCommunicationClient.getInstance(
+        { network: NetworkType.MAINNET, opts: {} },
+        async () => true,
+        owner
+      )
+      first.connect.mockImplementationOnce(async () => {
+        await release.promise
+        return {
+          uri: 'wc:first-proposal@2?symKey=key',
+          approval: () => new Promise<SessionTypes.Struct>(() => {})
+        }
+      })
+      const pairing = observe(owned.getPairingRequestInfo())
+      await vi.advanceTimersByTimeAsync(0)
+      await owned.releaseOwner(owner)
+      const result = await pairing.outcome
+      expectFailure((result as { value: { uri: string; failureReason?: string } }).value, 'retired')
+    })
+
+    it('reports "initialization-unavailable" when the supplied WalletConnect Core is owned by another client', async () => {
+      const sharedCore = first.core as never
+      const firstOwner = new WalletConnectCommunicationClient(
+        { network: NetworkType.MAINNET, opts: { core: sharedCore } },
+        async () => true
+      )
+      const contender = new WalletConnectCommunicationClient(
+        { network: NetworkType.MAINNET, opts: { core: sharedCore } },
+        async () => true
+      )
+      try {
+        await firstOwner.init()
+        expectFailure(await contender.getPairingRequestInfo(), 'initialization-unavailable')
+      } finally {
+        await contender.close()
+        await firstOwner.close()
+      }
+    })
+
+    it('reports "relay-unreachable" without writing WC_INIT_ERROR when relayer connection fails or emits a fatal relayer_error', async () => {
+      initialize.mockRejectedValue(new Error('Could not establish socket connection'))
+      expectFailure(await client.getPairingRequestInfo(), 'relay-unreachable')
+
+      reportDiagnostic.mockClear()
+      initialize.mockResolvedValue(first)
+      first.connect.mockImplementationOnce(async () => {
+        first.core.relayer.events.emit(
+          'relayer_error',
+          new Error('WebSocket connection reset by peer')
+        )
+        await release.promise
+        throw new Error('Connection interrupted')
+      })
+      expectFailure(await client.getPairingRequestInfo(), 'relay-unreachable')
+    })
+
+    it('reports "origin-not-allowed" when the relay closes the socket with code 3000 (Unauthorized), even across an immediate retry', async () => {
+      first.connect.mockImplementationOnce(async () => {
+        first.core.relayer.events.emit(
+          'relayer_error',
+          new Error(
+            'WebSocket connection closed abnormally with code: 3000 (Unauthorized: origin not allowed)'
+          )
+        )
+        await release.promise
+        throw new Error('Connection interrupted while trying to subscribe')
+      })
+      const firstRequest = client.getPairingRequestInfo()
+      await vi.advanceTimersByTimeAsync(0)
+      initialize.mockResolvedValue(second)
+      const secondRequest = client.getPairingRequestInfo()
+      expectFailure(await firstRequest, 'origin-not-allowed')
+      expect((await secondRequest).uri).toBe('wc:second-proposal@2?symKey=key')
+    })
+
+    it('reports "timeout" without writing WC_INIT_ERROR when SignClient init or proposal creation times out', async () => {
+      initialize.mockImplementation(() => new Promise(() => {}))
+      const initPairing = observe(client.getPairingRequestInfo())
+      await vi.advanceTimersByTimeAsync(90_000)
+      const initResult = await initPairing.outcome
+      expectFailure(
+        (initResult as { value: { uri: string; failureReason?: string } }).value,
+        'timeout'
+      )
+
+      reportDiagnostic.mockClear()
+      initialize.mockResolvedValue(first)
+      first.connect.mockImplementationOnce(() => new Promise(() => {}))
+      const pairing = observe(client.getPairingRequestInfo())
+      await vi.advanceTimersByTimeAsync(60_000)
+      const result = await pairing.outcome
+      expectFailure((result as { value: { uri: string; failureReason?: string } }).value, 'timeout')
+    })
+
+    it('clears a stale WC_INIT_ERROR key in localStorage when init succeeds', async () => {
+      localStorage.setItem(StorageKey.WC_INIT_ERROR, 'Stale error from earlier session')
+      const pairing = await client.getPairingRequestInfo()
+      expect(pairing.uri).toBe('wc:first-proposal@2?symKey=key')
+      expect(pairing.failureReason).toBeUndefined()
+      expect(localStorage.getItem(StorageKey.WC_INIT_ERROR)).toBeNull()
+    })
   })
 })

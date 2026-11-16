@@ -37,7 +37,8 @@ import {
   SignPayloadResponseInput,
   StorageKey,
   TransportStatus,
-  TransportType
+  TransportType,
+  WalletConnectPairingFailureReason
 } from '@ecadlabs/beacon-types'
 import { generateGUID, getAddressFromPublicKey, isPublicKeySC } from '@ecadlabs/beacon-utils'
 import {
@@ -99,6 +100,15 @@ const getErrorDiagnostic = (error: unknown): unknown => {
   }
 
   return error
+}
+
+const isOriginNotAllowedError = (error: unknown): boolean => {
+  const diagnostic = getErrorDiagnostic(error)
+
+  return (
+    typeof diagnostic === 'string' &&
+    (/\b3000\b.*unauthorized/i.test(diagnostic) || /origin not allowed/i.test(diagnostic))
+  )
 }
 
 function getStringBetween(str: string | undefined, startChar: string, endChar: string): string {
@@ -171,6 +181,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
   protected readonly channelOpeningListeners: Map<string, ChannelOpeningListener> = new Map()
   private pairingGeneration = 0
+  private readonly retiredPairingGenerations = new Set<number>()
+  private readonly relayerErrors = new Map<number, unknown>()
   private approvalQueue: Promise<void> = Promise.resolve()
 
   private static storageReset: Promise<void> | undefined
@@ -182,6 +194,9 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   private clientGeneration = 0
   private startup:
     | {
+        generation: number
+        forceNewConnection: boolean
+        fromPairingRequest?: boolean
         promise: Promise<{ uri: string; topic: string } | undefined>
         cancel: () => void
       }
@@ -449,6 +464,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
   }
 
   public cancelPendingPairing(): void {
+    this.retiredPairingGenerations.add(this.pairingGeneration)
     this.pairingGeneration++
     this.pairingRequestPromise = undefined
   }
@@ -1134,6 +1150,9 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     if (this.startup && !forceNewConnection) {
       return this.startup.promise
     }
+    if (this.startup) {
+      this.pairingRequestPromise = undefined
+    }
     this.startup?.cancel()
     const generation = ++this.pairingGeneration
     let cancel: () => void = () => undefined
@@ -1147,7 +1166,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         }
       }
     )
-    this.startup = { promise, cancel }
+    this.startup = { generation, forceNewConnection, promise, cancel }
 
     return promise
   }
@@ -1200,6 +1219,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
 
         // Check if session needs extension (within 24 hours of expiry)
         await this.checkAndExtendSession()
+        this.clearLegacyInitError()
 
         return undefined
       } else {
@@ -1264,9 +1284,6 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       }
       const message = error instanceof Error ? error.message : String(error)
       logger.error(`Init error: ${message}`)
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(StorageKey.WC_INIT_ERROR, message)
-      }
       throw new Error(message)
     }
     if (!ownsClient()) {
@@ -1280,7 +1297,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     const topic = getStringBetween(uri, ':', '@')
 
     if (!topic) {
-      return
+      throw new Error('Missing pairing topic in WalletConnect URI')
     }
 
     const exposed = this.trackProposal(signClient, topic)
@@ -1413,8 +1430,19 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       .catch((error: unknown) => logger.warn('approval completion', getErrorDiagnostic(error)))
 
     logger.warn('return uri and topic')
+    this.clearLegacyInitError()
 
     return { uri: uri ?? '', topic }
+  }
+
+  private clearLegacyInitError(): void {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(StorageKey.WC_INIT_ERROR)
+      } catch {
+        // Ignore storage errors when cleaning up legacy WC_INIT_ERROR.
+      }
+    }
   }
 
   private async discardApproval(signClient: Client, session: SessionTypes.Struct): Promise<void> {
@@ -1482,6 +1510,7 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       if (!isCurrent()) {
         return
       }
+      this.relayerErrors.set(this.pairingGeneration, event)
       try {
         logger.error('subscribeToSessionEvents', event)
         const diagnostic = getErrorDiagnostic(event)
@@ -1763,16 +1792,99 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     return this.pairingRequestPromise
   }
 
+  /**
+   * Filter out stale relay diagnostics that belong to an earlier pairing generation.
+   * Reject retired client lifetimes before inspecting transport or socket state.
+   * Elevate explicit storage-lock conflicts when a shared core is still claimed.
+   * Expose relay origin-allowlist rejections so misconfigured domains fail visibly.
+   * Recognize initialization and proposal deadlines before generic socket errors.
+   * Isolate concurrent init(true) handoffs so superseded attempts wait for the winner.
+   * Distinguish mid-flight client replacement from external relay unreachability.
+   * Emit a deterministic failure classification for every empty pairing URI.
+   */
+  private classifyPairingFailure(
+    wasRetired: boolean,
+    pairingGen: number,
+    caughtError: unknown
+  ): { reason: WalletConnectPairingFailureReason; detail?: unknown } {
+    const relayerError = this.relayerErrors.get(pairingGen)
+    this.relayerErrors.delete(pairingGen)
+    const detail = getErrorDiagnostic(relayerError ?? caughtError)
+    if (wasRetired || this.retired) {
+      return { reason: 'retired', detail }
+    }
+    if (caughtError instanceof InitializationUnavailable) {
+      return { reason: 'initialization-unavailable', detail }
+    }
+    if (isOriginNotAllowedError(caughtError) || isOriginNotAllowedError(relayerError)) {
+      return { reason: 'origin-not-allowed', detail }
+    }
+    if (typeof detail === 'string' && /timed out/i.test(detail)) {
+      return { reason: 'timeout', detail }
+    }
+    if (relayerError !== undefined) {
+      return { reason: 'relay-unreachable', detail }
+    }
+    if (this.retiredPairingGenerations.has(pairingGen)) {
+      return { reason: 'retired', detail }
+    }
+    if (this.pairingGeneration !== pairingGen) {
+      return { reason: 'superseded', detail }
+    }
+    if (
+      caughtError === undefined ||
+      (relayerError === undefined && detail === 'Failed to connect to the relayer.')
+    ) {
+      return { reason: 'client-replaced', detail }
+    }
+
+    return { reason: 'relay-unreachable', detail }
+  }
+
   private async createPairingRequestInfo(): Promise<ExtendedWalletConnectPairingRequest> {
     let pairingUri = ''
     let pairingTopic = ''
+    const wasRetired = this.retired
+    const activeStartup =
+      !wasRetired && this.startup?.forceNewConnection && !this.startup.fromPairingRequest
+        ? this.startup
+        : undefined
+    const pairingGen = activeStartup
+      ? activeStartup.generation
+      : this.pairingGeneration + (wasRetired ? 0 : 1)
+    let caughtError: unknown
     try {
       logger.warn('getPairingRequestInfo')
-      const { uri, topic } = (await this.init(true)) ?? { uri: '', topic: '' }
+      let initPromise: Promise<{ uri: string; topic: string } | undefined>
+      if (activeStartup) {
+        initPromise = activeStartup.promise
+      } else {
+        initPromise = this.init(true)
+        if (this.startup) {
+          this.startup.fromPairingRequest = true
+        }
+      }
+      const { uri, topic } = (await initPromise) ?? {
+        uri: '',
+        topic: ''
+      }
       pairingUri = uri
       pairingTopic = topic
     } catch (error: unknown) {
+      caughtError = error
       logger.warn(error instanceof Error ? error.message : String(error))
+    }
+
+    let failureReason: WalletConnectPairingFailureReason | undefined
+    if (!pairingUri) {
+      const failure = this.classifyPairingFailure(wasRetired, pairingGen, caughtError)
+      failureReason = failure.reason
+      reportDiagnostic({
+        level: 'warn',
+        service: 'WalletConnectCommunicationClient',
+        method: 'getPairingRequestInfo',
+        args: failure.detail !== undefined ? [failureReason, failure.detail] : [failureReason]
+      })
     }
 
     return new ExtendedWalletConnectPairingRequest(
@@ -1781,7 +1893,10 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
       await generateGUID(),
       BEACON_VERSION,
       await generateGUID(),
-      pairingUri
+      pairingUri,
+      undefined,
+      undefined,
+      failureReason
     )
   }
 
@@ -2489,10 +2604,8 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
         return undefined
       }
       const message = error instanceof Error ? error.message : String(error)
+      this.relayerErrors.set(this.pairingGeneration, error)
       logger.error(message)
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(StorageKey.WC_INIT_ERROR, message)
-      }
 
       return undefined
     }

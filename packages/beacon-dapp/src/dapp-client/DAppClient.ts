@@ -53,6 +53,7 @@ import {
   PermissionRequestV3,
   PermissionResponseV3,
   ExtendedWalletConnectPairingResponse,
+  WalletConnectPairingResult,
   ProofOfEventChallengeRequest,
   ProofOfEventChallengeResponse,
   ProofOfEventChallengeRequestInput,
@@ -1865,6 +1866,15 @@ export class DAppClient extends Client {
             () => '',
             () => ''
           )
+        const retiredWalletConnectResult: WalletConnectPairingResult = {
+          ok: false,
+          reason: 'retired'
+        }
+        const retiredWalletConnectInformation = (): Promise<WalletConnectPairingResult> =>
+          attempt.promise.then(
+            () => retiredWalletConnectResult,
+            () => retiredWalletConnectResult
+          )
         const serializer = new Serializer()
         const p2pPeerInfo = attempt.information(async () => {
           try {
@@ -1910,19 +1920,6 @@ export class DAppClient extends Client {
           }
         })
 
-        const walletConnectPeerInfo = createLazyPromise(() =>
-          attempt.information(() =>
-            walletConnectTransport
-              .getPairingRequestInfo()
-              .then((pairingRequestInfo) => pairingRequestInfo.uri)
-              .catch((error) => {
-                logger.warn('init', 'walletconnect pairing request failed', error)
-
-                return pairing.collecting ? '' : retiredInformation()
-              })
-          )
-        )
-
         const postmessagePeerInfo = attempt.information(async (): Promise<string> => {
           if (!pairing.collecting) {
             return retiredInformation()
@@ -1937,23 +1934,75 @@ export class DAppClient extends Client {
           }
         })
 
-        if (!attempt.isCurrent()) {
-          return
+        const emitPairInit = (walletConnectPeerInfo: PromiseLike<WalletConnectPairingResult>) => {
+          if (!attempt.isCurrent()) {
+            return
+          }
+          this.events
+            .emit(BeaconEvent.PAIR_INIT, {
+              p2pPeerInfo,
+              postmessagePeerInfo,
+              walletConnectPeerInfo,
+              networkType: this.network.type,
+              abortedHandler: async () => {
+                await abortHandler()
+              },
+              disclaimerText: this.disclaimerText,
+              analytics: this.analytics,
+              featuredWallets: this.featuredWallets
+            })
+            .catch((emitError) => logger.warn('init', emitError))
         }
-        this.events
-          .emit(BeaconEvent.PAIR_INIT, {
-            p2pPeerInfo,
-            postmessagePeerInfo,
-            walletConnectPeerInfo,
-            networkType: this.network.type,
-            abortedHandler: async () => {
-              await abortHandler()
-            },
-            disclaimerText: this.disclaimerText,
-            analytics: this.analytics,
-            featuredWallets: this.featuredWallets
-          })
-          .catch((emitError) => logger.warn('init', emitError))
+
+        const createWalletConnectPeerInfo = (): PromiseLike<WalletConnectPairingResult> =>
+          createLazyPromise(() =>
+            attempt.informationWithDefault(
+              () =>
+                walletConnectTransport
+                  .getPairingRequestInfo()
+                  .then((pairingRequestInfo): WalletConnectPairingResult => {
+                    if (pairingRequestInfo.uri) {
+                      return { ok: true, uri: pairingRequestInfo.uri }
+                    }
+                    const reason =
+                      pairingRequestInfo.failureReason ??
+                      (pairing.collecting ? 'relay-unreachable' : 'retired')
+                    if (!pairingRequestInfo.failureReason && reason !== 'retired') {
+                      reportDiagnostic({
+                        level: 'warn',
+                        service: 'DAppClient',
+                        method: 'walletConnectPeerInfo',
+                        args: [reason]
+                      })
+                    }
+                    if (reason === 'superseded' && pairing.collecting && attempt.isCurrent()) {
+                      emitPairInit(createWalletConnectPeerInfo())
+                    }
+
+                    return { ok: false, reason }
+                  })
+                  .catch(
+                    (error): WalletConnectPairingResult | Promise<WalletConnectPairingResult> => {
+                      logger.warn('init', 'walletconnect pairing request failed', error)
+                      if (pairing.collecting) {
+                        reportDiagnostic({
+                          level: 'warn',
+                          service: 'DAppClient',
+                          method: 'walletConnectPeerInfo',
+                          args: ['relay-unreachable', error]
+                        })
+
+                        return { ok: false, reason: 'relay-unreachable' }
+                      }
+
+                      return retiredWalletConnectInformation()
+                    }
+                  ),
+              retiredWalletConnectResult
+            )
+          )
+
+        emitPairInit(createWalletConnectPeerInfo())
       }
     }
   }

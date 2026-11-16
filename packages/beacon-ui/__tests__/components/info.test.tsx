@@ -121,12 +121,13 @@ describe('Info Component', () => {
   })
 
   test('does not render optional elements when props are missing', () => {
-    render(<Info {...defaultProps} />)
+    const { container } = render(<Info {...defaultProps} />)
 
     // Icon, description, data, buttons, download link and QR code should not be rendered
     expect(screen.queryByTestId('dummy-icon')).not.toBeInTheDocument()
     expect(screen.queryByText('Test description')).not.toBeInTheDocument()
     expect(screen.queryByText('Test data')).not.toBeInTheDocument()
+    expect(container.querySelector('.info-buttons')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /qr-code-icon/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })

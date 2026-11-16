@@ -1,5 +1,17 @@
 import { ExtendedPeerInfo, PeerInfo } from './PeerInfo'
 
+export type WalletConnectPairingFailureReason =
+  | 'superseded'
+  | 'client-replaced'
+  | 'retired'
+  | 'initialization-unavailable'
+  | 'relay-unreachable'
+  | 'origin-not-allowed'
+  | 'timeout'
+
+export type WalletConnectPairingResult =
+  { ok: true; uri: string } | { ok: false; reason: WalletConnectPairingFailureReason }
+
 /**
  * @internalapi
  */
@@ -12,6 +24,7 @@ export class WalletConnectPairingRequest implements PeerInfo {
   public appUrl?: string | undefined
   public publicKey: string
   public version: string
+  public failureReason?: WalletConnectPairingFailureReason | undefined
 
   constructor(
     id: string,
@@ -20,7 +33,8 @@ export class WalletConnectPairingRequest implements PeerInfo {
     version: string,
     uri: string,
     icon?: string,
-    appUrl?: string
+    appUrl?: string,
+    failureReason?: WalletConnectPairingFailureReason
   ) {
     this.id = id
     this.name = name
@@ -29,6 +43,7 @@ export class WalletConnectPairingRequest implements PeerInfo {
     this.publicKey = publicKey
     this.version = version
     this.uri = uri
+    this.failureReason = failureReason
   }
 }
 
@@ -49,9 +64,10 @@ export class ExtendedWalletConnectPairingRequest
     senderId: string,
     uri: string,
     icon?: string,
-    appUrl?: string
+    appUrl?: string,
+    failureReason?: WalletConnectPairingFailureReason
   ) {
-    super(id, name, publicKey, version, uri, icon, appUrl)
+    super(id, name, publicKey, version, uri, icon, appUrl, failureReason)
     this.senderId = senderId
   }
 }

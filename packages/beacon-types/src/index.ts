@@ -151,7 +151,9 @@ import {
 } from './types/WalletConnectPairingResponse'
 import {
   ExtendedWalletConnectPairingRequest,
-  WalletConnectPairingRequest
+  WalletConnectPairingFailureReason,
+  WalletConnectPairingRequest,
+  WalletConnectPairingResult
 } from './types/WalletConnectPairingRequest'
 import {
   ExtendedPostMessagePairingResponse,
@@ -397,6 +399,8 @@ export {
   ExtendedP2PPairingResponse,
   WalletConnectPairingResponse,
   WalletConnectPairingRequest,
+  WalletConnectPairingFailureReason,
+  WalletConnectPairingResult,
   ExtendedWalletConnectPairingRequest,
   ExtendedWalletConnectPairingResponse
 }

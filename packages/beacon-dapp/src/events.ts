@@ -37,7 +37,8 @@ import {
   TransportHealth,
   TransportStatusChangeReason,
   TransportStatusChangedInfo,
-  WaitingForWalletAckInfo
+  WaitingForWalletAckInfo,
+  WalletConnectPairingResult
 } from '@ecadlabs/beacon-types'
 import {
   UnknownBeaconError,
@@ -369,7 +370,7 @@ export interface BeaconEventType {
   [BeaconEvent.PAIR_INIT]: {
     p2pPeerInfo: Promise<string>
     postmessagePeerInfo: Promise<string>
-    walletConnectPeerInfo: PromiseLike<string>
+    walletConnectPeerInfo: PromiseLike<WalletConnectPairingResult>
     networkType: NetworkType
     abortedHandler?(): void
     disclaimerText?: string

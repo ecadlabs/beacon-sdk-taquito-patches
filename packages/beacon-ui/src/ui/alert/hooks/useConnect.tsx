@@ -1,12 +1,18 @@
 import { Logger, reportDiagnostic, windowRef } from '@ecadlabs/beacon-core'
-import { StorageKey, ExtensionMessage, ExtensionMessageTarget } from '@ecadlabs/beacon-types'
+import {
+  StorageKey,
+  ExtensionMessage,
+  ExtensionMessageTarget,
+  WalletConnectPairingFailureReason,
+  WalletConnectPairingResult
+} from '@ecadlabs/beacon-types'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { getTzip10Link } from '../../../utils/get-tzip10-link'
 import { isTwBrowser, isAndroid, isMobileOS, isIOS } from '../../../utils/platform'
 import { MergedWallet, OSLink } from '../../../utils/wallets'
 import { getDefaultLogo } from '../getDefautlLogo'
-import { AlertConfig, AlertState } from '../../common'
-import { hasWalletConnectSymKey } from '../../../utils/walletconnect'
+import { AlertConfig, AlertState, WalletConnectSyncCode } from '../../common'
+import { hasWalletConnectSymKey, unwrapWalletConnectResult } from '../../../utils/walletconnect'
 
 const logger = new Logger('useConnect')
 
@@ -17,10 +23,10 @@ interface WalletAction {
 const reportLaunchFailure = (method: string, error: unknown) =>
   reportDiagnostic({ level: 'error', service: 'useConnect', method, args: [error] })
 
-const reportWalletConnectFailure = (error: unknown): string => {
+const reportWalletConnectFailure = (error: unknown): WalletConnectPairingResult => {
   reportLaunchFailure('walletConnectPayload', error)
 
-  return ''
+  return { ok: false, reason: 'relay-unreachable' }
 }
 
 const getInitialWalletType = (
@@ -95,7 +101,7 @@ const openMobileLink = (link: string) => {
 
 export const useConnect = (
   isMobile: boolean,
-  wcPayload: PromiseLike<string>,
+  wcPayload: PromiseLike<WalletConnectSyncCode>,
   p2pPayload: Promise<string>,
   postPayload: Promise<string>,
   wallets: Map<string, MergedWallet>,
@@ -108,7 +114,19 @@ export const useConnect = (
   const [displayQRExtra, setDisplayQRExtra] = useState(false)
   const [showMoreContent, setShowMoreContent] = useState(false)
   const [isWCWorking, setIsWCWorking] = useState(true)
+  const [wcFailureReason, setWcFailureReason] = useState<WalletConnectPairingFailureReason>()
   const currentAction = useRef<WalletAction | undefined>(undefined)
+  const awaitingWcAction = useRef<WalletAction | undefined>(undefined)
+  const preservedAction = useRef<WalletAction | undefined>(undefined)
+  const latestWcPayload = useRef(wcPayload)
+  const previousPayloads = useRef({ wcPayload, p2pPayload, postPayload })
+  const supersededWaiter = useRef<
+    | {
+        action: WalletAction
+        resolve: (next: PromiseLike<WalletConnectSyncCode>) => void
+      }
+    | undefined
+  >(undefined)
 
   const closePlaceholder = (action: WalletAction) => {
     const placeholder = action.placeholder
@@ -121,6 +139,9 @@ export const useConnect = (
   }
 
   const invalidateAction = () => {
+    supersededWaiter.current = undefined
+    awaitingWcAction.current = undefined
+    preservedAction.current = undefined
     const previousAction = currentAction.current
     currentAction.current = undefined
     if (previousAction) {
@@ -130,7 +151,30 @@ export const useConnect = (
 
   useEffect(() => invalidateAction, [])
 
+  const isCurrentAction = (action: WalletAction) => currentAction.current === action
+
   useLayoutEffect(() => {
+    const prev = previousPayloads.current
+    previousPayloads.current = { wcPayload, p2pPayload, postPayload }
+    latestWcPayload.current = wcPayload
+    const waiter = supersededWaiter.current
+    const activeWcAction = waiter?.action ?? awaitingWcAction.current
+    const isWcOnlyReplacement =
+      prev.p2pPayload === p2pPayload &&
+      prev.postPayload === postPayload &&
+      prev.wcPayload !== wcPayload
+    if (isWcOnlyReplacement && activeWcAction && isCurrentAction(activeWcAction)) {
+      preservedAction.current = activeWcAction
+      if (waiter) {
+        supersededWaiter.current = undefined
+        waiter.resolve(wcPayload)
+      }
+
+      return
+    }
+    if (isWcOnlyReplacement && state === AlertState.QR && !displayQRExtra && qrCode === undefined) {
+      return
+    }
     invalidateAction()
     setWallet(undefined)
     setQRCode(undefined)
@@ -138,10 +182,63 @@ export const useConnect = (
     setDisplayQRExtra(false)
     setShowMoreContent(false)
     setIsWCWorking(true)
+    setWcFailureReason(undefined)
     setIsLoading(false)
   }, [wcPayload, p2pPayload, postPayload])
 
-  const isCurrentAction = (action: WalletAction) => currentAction.current === action
+  const awaitWcSyncCode = async (
+    action: WalletAction
+  ): Promise<WalletConnectSyncCode | undefined> => {
+    let payload: PromiseLike<WalletConnectSyncCode> = wcPayload
+    awaitingWcAction.current = action
+    try {
+      for (;;) {
+        const raw = await Promise.resolve(payload).catch((error: unknown) =>
+          isCurrentAction(action) ? reportWalletConnectFailure(error) : undefined
+        )
+        if (raw === undefined || !isCurrentAction(action)) {
+          return undefined
+        }
+        if (typeof raw !== 'string' && !raw.ok && raw.reason === 'superseded') {
+          const next =
+            latestWcPayload.current !== payload
+              ? { payload: latestWcPayload.current }
+              : await new Promise<{ payload: PromiseLike<WalletConnectSyncCode> }>((resolve) => {
+                  supersededWaiter.current = { action, resolve: (p) => resolve({ payload: p }) }
+                })
+          if (!isCurrentAction(action)) {
+            return undefined
+          }
+          payload = next.payload
+          continue
+        }
+
+        return raw
+      }
+    } finally {
+      if (awaitingWcAction.current === action) {
+        awaitingWcAction.current = undefined
+      }
+    }
+  }
+
+  const resolveWalletConnectUri = async (action: WalletAction): Promise<string | undefined> => {
+    const raw = await awaitWcSyncCode(action)
+    if (raw === undefined || !isCurrentAction(action)) {
+      return undefined
+    }
+    const result = unwrapWalletConnectResult(raw)
+    if (!result.ok || !hasWalletConnectSymKey(result.uri)) {
+      setIsWCWorking(false)
+      setWcFailureReason(result.ok ? 'relay-unreachable' : result.reason)
+
+      return ''
+    }
+    setIsWCWorking(true)
+    setWcFailureReason(undefined)
+
+    return result.uri
+  }
 
   const runWalletAction = async (
     method: string,
@@ -200,24 +297,11 @@ export const useConnect = (
       selectedWallet.supportedInteractionStandards?.includes('wallet_connect') &&
       !selectedWallet.name.toLowerCase().includes('kukai')
     ) {
-      let payload: string
-      try {
-        payload = await wcPayload
-      } catch (error: unknown) {
-        if (!isCurrentAction(action)) {
-          return
-        }
-        payload = reportWalletConnectFailure(error)
-      }
-      if (!isCurrentAction(action)) {
+      const uri = await resolveWalletConnectUri(action)
+      if (!uri || !isCurrentAction(action)) {
         return
       }
-      const isValid = hasWalletConnectSymKey(payload)
-      setIsWCWorking(isValid)
-      if (!isValid) {
-        return
-      }
-      link = `${selectedWallet.links[OSLink.WEB]}/wc?uri=${encodeURIComponent(payload)}`
+      link = `${selectedWallet.links[OSLink.WEB]}/wc?uri=${encodeURIComponent(uri)}`
     } else {
       const payload = await p2pPayload
       if (!isCurrentAction(action)) {
@@ -259,34 +343,21 @@ export const useConnect = (
   }
 
   const selectWalletConnectWallet = async (action: WalletAction, selectedWallet: MergedWallet) => {
-    let payload: string
-    try {
-      payload = await wcPayload
-    } catch (error: unknown) {
-      if (!isCurrentAction(action)) {
-        return
-      }
-      payload = reportWalletConnectFailure(error)
-    }
-    if (!isCurrentAction(action)) {
+    const uri = await resolveWalletConnectUri(action)
+    if (uri === undefined || !isCurrentAction(action)) {
       return
     }
-    const isValid = hasWalletConnectSymKey(payload)
-    setIsWCWorking(isValid)
-    if (!isValid && selectedWallet.name.toLowerCase().includes('kukai')) {
+    if (!uri) {
       setQRCode('error')
       setInstallState(selectedWallet)
 
       return
     }
-    if (!isValid) {
-      return
-    }
     if (isMobile && selectedWallet.types.includes('ios') && selectedWallet.types.length === 1) {
       storeSelectedWallet(selectedWallet, 'mobile')
-      await launchMobileWallet(selectedWallet, payload)
+      await launchMobileWallet(selectedWallet, uri)
     } else {
-      setQRCode(payload)
+      setQRCode(uri)
       setInstallState(selectedWallet)
     }
   }
@@ -316,8 +387,14 @@ export const useConnect = (
     openMobileLink(link)
   }
 
-  const handleClickWallet = (id: string, config: AlertConfig): Promise<void> =>
-    runWalletAction('handleClickWallet', async (action) => {
+  const handleClickWallet = (id: string, config: AlertConfig): Promise<void> => {
+    if (preservedAction.current && isCurrentAction(preservedAction.current) && wallet?.id === id) {
+      preservedAction.current = undefined
+
+      return Promise.resolve()
+    }
+
+    return runWalletAction('handleClickWallet', async (action) => {
       setShowMoreContent(false)
       const selectedWallet = wallets.get(id)
       setWallet(selectedWallet)
@@ -338,6 +415,7 @@ export const useConnect = (
         }
       }
     })
+  }
 
   const handleNewTab = (config: AlertConfig, selectedWallet: MergedWallet): Promise<void> =>
     runWalletAction('handleNewTab', (action) => launchWebWallet(action, config, selectedWallet))
@@ -347,21 +425,19 @@ export const useConnect = (
       storeSelectedWallet(selectedWallet, 'mobile')
       let syncCode: string
       if (selectedWallet.supportedInteractionStandards?.includes('wallet_connect')) {
-        try {
-          syncCode = await wcPayload
-        } catch (error: unknown) {
-          if (!isCurrentAction(action)) {
-            return
-          }
-          reportWalletConnectFailure(error)
+        const raw = await awaitWcSyncCode(action)
+        if (raw === undefined || !isCurrentAction(action)) {
+          return
+        }
+        if (typeof raw !== 'string' && !raw.ok) {
+          setWcFailureReason(raw.reason)
           setIsWCWorking(false)
           setInstallState(selectedWallet)
-          if (selectedWallet.name.toLowerCase().includes('kukai')) {
-            setQRCode('error')
-          }
+          setQRCode('error')
 
           return
         }
+        syncCode = typeof raw === 'string' ? raw : raw.uri
       } else {
         syncCode = await p2pPayload
       }
@@ -470,6 +546,7 @@ export const useConnect = (
     handleShowMoreContent,
     handleDisplayQRExtra,
     handleIsLoading,
-    cancelPendingLaunch
+    cancelPendingLaunch,
+    wcFailureReason
   ] as const
 }

@@ -52,25 +52,29 @@ export class InitializationAttempt {
 
   /** Issued UI information settles even when its adapter is still completing. */
   public information(operation: () => Promise<string>): Promise<string> {
+    return this.informationWithDefault(operation, '')
+  }
+
+  public informationWithDefault<T>(operation: () => Promise<T>, retiredValue: T): Promise<T> {
     if (this.retirement.signal.aborted) {
-      return Promise.resolve('')
+      return Promise.resolve(retiredValue)
     }
 
-    return new Promise<string>((resolve, reject) => {
-      const retired = () => resolve('')
+    return new Promise<T>((resolve, reject) => {
+      const retired = () => resolve(retiredValue)
       this.retirement.signal.addEventListener('abort', retired, { once: true })
       const finish = () => this.retirement.signal.removeEventListener('abort', retired)
       Promise.resolve()
-        .then(() => (this.retirement.signal.aborted ? '' : operation()))
+        .then(() => (this.retirement.signal.aborted ? retiredValue : operation()))
         .then(
           (value) => {
             finish()
-            resolve(this.retirement.signal.aborted ? '' : value)
+            resolve(this.retirement.signal.aborted ? retiredValue : value)
           },
           (error: unknown) => {
             finish()
             if (this.retirement.signal.aborted) {
-              resolve('')
+              resolve(retiredValue)
             } else {
               reject(error)
             }

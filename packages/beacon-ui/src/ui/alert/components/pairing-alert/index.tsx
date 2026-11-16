@@ -143,7 +143,10 @@ const InstallView = ({
         (isWCWorking && wallet.supportedInteractionStandards?.includes('wallet_connect') ? (
           mobileContent
         ) : (
-          <WCInitError title={`Connect with ${wallet.name} Mobile`} />
+          <WCInitError
+            title={`Connect with ${wallet.name} Mobile`}
+            reason={qrProps.wcFailureReason}
+          />
         ))}
     </div>
   )
@@ -247,7 +250,8 @@ export const PairingAlert: React.FC<PairingAlertProps> = (props) => {
     handleShowMoreContent,
     handleDisplayQRExtra,
     handleIsLoading,
-    cancelPendingLaunch
+    cancelPendingLaunch,
+    wcFailureReason
   ] = useConnect(isMobile, wcPayload, p2pPayload, postPayload, wallets, props.onClose)
   useLayoutEffect(() => {
     if (!props.open) {
@@ -255,7 +259,7 @@ export const PairingAlert: React.FC<PairingAlertProps> = (props) => {
     }
 
     return cancelPendingLaunch
-  }, [props.open, wcPayload, p2pPayload, postPayload])
+  }, [props.open])
 
   const handleClose = async () => {
     cancelPendingLaunch()
@@ -293,6 +297,7 @@ export const PairingAlert: React.FC<PairingAlertProps> = (props) => {
   const qrProps: Omit<QRCodeProps, 'isMobile'> = {
     wallet,
     isWCWorking,
+    wcFailureReason,
     qrCode,
     defaultPairing: p2pPayload,
     handleIsLoading

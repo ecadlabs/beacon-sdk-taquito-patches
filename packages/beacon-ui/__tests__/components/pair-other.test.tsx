@@ -174,4 +174,19 @@ describe('PairOther Component', () => {
     expect(screen.queryByRole('button', { name: /Beacon/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /WalletConnect/i })).not.toBeInTheDocument()
   })
+
+  test('renders the typed WalletConnect failure message when WalletConnect pairing fails', async () => {
+    render(
+      <PairOther
+        {...defaultProps}
+        wcPayload={Promise.resolve({ ok: false, reason: 'origin-not-allowed' })}
+      />
+    )
+
+    const wcButton = await screen.findByRole('button', { name: /WalletConnect/i })
+    fireEvent.click(wcButton)
+
+    expect(await screen.findByText('Origin not allowed.')).toBeInTheDocument()
+    expect(screen.getByText(/add this origin to the project allowlist/i)).toBeInTheDocument()
+  })
 })

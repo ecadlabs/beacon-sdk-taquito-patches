@@ -4,6 +4,7 @@ import type { MergedWallet } from '../../../../../../utils/wallets'
 import { Info } from '../../../../../../components/info'
 import { AlertState, type PairingPayload } from '../../../../../common'
 import { isIOS } from '../../../../../../utils/platform'
+import { unwrapWalletConnectResult } from '../../../../../../utils/walletconnect'
 import { suffixMap } from './utils/suffix-map'
 
 interface MobilePairingProps {
@@ -66,9 +67,11 @@ export const MobilePairing: FC<MobilePairingProps> = ({
     const action = ++qrAction.current
     try {
       cancelPendingLaunch?.()
-      const syncCode = await (wallet.supportedInteractionStandards?.includes('wallet_connect')
+      const rawSyncCode = await (wallet.supportedInteractionStandards?.includes('wallet_connect')
         ? wcPayload
         : p2pPayload)
+      const result = unwrapWalletConnectResult(rawSyncCode)
+      const syncCode = result.ok ? result.uri : ''
       if (action !== qrAction.current) {
         return
       }

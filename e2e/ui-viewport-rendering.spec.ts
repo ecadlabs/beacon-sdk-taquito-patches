@@ -165,7 +165,7 @@ async function inspectAlertLayout(page: Page): Promise<LayoutCheckResult> {
 
     const overflowingChildren: string[] = []
     const children = modal.querySelectorAll<HTMLElement>(
-      '.alert-header, .alert-modal-loading-wrapper, .alert-body, .info-wrapper, .info-title, .info-description, .info-buttons, .info-button, .info-button-secondary'
+      '.alert-header, .alert-modal-loading-wrapper, .alert-body, .info-wrapper, .info-title, .info-description, .info-buttons, .info-button, .info-button-secondary, #qr-code-icon, .qr-wrapper'
     )
     children.forEach((child) => {
       const cRect = child.getBoundingClientRect()
@@ -177,18 +177,17 @@ async function inspectAlertLayout(page: Page): Promise<LayoutCheckResult> {
         cRect.bottom > rect.bottom + 1
       ) {
         overflowingChildren.push(
-          `${child.className}: [${Math.round(cRect.left)},${Math.round(cRect.top)},${Math.round(cRect.right)},${Math.round(cRect.bottom)}] outside modal [${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.right)},${Math.round(rect.bottom)}]`
+          `${child.className || child.id}: [${Math.round(cRect.left)},${Math.round(cRect.top)},${Math.round(cRect.right)},${Math.round(cRect.bottom)}] outside modal [${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.right)},${Math.round(rect.bottom)}]`
         )
       }
     })
 
-    // Also check if children of .info-wrapper overflow outside .info-wrapper itself
-    const infoWrapper = modal.querySelector<HTMLElement>('.info-wrapper')
-    if (infoWrapper) {
+    // Also check if children of each .info-wrapper overflow outside that .info-wrapper itself
+    modal.querySelectorAll<HTMLElement>('.info-wrapper').forEach((infoWrapper) => {
       const infoRect = infoWrapper.getBoundingClientRect()
       infoWrapper
         .querySelectorAll<HTMLElement>(
-          '.info-title, .info-description, .info-buttons, .info-button, .info-button-secondary'
+          '.info-title, .info-description, .info-buttons, .info-button, .info-button-secondary, #qr-code-icon'
         )
         .forEach((child) => {
           const cRect = child.getBoundingClientRect()
@@ -200,11 +199,11 @@ async function inspectAlertLayout(page: Page): Promise<LayoutCheckResult> {
             cRect.bottom > infoRect.bottom + 1
           ) {
             overflowingChildren.push(
-              `${child.className}: [${Math.round(cRect.left)},${Math.round(cRect.top)},${Math.round(cRect.right)},${Math.round(cRect.bottom)}] outside info-wrapper [${Math.round(infoRect.left)},${Math.round(infoRect.top)},${Math.round(infoRect.right)},${Math.round(infoRect.bottom)}]`
+              `${child.className || child.id}: [${Math.round(cRect.left)},${Math.round(cRect.top)},${Math.round(cRect.right)},${Math.round(cRect.bottom)}] outside info-wrapper [${Math.round(infoRect.left)},${Math.round(infoRect.top)},${Math.round(infoRect.right)},${Math.round(infoRect.bottom)}]`
             )
           }
         })
-    }
+    })
 
     return {
       found: true,
@@ -359,12 +358,11 @@ test.describe('beacon-ui Desktop and Mobile Viewport Rendering & Scroll Conforma
             title: 'Choose your preferred wallet',
             body: '',
             pairingPayload: {
-              p2pSyncCode: () => Promise.resolve('tezos://?type=tzip10&data=mock-p2p-payload'),
-              postmessageSyncCode: () => Promise.resolve('mock-postmessage-payload'),
-              walletConnectSyncCode: () =>
-                new Promise((resolve) =>
-                  setTimeout(() => resolve('wc:mock@2?relay-protocol=irn'), 150)
-                ),
+              p2pSyncCode: Promise.resolve('tezos://?type=tzip10&data=mock-p2p-payload'),
+              postmessageSyncCode: Promise.resolve('mock-postmessage-payload'),
+              walletConnectSyncCode: new Promise((resolve) =>
+                setTimeout(() => resolve('wc:mock@2?relay-protocol=irn&symKey=deadbeef'), 150)
+              ),
               networkType: beacon.NetworkType.GHOSTNET
             }
           })
@@ -410,6 +408,40 @@ test.describe('beacon-ui Desktop and Mobile Viewport Rendering & Scroll Conforma
         expect(installLayout.closeButtonInBounds).toBe(true)
         expect(installLayout.closeButtonHitTestable).toBe(true)
         expect(installLayout.overflowingChildren).toEqual([])
+
+        // 3. Also verify WCInitError fallback layout fits within the viewport
+        await page.evaluate(() => {
+          beacon.openAlert({
+            title: 'Choose your preferred wallet',
+            body: '',
+            pairingPayload: {
+              p2pSyncCode: Promise.resolve('tezos://?type=tzip10&data=mock-p2p-payload'),
+              postmessageSyncCode: Promise.resolve('mock-postmessage-payload'),
+              walletConnectSyncCode: Promise.resolve({
+                ok: false as const,
+                reason: 'relay-unreachable' as const
+              }),
+              networkType: beacon.NetworkType.GHOSTNET
+            }
+          })
+        })
+        await page.waitForTimeout(100)
+        await page.evaluate(() => {
+          const host = document.querySelector('beacon-alert')
+          const firstWallet = host?.shadowRoot?.querySelector<HTMLElement>('.wallet-main')
+          firstWallet?.click()
+        })
+        await page.waitForTimeout(150)
+        const errorInstallLayout = await inspectAlertLayout(page)
+        expect(errorInstallLayout.containerRect.top).toBeGreaterThanOrEqual(0)
+        expect(errorInstallLayout.containerRect.left).toBeGreaterThanOrEqual(0)
+        expect(errorInstallLayout.containerRect.right).toBeLessThanOrEqual(profile.width)
+        expect(errorInstallLayout.containerRect.bottom).toBeLessThanOrEqual(profile.height)
+        expect(errorInstallLayout.horizontalOverflowPx).toBeLessThanOrEqual(1)
+        expect(errorInstallLayout.closeButtonVisible).toBe(true)
+        expect(errorInstallLayout.closeButtonInBounds).toBe(true)
+        expect(errorInstallLayout.closeButtonHitTestable).toBe(true)
+        expect(errorInstallLayout.overflowingChildren).toEqual([])
       } finally {
         await context.close()
       }

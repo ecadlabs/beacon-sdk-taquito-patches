@@ -1,6 +1,14 @@
 import type { ReactNode } from 'react'
-import { NetworkType, AnalyticsInterface, WalletInfo } from '@ecadlabs/beacon-types'
+import {
+  NetworkType,
+  AnalyticsInterface,
+  WalletInfo,
+  WalletConnectPairingFailureReason,
+  WalletConnectPairingResult
+} from '@ecadlabs/beacon-types'
 import { MergedWallet } from '../utils/wallets'
+
+export type WalletConnectSyncCode = WalletConnectPairingResult | string
 
 // ALERT
 
@@ -50,14 +58,14 @@ export interface AlertProps {
 export interface PairingPayload {
   p2pSyncCode: Promise<string>
   postmessageSyncCode: Promise<string>
-  walletConnectSyncCode: PromiseLike<string>
+  walletConnectSyncCode: PromiseLike<WalletConnectSyncCode>
   networkType: NetworkType
 }
 
 export interface PairOtherProps {
   walletList: MergedWallet[]
   p2pPayload: Promise<string>
-  wcPayload: PromiseLike<string>
+  wcPayload: PromiseLike<WalletConnectSyncCode>
   onClickLearnMore?: () => void
 }
 
@@ -73,6 +81,7 @@ export interface QRProps {
 export interface QRCodeProps {
   wallet?: MergedWallet
   isWCWorking: boolean
+  wcFailureReason?: WalletConnectPairingFailureReason
   isMobile: boolean
   qrCode?: string
   defaultPairing: Promise<string>
@@ -80,7 +89,8 @@ export interface QRCodeProps {
 }
 
 export interface WCInitErrorProps {
-  title: string
+  title?: string
+  reason?: WalletConnectPairingFailureReason
 }
 
 export interface InfoProps {

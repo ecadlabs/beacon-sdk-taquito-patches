@@ -7,6 +7,7 @@ import { runUICallback } from '../../../../../../utils/callback'
 export const QRCode: React.FC<QRCodeProps> = ({
   wallet,
   isWCWorking,
+  wcFailureReason,
   isMobile,
   qrCode,
   defaultPairing,
@@ -56,7 +57,7 @@ export const QRCode: React.FC<QRCodeProps> = ({
   }, [wallet, qrCode, defaultPairing, supportsWalletConnect])
 
   if (!isConnected) {
-    return <WCInitError title={`Connect with ${wallet?.name} Mobile`} />
+    return <WCInitError title={`Connect with ${wallet?.name} Mobile`} reason={wcFailureReason} />
   }
 
   if (!codeQr || codeQr.length === 0) {
