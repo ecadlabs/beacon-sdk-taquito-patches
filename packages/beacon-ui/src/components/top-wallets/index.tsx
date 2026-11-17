@@ -60,7 +60,22 @@ const TopWallets: React.FC<TopWalletsProps> = (props: TopWalletsProps) => {
           />
         ))}
         {props.otherWallets && (
-          <div className="top-wallets-other-wallets" onClick={props.otherWallets.onClick}>
+          <div
+            className="top-wallets-other-wallets"
+            role="button"
+            tabIndex={props.disabled ? -1 : 0}
+            aria-disabled={props.disabled ? 'true' : undefined}
+            onClick={props.disabled ? undefined : props.otherWallets.onClick}
+            onKeyDown={(e) => {
+              if (props.disabled) {
+                return
+              }
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                props.otherWallets?.onClick()
+              }
+            }}
+          >
             <div className="top-wallets-other-wallets-left">
               <h3>{ui.otherWallets}</h3>
               <p>{ui.otherWalletsDescription}</p>

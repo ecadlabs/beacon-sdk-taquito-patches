@@ -5,6 +5,15 @@ import { WalletProps } from 'src/ui/common'
 const Wallet: React.FC<WalletProps> = (props: WalletProps) => {
   const { aria } = getBeaconMessages()
   const logoAlt = interpolateBeaconMessage(aria.walletLogoAlt, { wallet: props.name })
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (props.disabled) {
+      return
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      props.onClick()
+    }
+  }
 
   return (
     <div
@@ -14,7 +23,11 @@ const Wallet: React.FC<WalletProps> = (props: WalletProps) => {
       {!props.small && (
         <div
           className={`wallet-main ${props.mobile ? 'wallet-main-mobile' : ''}`}
-          onClick={props.onClick}
+          role="button"
+          tabIndex={props.disabled ? -1 : 0}
+          aria-disabled={props.disabled ? 'true' : undefined}
+          onClick={props.disabled ? undefined : props.onClick}
+          onKeyDown={handleKeyDown}
         >
           <div className={`wallet-main-left ${props.mobile ? 'wallet-main-left-mobile' : ''}`}>
             <h3>{props.name}</h3>
@@ -35,7 +48,14 @@ const Wallet: React.FC<WalletProps> = (props: WalletProps) => {
         </div>
       )}
       {props.small && (
-        <div className="wallet-small" onClick={props.onClick}>
+        <div
+          className="wallet-small"
+          role="button"
+          tabIndex={props.disabled ? -1 : 0}
+          aria-disabled={props.disabled ? 'true' : undefined}
+          onClick={props.disabled ? undefined : props.onClick}
+          onKeyDown={handleKeyDown}
+        >
           <img src={props.image} alt={logoAlt} />
           <h3>{props.name}</h3>
         </div>

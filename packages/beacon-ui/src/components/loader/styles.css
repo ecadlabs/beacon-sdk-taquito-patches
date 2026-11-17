@@ -34,3 +34,13 @@
     width: 100%;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .loader:before {
+    -webkit-animation: none;
+    -moz-animation: none;
+    animation: none;
+    inset-inline-start: 25%;
+    width: 50%;
+  }
+}

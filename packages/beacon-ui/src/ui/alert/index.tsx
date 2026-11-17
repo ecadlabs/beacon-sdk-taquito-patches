@@ -1,9 +1,10 @@
 import { createRoot } from 'react-dom/client'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { getBeaconDirection, resolveBeaconLang, subscribeBeaconI18n } from '@ecadlabs/beacon-types'
 import { getColorMode } from 'src/utils/colorMode'
 import { Subject, Subscription } from '../../utils/subject'
 import { runUICallback } from '../../utils/callback'
+import { ensureDialogFocus, getActiveElementDeep } from '../../utils/focus'
 import { AlertConfig, ConfigurableAlertProps } from '../common'
 import { PairingAlert } from './components/pairing-alert'
 import { InfoAlert } from './components/info-alert'
@@ -13,8 +14,39 @@ import cssText from './aggregated.css'
 
 let initDone: boolean = false
 let alertHostEl: HTMLElement | undefined
+let previouslyFocusedElement: HTMLElement | null = null
 const show$ = new Subject<boolean>()
 const config$ = new Subject<AlertConfig>()
+
+const capturePreviousFocus = (): void => {
+  if (typeof document === 'undefined') {
+    return
+  }
+  const hostActive = document.activeElement
+  if (
+    alertHostEl &&
+    (hostActive === alertHostEl ||
+      (hostActive instanceof Node && alertHostEl.shadowRoot?.contains(hostActive)))
+  ) {
+    return
+  }
+  const active = getActiveElementDeep()
+  if (active && active !== document.body && active !== document.documentElement) {
+    previouslyFocusedElement = active
+  }
+}
+
+const restorePreviousFocus = (): void => {
+  const target = previouslyFocusedElement
+  previouslyFocusedElement = null
+  if (target && typeof target.focus === 'function' && target.isConnected) {
+    try {
+      target.focus()
+    } catch {
+      // Ignore focus errors on detached/disabled elements
+    }
+  }
+}
 
 const syncAlertHostAttributes = (el?: HTMLElement): void => {
   const target =
@@ -38,9 +70,11 @@ const AlertRoot = (props: AlertConfig) => {
     show$.hasEmitted() ? Boolean(show$.getValue()) : true
   )
   const [config, setConfig] = useState<AlertConfig>(() =>
-    config$.hasEmitted() ? (config$.getValue() as AlertConfig) : props
+    config$.hasEmitted() ? (config$.getValue() ?? props) : props
   )
   const [, setI18nRevision] = useState<number>(0)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const wasOpenRef = useRef<boolean>(false)
 
   useEffect(() => {
     const subs: Subscription[] = []
@@ -74,6 +108,34 @@ const AlertRoot = (props: AlertConfig) => {
     return () => clearTimeout(timer)
   }, [isOpen])
 
+  useLayoutEffect(() => {
+    const rootNode = rootRef.current
+    if (!isOpen || !mount) {
+      if (!isOpen && wasOpenRef.current) {
+        wasOpenRef.current = false
+        restorePreviousFocus()
+      }
+
+      return
+    }
+    wasOpenRef.current = true
+    const dialog = rootNode?.querySelector<HTMLElement>('[role="dialog"]')
+    if (!dialog) {
+      return
+    }
+    ensureDialogFocus(dialog)
+
+    if (typeof MutationObserver === 'undefined') {
+      return
+    }
+    const observer = new MutationObserver(() => {
+      ensureDialogFocus(dialog)
+    })
+    observer.observe(dialog, { childList: true, subtree: true })
+
+    return () => observer.disconnect()
+  }, [isOpen, mount, config])
+
   const onCloseHandler = () => {
     closeAlert()
     runUICallback(() => config.closeButtonCallback?.(), 'Alert', 'closeButtonCallback')
@@ -90,7 +152,7 @@ const AlertRoot = (props: AlertConfig) => {
   const lang = resolveBeaconLang()
 
   return (
-    <div className={`theme__${getColorMode()}`} dir={dir} lang={lang}>
+    <div ref={rootRef} className={`theme__${getColorMode()}`} dir={dir} lang={lang}>
       {mount &&
         (config.pairingPayload ? (
           <PairingAlert {...filteredProps} pairingPayload={config.pairingPayload} />
@@ -126,6 +188,7 @@ const createAlert = (config: AlertConfig) => {
 }
 
 const openAlert = (config: AlertConfig) => {
+  capturePreviousFocus()
   syncAlertHostAttributes()
   config$.next(config)
   show$.next(true)

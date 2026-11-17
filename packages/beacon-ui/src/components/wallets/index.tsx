@@ -49,7 +49,7 @@ const Wallets: React.FC<WalletsProps> = (props: WalletsProps) => {
           />
         ))}
       </div>
-      <button className="wallets-button" onClick={props.onClickOther}>
+      <button type="button" className="wallets-button" onClick={props.onClickOther}>
         {props.isMobile ? ui.pairWalletOnAnotherDevice : ui.showQrCode}
       </button>
     </div>

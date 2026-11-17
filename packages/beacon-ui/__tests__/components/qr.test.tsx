@@ -60,7 +60,8 @@ describe('QR Component', () => {
     // Wait for the QR SVG to be set by useEffect.
     await waitFor(() => {
       const svgWrapper = document.querySelector('.qr-svg-wrapper')
-      expect(svgWrapper?.innerHTML).toBe(dummySvg)
+      expect(svgWrapper?.querySelector('svg text')?.textContent).toBe('QR CODE')
+      expect(svgWrapper?.querySelector('svg')).toHaveAttribute('role', 'img')
     })
 
     // Check that getQrData was called with desktop dimensions (160x160).
@@ -87,7 +88,8 @@ describe('QR Component', () => {
     // Wait for the QR SVG to be set.
     await waitFor(() => {
       const svgWrapper = document.querySelector('.qr-svg-wrapper')
-      expect(svgWrapper?.innerHTML).toBe(dummySvg)
+      expect(svgWrapper?.querySelector('svg text')?.textContent).toBe('QR CODE')
+      expect(svgWrapper?.querySelector('svg')).toHaveAttribute('role', 'img')
     })
 
     // Check that getQrData was called with mobile dimensions (300x300).

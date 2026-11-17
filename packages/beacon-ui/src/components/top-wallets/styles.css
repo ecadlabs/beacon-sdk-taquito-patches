@@ -49,6 +49,17 @@
   max-width: 148px;
 }
 
+.top-wallets-other-wallets:focus-visible {
+  outline: 2px solid #3880ff;
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .top-wallets-other-wallets {
+    transition-duration: 0.01ms !important;
+  }
+}
+
 .top-wallets-other-wallets-left h3 {
   color: #334155;
   margin: 0px;

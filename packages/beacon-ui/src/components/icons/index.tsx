@@ -7,6 +7,8 @@ interface IconProps {
 export function CloseIcon(props: IconProps) {
   return (
     <svg
+      aria-hidden="true"
+      focusable="false"
       strokeWidth="0"
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 512 512"
@@ -26,6 +28,8 @@ export function CloseIcon(props: IconProps) {
 export function LeftIcon(props: IconProps) {
   return (
     <svg
+      aria-hidden="true"
+      focusable="false"
       strokeWidth="0"
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 320 512"
@@ -41,6 +45,8 @@ export function LeftIcon(props: IconProps) {
 export function LogoIcon(props: IconProps) {
   return (
     <svg
+      aria-hidden="true"
+      focusable="false"
       xmlns="http://www.w3.org/2000/svg"
       id="Guides"
       x="0"
@@ -78,7 +84,12 @@ export function LogoIcon(props: IconProps) {
 
 export function QRCodeIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512">
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 448 512"
+    >
       <path d="M0 224h192V32H0v192zM64 96h64v64H64V96zm192-64v192h192V32H256zm128 128h-64V96h64v64zM0 480h192V288H0v192zm64-128h64v64H64v-64zm352-64h32v128h-96v-32h-32v96h-64V288h96v32h64v-32zm0 160h32v32h-32v-32zm-64 0h32v32h-32v-32z" />
     </svg>
   )

@@ -8,6 +8,18 @@ import { runUICallback } from '../../utils/callback'
 
 const COPY_RESET_TIMEOUT = 3000
 
+const escapeHtmlAttr = (value: string): string =>
+  value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+const withAccessibleSvgAttributes = (svg: string, ariaLabel: string): string => {
+  if (!svg || !svg.includes('<svg')) {
+    return svg
+  }
+  const safeLabel = escapeHtmlAttr(ariaLabel)
+
+  return svg.replace(/<svg\b/, `<svg role="img" aria-label="${safeLabel}" focusable="false"`)
+}
+
 export const QR: React.FC<QRProps> = (props: QRProps) => {
   const [copied, setCopied] = useState<boolean>(false)
   const [qrSVG, setQrSVG] = useState<string>('')
@@ -57,8 +69,20 @@ export const QR: React.FC<QRProps> = (props: QRProps) => {
     }
   }
 
-  const { ui } = getBeaconMessages()
+  const handleKeyDownClipboard = async (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      await handleCopyClipboard()
+    }
+  }
+
+  const { ui, aria } = getBeaconMessages()
   const standardName = props.isWalletConnect ? ui.walletConnectQrOption : ui.beaconQrOption
+  const qrAriaLabel = interpolateBeaconMessage(aria.qrCodeAlt, {
+    standard: standardName,
+    wallet: props.walletName
+  })
+  const accessibleQrSvg = withAccessibleSvgAttributes(qrSVG, qrAriaLabel)
 
   return (
     <div
@@ -91,13 +115,19 @@ export const QR: React.FC<QRProps> = (props: QRProps) => {
       </div>
       <div
         className="qr-right"
+        role="button"
+        tabIndex={0}
+        aria-label={copied ? aria.copiedToClipboard : aria.copyQrToClipboard}
         style={props.isMobile ? { backgroundColor: 'transparent' } : {}}
         onClick={handleCopyClipboard}
+        onKeyDown={handleKeyDownClipboard}
       >
-        <div dangerouslySetInnerHTML={{ __html: qrSVG }} className="qr-svg-wrapper" />
+        <div dangerouslySetInnerHTML={{ __html: accessibleQrSvg }} className="qr-svg-wrapper" />
         {copied ? (
           <div className="qr-copy-wrapper">
             <svg
+              aria-hidden="true"
+              focusable="false"
               fill="currentColor"
               strokeWidth="0"
               xmlns="http://www.w3.org/2000/svg"
@@ -113,6 +143,8 @@ export const QR: React.FC<QRProps> = (props: QRProps) => {
         ) : (
           <div className="qr-copy-wrapper">
             <svg
+              aria-hidden="true"
+              focusable="false"
               fill="currentColor"
               strokeWidth="0"
               xmlns="http://www.w3.org/2000/svg"
@@ -127,6 +159,9 @@ export const QR: React.FC<QRProps> = (props: QRProps) => {
           </div>
         )}
       </div>
+      <span className="qr-sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {copied ? aria.copiedToClipboard : ''}
+      </span>
     </div>
   )
 }

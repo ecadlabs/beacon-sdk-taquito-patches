@@ -29,3 +29,8 @@
   border: 1px solid #64748b;
   fill: #f1f5f9;
 }
+
+.button-icon:focus-visible {
+  outline: 2px solid #3880ff;
+  outline-offset: 2px;
+}

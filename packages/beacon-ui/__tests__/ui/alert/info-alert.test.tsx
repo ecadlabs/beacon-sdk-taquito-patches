@@ -32,16 +32,20 @@ describe('InfoAlert Component', () => {
     expect(screen.getByText(/Test description/i)).toBeInTheDocument()
     // Expect the data to appear (if rendered as preformatted text or similar).
     expect(screen.getByText(/Test data/i)).toBeInTheDocument()
-    // Expect the "Close" button to be present.
-    expect(screen.getByRole('button', { name: /Close/i })).toBeInTheDocument()
+    // Expect the "Close" buttons (header icon button + primary info action button) to be present.
+    const closeButtons = screen.getAllByRole('button', { name: /Close/i })
+    expect(closeButtons.length).toBeGreaterThanOrEqual(2)
   })
 
   test('calls onClose when the "Close" button is clicked', () => {
     render(<InfoAlert {...defaultProps} />)
 
-    // Find the "Close" button and simulate a click.
-    const closeButton = screen.getByRole('button', { name: /Close/i })
-    fireEvent.click(closeButton)
+    // Find the primary "Close" button in InfoAlert and simulate a click.
+    const closeButton = screen
+      .getAllByRole('button', { name: /Close/i })
+      .find((el) => el.classList.contains('info-button'))
+    expect(closeButton).toBeDefined()
+    fireEvent.click(closeButton!)
     expect(onCloseMock).toHaveBeenCalledTimes(1)
   })
 

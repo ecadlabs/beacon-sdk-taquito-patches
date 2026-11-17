@@ -155,12 +155,20 @@ export const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
         <span className="pair-other-info">{ui.selectQrType}</span>
         <br />
         {hasBeacon && (
-          <button className="wallets-button" onClick={() => buttonClickHandler('p2p')}>
+          <button
+            type="button"
+            className="wallets-button"
+            onClick={() => buttonClickHandler('p2p')}
+          >
             {ui.beaconQrOption}
           </button>
         )}
         {hasWalletConnect && (
-          <button className="wallets-button" onClick={() => buttonClickHandler('walletconnect')}>
+          <button
+            type="button"
+            className="wallets-button"
+            onClick={() => buttonClickHandler('walletconnect')}
+          >
             {ui.walletConnectQrOption}
           </button>
         )}

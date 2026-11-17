@@ -50,7 +50,7 @@ function parseWallet(
 }
 
 export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
-  const { ui, dapp } = getBeaconMessages()
+  const { ui, dapp, aria } = getBeaconMessages()
   const [showMoreInfo, setShowMoreInfo] = useState<boolean>(true)
   const hasWalletObject = /\{\{\s*wallet\s*\}\}/.test(props.label) && Boolean(props.walletInfo)
   const localizedSentPrefix = dapp.requestSent.replace(/\{\{\s*wallet\s*\}\}/g, '').trim()
@@ -101,6 +101,9 @@ export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
 
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
       onAnimationEnd={handleAnimationEnd}
       style={{
         transform: `translate3d(${x}px, ${y}px, 0)`,
@@ -123,15 +126,23 @@ export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
         {!isMobileOS(window) && props.openWalletAction && (
           <div
             className="toast-action-button"
+            role="button"
+            tabIndex={0}
             onClick={() =>
               runUICallback(() => props.openWalletAction?.(), 'Toast', 'openWalletAction')
             }
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                runUICallback(() => props.openWalletAction?.(), 'Toast', 'openWalletAction')
+              }
+            }}
           >
             {ui.openWallet}
           </div>
         )}
 
-        <ButtonIcon onClick={props.onClickClose}>
+        <ButtonIcon ariaLabel={aria.closeToast} onClick={props.onClickClose}>
           <CloseIcon />
         </ButtonIcon>
       </div>
@@ -146,9 +157,17 @@ export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
               {action.actionText && (
                 <div
                   className="toast-action-button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() =>
                     runUICallback(() => action.actionCallback?.(), 'Toast', 'actionCallback')
                   }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      runUICallback(() => action.actionCallback?.(), 'Toast', 'actionCallback')
+                    }
+                  }}
                 >
                   {action.actionText}
                 </div>
