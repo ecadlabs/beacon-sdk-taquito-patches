@@ -12,4 +12,5 @@ export interface BeaconErrorOptions {
   errorOrigin?: ErrorOrigin
   errorData?: unknown
   description?: string
+  title?: string
 }

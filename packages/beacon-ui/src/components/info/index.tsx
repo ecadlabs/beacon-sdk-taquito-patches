@@ -3,7 +3,11 @@ import { QRCodeIcon } from '../icons'
 import { InfoProps } from '../../ui/common'
 
 const Info: React.FC<InfoProps> = (props: InfoProps) => (
-  <div className={`info-wrapper ${props.border ? 'info-border' : ''}`}>
+  <div
+    className={`info-wrapper ${props.border ? 'info-border' : ''} ${
+      props.onShowQRCodeClick ? 'info-has-qr' : ''
+    }`}
+  >
     {props.icon && (
       <div
         className={`info-icon ${props.iconBadge ? 'info-badge' : ''}`}

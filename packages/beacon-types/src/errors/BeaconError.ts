@@ -37,7 +37,7 @@ export abstract class BeaconError extends Error implements RequestErrorResponse 
 
     this.name = name
     this.errorType = errorType
-    this.title = defaultTitle
+    this.title = options?.title ?? defaultTitle
     this.description = description
     this.id = options?.id ?? ''
     this.version = options?.version ?? '2'

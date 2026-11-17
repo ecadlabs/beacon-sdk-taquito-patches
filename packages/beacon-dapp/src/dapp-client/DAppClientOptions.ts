@@ -4,7 +4,9 @@ import {
   ColorMode,
   NodeDistributions,
   AnalyticsInterface,
-  Network
+  Network,
+  BeaconTextDirection,
+  BeaconTranslationOverrides
 } from '@ecadlabs/beacon-types'
 import { BeaconEvent, BeaconEventType, BeaconEventHandlerFunction } from '../events'
 import { BlockExplorer } from '../utils/block-explorer'
@@ -108,6 +110,25 @@ export interface DAppClientOptions {
    * Set the color mode for the UI elements (alerts and toasts)
    */
   colorMode?: ColorMode
+
+  /**
+   * BCP-47 language tag for UI components, toasts, alerts, and error messages
+   * (for example: 'en', 'fr', 'es', 'de', 'ja', 'ar'). When omitted, inherits a
+   * supported `document.documentElement.lang` tag or falls back to 'en'.
+   */
+  locale?: string
+
+  /**
+   * Text direction for `<beacon-alert>` and `<beacon-toast>` shadow roots
+   * ('ltr' | 'rtl' | 'auto'). Defaults to 'rtl' for supported or custom-translated
+   * RTL locales (such as 'ar'), or inherits `document.documentElement.dir || 'ltr'`.
+   */
+  direction?: BeaconTextDirection
+
+  /**
+   * Optional custom or partial translation overrides merged over the active locale catalog.
+   */
+  translations?: BeaconTranslationOverrides
 
   /**
    * A disclaimer text that will be displayed in the pairing alert

@@ -44,6 +44,10 @@
   font-size: 16px;
 }
 
+.info-has-qr .info-title {
+  padding-inline: 2.2rem;
+}
+
 .info-description {
   text-align: center;
   font-size: 12.8px;
@@ -128,7 +132,7 @@ button#qr-code-icon {
   align-self: self-end;
   position: absolute;
   top: 0.3rem;
-  right: 0.3rem;
+  inset-inline-end: 0.3rem;
   padding: 1.5px;
 }
 

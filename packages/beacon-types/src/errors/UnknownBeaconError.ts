@@ -1,4 +1,5 @@
 import { BeaconErrorType } from '../types/BeaconErrorType'
+import { getBeaconErrorCopy } from '../i18n'
 import { BeaconError } from './BeaconError'
 import { BeaconErrorOptions } from './BeaconErrorOptions'
 
@@ -7,13 +8,13 @@ import { BeaconErrorOptions } from './BeaconErrorOptions'
  */
 export class UnknownBeaconError extends BeaconError {
   public override readonly name: string = 'UnknownBeaconError'
-  public override readonly title: string = 'Error'
 
   constructor(options?: BeaconErrorOptions) {
+    const copy = getBeaconErrorCopy(BeaconErrorType.UNKNOWN_ERROR)
     super(
       BeaconErrorType.UNKNOWN_ERROR,
-      'An unknown error occured. Please try again or report it to a developer.',
-      'Error',
+      copy.description,
+      copy.title,
       'UnknownBeaconError',
       options
     )

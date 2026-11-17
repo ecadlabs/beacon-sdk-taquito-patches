@@ -1,4 +1,5 @@
 import { BeaconErrorType } from '../types/BeaconErrorType'
+import { getBeaconErrorCopy } from '../i18n'
 import { BeaconError } from './BeaconError'
 import { BeaconErrorOptions } from './BeaconErrorOptions'
 
@@ -7,13 +8,13 @@ import { BeaconErrorOptions } from './BeaconErrorOptions'
  */
 export class NetworkNotSupportedBeaconError extends BeaconError {
   public override readonly name: string = 'NetworkNotSupportedBeaconError'
-  public override readonly title: string = 'Network Error'
 
   constructor(options?: BeaconErrorOptions) {
+    const copy = getBeaconErrorCopy(BeaconErrorType.NETWORK_NOT_SUPPORTED)
     super(
       BeaconErrorType.NETWORK_NOT_SUPPORTED,
-      'The wallet does not support this network. Please select another one.',
-      'Network Error',
+      copy.description,
+      copy.title,
       'NetworkNotSupportedBeaconError',
       options
     )

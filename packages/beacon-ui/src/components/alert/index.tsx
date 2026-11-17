@@ -1,4 +1,5 @@
 import React from 'react'
+import { getBeaconMessages } from '@ecadlabs/beacon-types'
 import { CloseIcon, LeftIcon, LogoIcon } from '../icons'
 import { Loader } from '../loader'
 import { AlertProps } from '../../ui/common'
@@ -6,6 +7,7 @@ import { useIsMobile } from '../../ui/alert/hooks/useIsMobile'
 import { ButtonIcon } from '../button-icon/button-icon'
 const Alert: React.FC<React.PropsWithChildren<AlertProps>> = (props) => {
   const isMobile = useIsMobile()
+  const { ui } = getBeaconMessages()
 
   return (
     <div
@@ -75,7 +77,7 @@ const Alert: React.FC<React.PropsWithChildren<AlertProps>> = (props) => {
             className="alert-footer"
             onClick={() => props.onClickShowMore && props.onClickShowMore()}
           >
-            {props.showMore ? 'Show less' : 'Show more'}
+            {props.showMore ? ui.showLess : ui.showMore}
           </div>
         )}
       </div>

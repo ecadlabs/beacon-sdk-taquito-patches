@@ -1,5 +1,10 @@
 import { reportDiagnostic, windowRef } from '@ecadlabs/beacon-core'
-import { Extension, NetworkType } from '@ecadlabs/beacon-types'
+import {
+  Extension,
+  getBeaconMessages,
+  NetworkType,
+  subscribeBeaconI18n
+} from '@ecadlabs/beacon-types'
 import { useEffect, useMemo, useState } from 'react'
 import { getAvailableExtensions } from '../../../utils/extensions'
 import { arrangeTopWallets, mergeWallets, parseWallets } from '../../../utils/wallets'
@@ -13,6 +18,9 @@ const isExtensionsUpdatedMessage = (event: unknown): boolean =>
 
 export const useWallets = (networkType?: NetworkType, featuredWallets?: string[]) => {
   const [availableExtensions, setAvailableExtensions] = useState<Extension[]>([])
+  const [i18nRevision, setI18nRevision] = useState<number>(0)
+
+  useEffect(() => subscribeBeaconI18n(() => setI18nRevision((rev) => rev + 1)), [])
 
   // Fetch and listen for extension updates
   useEffect(() => {
@@ -56,6 +64,7 @@ export const useWallets = (networkType?: NetworkType, featuredWallets?: string[]
 
   // Memoize wallet list creation
   const wallets = useMemo(() => {
+    const { walletTypes } = getBeaconMessages().ui
     const merged = [
       // Desktop wallets filtered by available extensions
       ...desktopList
@@ -65,7 +74,7 @@ export const useWallets = (networkType?: NetworkType, featuredWallets?: string[]
           key: w.key,
           name: w.shortName,
           image: w.logo,
-          description: 'Desktop App',
+          description: walletTypes.desktopApp,
           supportedInteractionStandards: w.supportedInteractionStandards,
           type: 'desktop' as const,
           link: w.downloadLink,
@@ -78,7 +87,7 @@ export const useWallets = (networkType?: NetworkType, featuredWallets?: string[]
         key: w.key,
         name: w.shortName,
         image: w.logo,
-        description: 'Browser Extension',
+        description: walletTypes.browserExtension,
         supportedInteractionStandards: w.supportedInteractionStandards,
         type: 'extension' as const,
         link: w.link
@@ -90,7 +99,7 @@ export const useWallets = (networkType?: NetworkType, featuredWallets?: string[]
         key: w.key,
         name: w.shortName,
         image: w.logo,
-        description: 'Mobile App',
+        description: walletTypes.mobileApp,
         supportedInteractionStandards: w.supportedInteractionStandards,
         type: 'ios' as const,
         link: w.universalLink,
@@ -107,7 +116,7 @@ export const useWallets = (networkType?: NetworkType, featuredWallets?: string[]
             key: w.key,
             name: w.shortName,
             image: w.logo,
-            description: 'Web App',
+            description: walletTypes.webApp,
             supportedInteractionStandards: w.supportedInteractionStandards,
             type: 'web' as const,
             link: link ?? w.links.mainnet
@@ -126,7 +135,7 @@ export const useWallets = (networkType?: NetworkType, featuredWallets?: string[]
             key: e.id,
             name: e.shortName ?? e.name ?? '',
             image: e.iconUrl ?? '',
-            description: 'Browser Extension',
+            description: walletTypes.browserExtension,
             type: 'extension' as const,
             link: typeof link === 'string' ? link : ''
           }
@@ -137,7 +146,7 @@ export const useWallets = (networkType?: NetworkType, featuredWallets?: string[]
       mergeWallets(parseWallets(merged)),
       featuredWallets ?? ['kukai', 'temple', 'umami']
     )
-  }, [availableExtensions, networkType, featuredWallets])
+  }, [availableExtensions, networkType, featuredWallets, i18nRevision])
 
   // Expose both the merged wallet map and the extension probe results so the UI
   // can distinguish "known extension" from "extension actually responded".

@@ -374,6 +374,7 @@ export * from './types/ErrorOrigin'
 export * from './types/RequestErrorResponse'
 export * from './types/TezosRpcError'
 export * from './errors'
+export * from './i18n'
 
 // Transport
 export { TransportStatus, TransportType }

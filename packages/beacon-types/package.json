@@ -25,7 +25,9 @@
     "url": "git+https://github.com/ecadlabs/beacon-sdk-taquito-patches.git"
   },
   "scripts": {
-    "tsc": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json"
+    "tsc": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json",
+    "test": "vitest run",
+    "test-ci": "vitest run --coverage"
   },
   "bugs": {
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"

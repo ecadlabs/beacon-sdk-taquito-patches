@@ -43,7 +43,7 @@
     position: absolute;
     top: 0px;
     content: '';
-    left: -24px;
+    inset-inline-start: -24px;
     width: calc(100% + 48px);
     background: radial-gradient(
       circle,

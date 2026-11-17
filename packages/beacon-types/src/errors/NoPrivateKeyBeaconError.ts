@@ -1,4 +1,5 @@
 import { BeaconErrorType } from '../types/BeaconErrorType'
+import { getBeaconErrorCopy } from '../i18n'
 import { BeaconError } from './BeaconError'
 import { BeaconErrorOptions } from './BeaconErrorOptions'
 
@@ -7,13 +8,13 @@ import { BeaconErrorOptions } from './BeaconErrorOptions'
  */
 export class NoPrivateKeyBeaconError extends BeaconError {
   public override readonly name: string = 'NoPrivateKeyBeaconError'
-  public override readonly title: string = 'No Private Key Found'
 
   constructor(options?: BeaconErrorOptions) {
+    const copy = getBeaconErrorCopy(BeaconErrorType.NO_PRIVATE_KEY_FOUND_ERROR)
     super(
       BeaconErrorType.NO_PRIVATE_KEY_FOUND_ERROR,
-      'The account you are trying to interact with is not available. Please make sure to add the account to your wallet and try again.',
-      'No Private Key Found',
+      copy.description,
+      copy.title,
       'NoPrivateKeyBeaconError',
       options
     )

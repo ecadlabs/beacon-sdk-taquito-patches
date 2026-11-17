@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
+import { getBeaconMessages, interpolateBeaconMessage } from '@ecadlabs/beacon-types'
 import { QRCodeProps } from '../../../../../common'
 import { QR } from '../../../../../../components/qr'
 import { WCInitError } from '../wc-init-error'
@@ -56,16 +57,27 @@ export const QRCode: React.FC<QRCodeProps> = ({
     }
   }, [wallet, qrCode, defaultPairing, supportsWalletConnect])
 
+  const { ui } = getBeaconMessages()
+
   if (!isConnected) {
-    return <WCInitError title={`Connect with ${wallet?.name} Mobile`} reason={wcFailureReason} />
+    return (
+      <WCInitError
+        title={interpolateBeaconMessage(ui.connectWithMobile, { wallet: wallet?.name ?? '' })}
+        reason={wcFailureReason}
+      />
+    )
   }
 
   if (!codeQr || codeQr.length === 0) {
     return (
       <div className="qr-wrapper">
         <div className="qr-left">
-          {!isMobile && <h3>Or scan to connect</h3>}
-          <span>{`Preparing ${wallet?.name || 'wallet'} QR code...`}</span>
+          {!isMobile && <h3>{ui.orScanToConnect}</h3>}
+          <span>
+            {interpolateBeaconMessage(ui.preparingQrCode, {
+              wallet: wallet?.name || ui.defaultWalletName
+            })}
+          </span>
         </div>
       </div>
     )

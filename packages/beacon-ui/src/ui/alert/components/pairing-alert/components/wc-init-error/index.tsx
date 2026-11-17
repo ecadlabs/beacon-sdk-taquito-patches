@@ -1,9 +1,12 @@
 import React from 'react'
+import { getBeaconMessages } from '@ecadlabs/beacon-types'
 import { Info } from '../../../../../../components/info'
 import { WCInitErrorProps } from '../../../../../common'
 import { getWalletConnectErrorCopy } from '../../../../../../i18n/messages'
 
-const WCInitError: React.FC<WCInitErrorProps> = ({ title = 'Scan QR code', reason }) => {
+const WCInitError: React.FC<WCInitErrorProps> = ({ title, reason }) => {
+  const { ui } = getBeaconMessages()
+  const resolvedTitle = title ?? ui.scanQrCode
   const copy = getWalletConnectErrorCopy(reason)
   const description = (
     <>
@@ -23,7 +26,7 @@ const WCInitError: React.FC<WCInitErrorProps> = ({ title = 'Scan QR code', reaso
     </>
   )
 
-  return <Info title={title} description={description} border />
+  return <Info title={resolvedTitle} description={description} border />
 }
 
 export { WCInitError }

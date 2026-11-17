@@ -1,4 +1,5 @@
 import { BeaconErrorType } from '../types/BeaconErrorType'
+import { getBeaconErrorCopy } from '../i18n'
 import { BeaconError } from './BeaconError'
 import { BeaconErrorOptions } from './BeaconErrorOptions'
 
@@ -7,13 +8,13 @@ import { BeaconErrorOptions } from './BeaconErrorOptions'
  */
 export class SignatureTypeNotSupportedBeaconError extends BeaconError {
   public override readonly name: string = 'SignatureTypeNotSupportedBeaconError'
-  public override readonly title: string = 'Signature Type Not Supported'
 
   constructor(options?: BeaconErrorOptions) {
+    const copy = getBeaconErrorCopy(BeaconErrorType.SIGNATURE_TYPE_NOT_SUPPORTED)
     super(
       BeaconErrorType.SIGNATURE_TYPE_NOT_SUPPORTED,
-      'The wallet is not able to sign payloads of this type.',
-      'Signature Type Not Supported',
+      copy.description,
+      copy.title,
       'SignatureTypeNotSupportedBeaconError',
       options
     )

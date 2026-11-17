@@ -48,7 +48,7 @@
 .qr-more-info {
   font-size: 0.95em !important;
   text-decoration: underline;
-  margin-left: 6px !important;
+  margin-inline-start: 6px !important;
   cursor: pointer;
 }
 

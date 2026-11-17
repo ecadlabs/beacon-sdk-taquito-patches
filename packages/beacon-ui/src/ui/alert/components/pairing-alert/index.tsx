@@ -1,6 +1,6 @@
 import { reportDiagnostic } from '@ecadlabs/beacon-core'
 import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react'
-import type { Extension } from '@ecadlabs/beacon-types'
+import { getBeaconMessages, interpolateBeaconMessage, type Extension } from '@ecadlabs/beacon-types'
 import { Alert } from '../../../../components/alert'
 import { useConnect } from '../../hooks/useConnect'
 import { Info } from '../../../../components/info'
@@ -63,6 +63,7 @@ const ExtensionInstall = ({
   InstallViewProps,
   'wallet' | 'availableExtensions' | 'onConnectExtension' | 'onInstallExtension'
 >) => {
+  const { ui } = getBeaconMessages()
   const installed = availableExtensions.some(
     (extension) => extension.id === wallet.id || extension.id === wallet.firefoxId
   )
@@ -70,19 +71,17 @@ const ExtensionInstall = ({
   return (
     <Info
       border
-      title={
-        installed
-          ? `Connect with ${wallet.name} Browser Extension`
-          : `Install ${wallet.name} Wallet`
-      }
-      description={
-        installed
-          ? `Please connect below to use your ${wallet.name} Wallet browser extension.`
-          : `To connect your ${wallet.name} Wallet, install the browser extension.`
-      }
+      title={interpolateBeaconMessage(
+        installed ? ui.connectWithBrowserExtension : ui.installWallet,
+        { wallet: wallet.name }
+      )}
+      description={interpolateBeaconMessage(
+        installed ? ui.connectBrowserExtensionDescription : ui.installBrowserExtensionDescription,
+        { wallet: wallet.name }
+      )}
       buttons={[
         {
-          label: installed ? 'Use Extension' : 'Install extension',
+          label: installed ? ui.useExtension : ui.installExtension,
           type: 'primary',
           onClick: installed ? onConnectExtension : onInstallExtension
         }
@@ -104,6 +103,7 @@ const InstallView = ({
   qrProps,
   mobileContent
 }: InstallViewProps) => {
+  const { ui } = getBeaconMessages()
   const mobileOS = isMobileOS(window)
 
   return (
@@ -111,9 +111,9 @@ const InstallView = ({
       {navigator.onLine && wallet.types.includes('web') && (
         <Info
           border
-          title={`Connect with ${wallet.name} Web`}
-          description="(It will open the wallet in a new tab)"
-          buttons={[{ label: 'Use Browser', type: 'primary', onClick: onOpenWeb }]}
+          title={interpolateBeaconMessage(ui.connectWithWeb, { wallet: wallet.name })}
+          description={ui.connectWithWebDescription}
+          buttons={[{ label: ui.useBrowser, type: 'primary', onClick: onOpenWeb }]}
         />
       )}
       {!isMobile && wallet.types.includes('extension') && (
@@ -127,11 +127,11 @@ const InstallView = ({
       {!mobileOS && wallet.types.includes('desktop') && (
         <Info
           border
-          title={`Connect with ${wallet.name} Desktop App`}
-          description="If you don't have the desktop app installed, click below to download it."
+          title={interpolateBeaconMessage(ui.connectWithDesktopApp, { wallet: wallet.name })}
+          description={ui.connectWithDesktopDescription}
           buttons={[
-            { label: 'Open desktop app', type: 'primary', onClick: onOpenDesktop },
-            { label: 'Download desktop app', type: 'secondary', onClick: onDownloadDesktop }
+            { label: ui.openDesktopApp, type: 'primary', onClick: onOpenDesktop },
+            { label: ui.downloadDesktopApp, type: 'secondary', onClick: onDownloadDesktop }
           ]}
         />
       )}
@@ -144,7 +144,7 @@ const InstallView = ({
           mobileContent
         ) : (
           <WCInitError
-            title={`Connect with ${wallet.name} Mobile`}
+            title={interpolateBeaconMessage(ui.connectWithMobile, { wallet: wallet.name })}
             reason={qrProps.wcFailureReason}
           />
         ))}

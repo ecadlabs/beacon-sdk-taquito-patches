@@ -27,3 +27,26 @@ export {
   currentBrowser,
   currentOS
 } from './utils/platform'
+
+export {
+  configureBeaconI18n,
+  setBeaconLocale,
+  getBeaconLocale,
+  resolveBeaconLang,
+  setBeaconDirection,
+  getBeaconDirection,
+  setBeaconTranslations,
+  getBeaconTranslations,
+  getBeaconMessages,
+  interpolateBeaconMessage,
+  resetBeaconI18n,
+  subscribeBeaconI18n,
+  builtInLocales
+} from './i18n/messages'
+export type {
+  BeaconI18nConfig,
+  BeaconResolvedDirection,
+  BeaconTextDirection,
+  BeaconLocaleMessages,
+  BeaconTranslationOverrides
+} from './i18n/messages'

@@ -1,13 +1,32 @@
 import { BeaconErrorType } from '../types/BeaconErrorType'
+import { getBeaconErrorCopy } from '../i18n'
 import { BeaconError } from './BeaconError'
 import { BeaconErrorOptions } from './BeaconErrorOptions'
+
+const BEACON_ERROR_OPTION_KEYS = new Set([
+  'id',
+  'version',
+  'senderId',
+  'errorOrigin',
+  'errorData',
+  'description',
+  'title'
+])
+
+const isBeaconErrorOptionsObject = (value: unknown): value is BeaconErrorOptions => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+  const keys = Object.keys(value)
+
+  return keys.length > 0 && keys.every((key) => BEACON_ERROR_OPTION_KEYS.has(key))
+}
 
 /**
  * @category Error
  */
 export class TransactionInvalidBeaconError extends BeaconError {
   public override readonly name: string = 'TransactionInvalidBeaconError'
-  public override readonly title: string = 'Transaction Invalid'
   public readonly data: unknown
 
   public override get fullDescription(): { description: string; data?: string } {
@@ -24,28 +43,19 @@ export class TransactionInvalidBeaconError extends BeaconError {
         ...maybeOptions,
         errorData: maybeOptions.errorData !== undefined ? maybeOptions.errorData : resolvedData
       }
-    } else if (
-      dataOrOptions !== null &&
-      typeof dataOrOptions === 'object' &&
-      !Array.isArray(dataOrOptions) &&
-      ('id' in dataOrOptions ||
-        'version' in dataOrOptions ||
-        'senderId' in dataOrOptions ||
-        'errorOrigin' in dataOrOptions ||
-        'errorData' in dataOrOptions ||
-        'description' in dataOrOptions)
-    ) {
-      resolvedOptions = dataOrOptions as BeaconErrorOptions
+    } else if (isBeaconErrorOptionsObject(dataOrOptions)) {
+      resolvedOptions = dataOrOptions
       resolvedData = resolvedOptions.errorData
     } else {
       resolvedData = dataOrOptions
       resolvedOptions = dataOrOptions !== undefined ? { errorData: dataOrOptions } : undefined
     }
 
+    const copy = getBeaconErrorCopy(BeaconErrorType.TRANSACTION_INVALID_ERROR)
     super(
       BeaconErrorType.TRANSACTION_INVALID_ERROR,
-      'The transaction is invalid and the node did not accept it.',
-      'Transaction Invalid',
+      copy.description,
+      copy.title,
       'TransactionInvalidBeaconError',
       resolvedOptions
     )

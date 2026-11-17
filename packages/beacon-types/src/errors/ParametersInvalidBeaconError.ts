@@ -1,4 +1,5 @@
 import { BeaconErrorType } from '../types/BeaconErrorType'
+import { getBeaconErrorCopy } from '../i18n'
 import { BeaconError } from './BeaconError'
 import { BeaconErrorOptions } from './BeaconErrorOptions'
 
@@ -7,13 +8,13 @@ import { BeaconErrorOptions } from './BeaconErrorOptions'
  */
 export class ParametersInvalidBeaconError extends BeaconError {
   public override readonly name: string = 'ParametersInvalidBeaconError'
-  public override readonly title: string = 'Parameters Invalid'
 
   constructor(options?: BeaconErrorOptions) {
+    const copy = getBeaconErrorCopy(BeaconErrorType.PARAMETERS_INVALID_ERROR)
     super(
       BeaconErrorType.PARAMETERS_INVALID_ERROR,
-      'Some of the parameters you provided are invalid and the request could not be completed. Please check your inputs and try again.',
-      'Parameters Invalid',
+      copy.description,
+      copy.title,
       'ParametersInvalidBeaconError',
       options
     )

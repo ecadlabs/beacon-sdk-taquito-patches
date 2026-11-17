@@ -70,7 +70,10 @@ import {
   TransportStatusChangedInfo,
   ConnectionInfo,
   PendingRequestInfo,
-  Storage
+  Storage,
+  getBeaconMessages,
+  registerBeaconClientI18n,
+  unregisterBeaconClientI18n
   // PermissionRequestV3
   // RequestEncryptPayloadInput,
   // EncryptPayloadResponseOutput,
@@ -528,6 +531,8 @@ export class DAppClient extends Client {
 
   private readonly featuredWallets: string[] | undefined
 
+  private readonly i18nOwnerId: symbol = Symbol('BeaconDAppClientI18n')
+
   private readonly storageValidator: StorageValidator
 
   private debounceSetActiveAccount: boolean = false
@@ -588,6 +593,11 @@ export class DAppClient extends Client {
     this.blockExplorer = config.blockExplorer ?? new TzktBlockExplorer()
     this.network = config.network ?? { type: config.preferredNetwork ?? NetworkType.MAINNET }
     setColorMode(config.colorMode ?? ColorMode.LIGHT)
+    registerBeaconClientI18n(this.i18nOwnerId, {
+      locale: config.locale,
+      direction: config.direction,
+      translations: config.translations
+    })
 
     this.disclaimerText = config.disclaimerText
 
@@ -1452,6 +1462,7 @@ export class DAppClient extends Client {
       this._activeAccount.resolve(undefined)
     }
     this.destroyed = true
+    unregisterBeaconClientI18n(this.i18nOwnerId)
     // Retire requests before asynchronous cleanup, including caller-supplied transports.
     this.abortOpenRequests()
     this.messageObserver.clear()
@@ -2956,7 +2967,7 @@ export class DAppClient extends Client {
     const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
 
     if (!activeAccount) {
-      throw await this.sendInternalError('No active account set!')
+      throw await this.sendInternalError('noActiveAccountSet')
     }
 
     if (!activeAccount.network) {
@@ -3168,7 +3179,7 @@ export class DAppClient extends Client {
 
     const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
     if (!activeAccount) {
-      throw await this.sendInternalError('No active account!')
+      throw await this.sendInternalError('noActiveAccount')
     }
 
     const request: BlockchainRequestV3 = {
@@ -3521,11 +3532,11 @@ export class DAppClient extends Client {
     input: RequestSignPayloadInput
   ): Promise<SignPayloadResponseOutput> {
     if (!input.payload) {
-      throw await this.sendInternalError('Payload must be provided')
+      throw await this.sendInternalError('payloadRequired')
     }
     const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
     if (!activeAccount) {
-      throw await this.sendInternalError('No active account!')
+      throw await this.sendInternalError('noActiveAccount')
     }
 
     const payload = input.payload
@@ -3686,12 +3697,12 @@ export class DAppClient extends Client {
    */
   public async requestOperation(input: RequestOperationInput): Promise<OperationResponseOutput> {
     if (!input.operationDetails) {
-      throw await this.sendInternalError('Operation details must be provided')
+      throw await this.sendInternalError('operationDetailsRequired')
     }
     const activeAccount: StoredAccountInfo | undefined = await this.getActiveAccount()
 
     if (!activeAccount || !activeAccount.network) {
-      throw await this.sendInternalError('No active account!')
+      throw await this.sendInternalError('noActiveAccount')
     }
 
     const request: OperationRequestInput = {
@@ -3748,7 +3759,7 @@ export class DAppClient extends Client {
    */
   public async requestBroadcast(input: RequestBroadcastInput): Promise<BroadcastResponseOutput> {
     if (!input.signedTransaction) {
-      throw await this.sendInternalError('Signed transaction must be provided')
+      throw await this.sendInternalError('signedTransactionRequired')
     }
 
     // Add error message for deprecation of network
@@ -3903,13 +3914,23 @@ export class DAppClient extends Client {
   /**
    * This method will emit an internal error message.
    *
-   * @param errorMessage The error message to send.
+   * @param errorKey The localized dApp error key to send.
    */
-  private async sendInternalError(errorMessage: string): Promise<void> {
-    await this.events.emit(BeaconEvent.INTERNAL_ERROR, { text: errorMessage })
-    if (errorMessage === 'No active account!' || errorMessage === 'No active account set!') {
+  private async sendInternalError(
+    errorKey:
+      | 'noActiveAccount'
+      | 'noActiveAccountSet'
+      | 'operationDetailsRequired'
+      | 'signedTransactionRequired'
+      | 'payloadRequired'
+      | 'beaconIdNotDefined'
+  ): Promise<void> {
+    const localizedMessage = getBeaconMessages().dapp[errorKey]
+
+    await this.events.emit(BeaconEvent.INTERNAL_ERROR, { text: localizedMessage })
+    if (errorKey === 'noActiveAccount' || errorKey === 'noActiveAccountSet') {
       throw new NoAddressBeaconError({
-        description: errorMessage,
+        description: localizedMessage,
         errorOrigin: 'local',
         id: '',
         senderId: '',
@@ -3917,12 +3938,12 @@ export class DAppClient extends Client {
       })
     }
     if (
-      errorMessage === 'Operation details must be provided' ||
-      errorMessage === 'Signed transaction must be provided' ||
-      errorMessage === 'Payload must be provided'
+      errorKey === 'operationDetailsRequired' ||
+      errorKey === 'signedTransactionRequired' ||
+      errorKey === 'payloadRequired'
     ) {
       throw new ParametersInvalidBeaconError({
-        description: errorMessage,
+        description: localizedMessage,
         errorOrigin: 'local',
         id: '',
         senderId: '',
@@ -3930,7 +3951,7 @@ export class DAppClient extends Client {
       })
     }
     throw new UnknownBeaconError({
-      description: errorMessage,
+      description: localizedMessage,
       errorOrigin: 'local',
       id: '',
       senderId: '',
@@ -4072,7 +4093,8 @@ export class DAppClient extends Client {
       beaconError instanceof NoAddressBeaconError ||
       beaconError instanceof ParametersInvalidBeaconError ||
       (beaconError instanceof UnknownBeaconError &&
-        beaconError.description === 'BeaconID not defined')
+        (beaconError.description === 'BeaconID not defined' ||
+          beaconError.description === getBeaconMessages().dapp.beaconIdNotDefined))
     if (beaconError.errorType && !isPreconditionError) {
       const errorResponse = errorEventResponse(beaconError)
       const buttons: AlertButton[] = []
@@ -4449,12 +4471,13 @@ export class DAppClient extends Client {
     if (owned && !this.requestTracker.reject(owned.key, sendError)) {
       return
     }
+    const dappMessages = getBeaconMessages().dapp
     this.events
       .emit(BeaconEvent.INTERNAL_ERROR, {
-        text: 'Unable to send message. If this problem persists, please reset the connection and pair your wallet again.',
+        text: dappMessages.unableToSendMessage,
         buttons: [
           {
-            text: 'Reset Connection',
+            text: dappMessages.resetConnection,
             actionCallback: async () => {
               closeToast()
               await this.disconnect()
@@ -4538,7 +4561,7 @@ export class DAppClient extends Client {
         throw new Error('No permissions to send this request to wallet!')
       }
       if (!this.beaconId) {
-        throw await this.sendInternalError('BeaconID not defined')
+        throw await this.sendInternalError('beaconIdNotDefined')
       }
       const beaconId = await this.beaconId
       if (!stillAdmitted()) {
@@ -4617,7 +4640,7 @@ export class DAppClient extends Client {
         return delegated.promise
       }
       if (!this.beaconId) {
-        throw await this.sendInternalError('BeaconID not defined')
+        throw await this.sendInternalError('beaconIdNotDefined')
       }
       const beaconId = await this.beaconId
       if (delegated && !stillAdmitted()) {

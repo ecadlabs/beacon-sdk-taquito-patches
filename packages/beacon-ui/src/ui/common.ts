@@ -163,6 +163,7 @@ export interface ToastConfig {
 export interface ToastProps {
   label: string
   open: boolean
+  state?: ToastConfig['state']
   onClickClose: () => void
   actions?: {
     text: string

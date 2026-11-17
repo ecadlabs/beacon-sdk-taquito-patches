@@ -1,4 +1,5 @@
 import { BeaconErrorType } from '../types/BeaconErrorType'
+import { getBeaconErrorCopy } from '../i18n'
 import { BeaconError } from './BeaconError'
 import { BeaconErrorOptions } from './BeaconErrorOptions'
 
@@ -7,13 +8,13 @@ import { BeaconErrorOptions } from './BeaconErrorOptions'
  */
 export class BroadcastBeaconError extends BeaconError {
   public override readonly name: string = 'BroadcastBeaconError'
-  public override readonly title: string = 'Broadcast Error'
 
   constructor(options?: BeaconErrorOptions) {
+    const copy = getBeaconErrorCopy(BeaconErrorType.BROADCAST_ERROR)
     super(
       BeaconErrorType.BROADCAST_ERROR,
-      'The transaction could not be broadcast to the network. Please try again.',
-      'Broadcast Error',
+      copy.description,
+      copy.title,
       'BroadcastBeaconError',
       options
     )

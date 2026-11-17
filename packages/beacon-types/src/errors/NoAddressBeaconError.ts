@@ -1,4 +1,5 @@
 import { BeaconErrorType } from '../types/BeaconErrorType'
+import { getBeaconErrorCopy } from '../i18n'
 import { BeaconError } from './BeaconError'
 import { BeaconErrorOptions } from './BeaconErrorOptions'
 
@@ -7,13 +8,13 @@ import { BeaconErrorOptions } from './BeaconErrorOptions'
  */
 export class NoAddressBeaconError extends BeaconError {
   public override readonly name: string = 'NoAddressBeaconError'
-  public override readonly title: string = 'No Address Error'
 
   constructor(options?: BeaconErrorOptions) {
+    const copy = getBeaconErrorCopy(BeaconErrorType.NO_ADDRESS_ERROR)
     super(
       BeaconErrorType.NO_ADDRESS_ERROR,
-      'No matching account was found for this network. Please switch networks or accounts in your wallet and try again.',
-      'No Address Error',
+      copy.description,
+      copy.title,
       'NoAddressBeaconError',
       options
     )

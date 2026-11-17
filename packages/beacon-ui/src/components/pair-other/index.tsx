@@ -1,5 +1,5 @@
 import { reportDiagnostic } from '@ecadlabs/beacon-core'
-import { WalletConnectPairingFailureReason } from '@ecadlabs/beacon-types'
+import { getBeaconMessages, WalletConnectPairingFailureReason } from '@ecadlabs/beacon-types'
 import React, { useState, useLayoutEffect, useRef } from 'react'
 import { QR } from '../qr'
 import { WCInitError } from '../../ui/alert/components/pairing-alert/components/wc-init-error'
@@ -147,19 +147,21 @@ export const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
     }
   }
 
+  const { ui } = getBeaconMessages()
+
   if (!currentSelection) {
     return (
       <div>
-        <span className="pair-other-info">Select QR Type</span>
+        <span className="pair-other-info">{ui.selectQrType}</span>
         <br />
         {hasBeacon && (
           <button className="wallets-button" onClick={() => buttonClickHandler('p2p')}>
-            Beacon
+            {ui.beaconQrOption}
           </button>
         )}
         {hasWalletConnect && (
           <button className="wallets-button" onClick={() => buttonClickHandler('walletconnect')}>
-            WalletConnect
+            {ui.walletConnectQrOption}
           </button>
         )}
       </div>
@@ -179,12 +181,12 @@ export const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
   }
 
   if (currentSelection.failureReason) {
-    return <WCInitError title="Scan QR code" reason={currentSelection.failureReason} />
+    return <WCInitError title={ui.scanQrCode} reason={currentSelection.failureReason} />
   }
 
   return (
     <span style={{ color: '#FF4136' }} className="pair-other-info">
-      Not connected.
+      {ui.notConnected}
     </span>
   )
 }

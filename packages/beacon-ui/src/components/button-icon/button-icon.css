@@ -10,7 +10,7 @@
   cursor: pointer;
   fill: #64748b;
   transition: all ease 0.2s;
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 .button-icon:hover {

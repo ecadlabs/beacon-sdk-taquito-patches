@@ -1,4 +1,5 @@
 import { reportDiagnostic } from '@ecadlabs/beacon-core'
+import { getBeaconMessages, interpolateBeaconMessage } from '@ecadlabs/beacon-types'
 import { useLayoutEffect, useRef, type FC } from 'react'
 import type { MergedWallet } from '../../../../../../utils/wallets'
 import { Info } from '../../../../../../components/info'
@@ -90,15 +91,20 @@ export const MobilePairing: FC<MobilePairingProps> = ({
     }
   }
 
+  const { ui } = getBeaconMessages()
+
   return (
     <Info
       border
-      title={`Connect with ${wallet.name} ${suffixMap.get(wallet.id) ?? ''}`}
+      title={interpolateBeaconMessage(ui.connectWithMobileApp, {
+        wallet: wallet.name,
+        suffix: suffixMap.get(wallet.id) ?? ''
+      })}
       description={''}
-      buttons={[{ label: 'Use App', type: 'primary', onClick: openApp }]}
+      buttons={[{ label: ui.useApp, type: 'primary', onClick: openApp }]}
       downloadLink={
         wallet.name.toLowerCase().includes('kukai') && isIOS(window)
-          ? { label: 'Get Kukai Mobile >', url: 'https://ios.kukai.app' }
+          ? { label: ui.getKukaiMobile, url: 'https://ios.kukai.app' }
           : undefined
       }
       onShowQRCodeClick={showQRCode}

@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { useEffect, useState } from 'react'
+import { getBeaconDirection, resolveBeaconLang, subscribeBeaconI18n } from '@ecadlabs/beacon-types'
 import { Toast } from 'src/components/toast'
 import { Subject, Subscription } from '../../utils/subject'
 import { ToastConfig } from '../common'
@@ -9,6 +10,7 @@ import { getColorMode } from '../../utils/colorMode'
 import cssText from './aggregated.css'
 
 let initDone: boolean = false
+let toastHostEl: HTMLElement | undefined
 const config$ = new Subject<ToastConfig | undefined>()
 const show$ = new Subject<boolean>()
 let lastTimer: ReturnType<typeof setTimeout> | undefined
@@ -20,6 +22,16 @@ let requestCount = 0
 const BASE_DELAY = 500
 const COOLDOWN = 2000
 const DELAY_INCREMENT = 100
+
+const syncToastHostAttributes = (el?: HTMLElement): void => {
+  const target =
+    el ?? toastHostEl ?? document.querySelector<HTMLElement>('beacon-toast') ?? undefined
+  if (!target) {
+    return
+  }
+  target.setAttribute('dir', getBeaconDirection())
+  target.setAttribute('lang', resolveBeaconLang())
+}
 
 const clearPendingTimers = () => {
   pendingTimers.forEach((timerId) => clearTimeout(timerId))
@@ -55,6 +67,7 @@ const ToastRoot = (props: ToastConfig) => {
 
     return Boolean(initialConfig && initialOpen)
   })
+  const [, setI18nRevision] = useState<number>(0)
 
   useEffect(() => {
     const subs: Subscription[] = []
@@ -68,11 +81,19 @@ const ToastRoot = (props: ToastConfig) => {
         setIsOpen(value)
       })
     )
+    const unsubscribeI18n = subscribeBeaconI18n(() => {
+      syncToastHostAttributes()
+      setI18nRevision((rev) => rev + 1)
+    })
 
-    return () => subs.forEach((sub) => sub.unsubscribe())
+    return () => {
+      subs.forEach((sub) => sub.unsubscribe())
+      unsubscribeI18n()
+    }
   }, [])
 
   useEffect(() => {
+    syncToastHostAttributes()
     // Unmount immediately if the toast is closed.
     if (!config || !isOpen) {
       setMount(false)
@@ -82,13 +103,17 @@ const ToastRoot = (props: ToastConfig) => {
     setMount(true)
   }, [isOpen, config])
 
+  const dir = getBeaconDirection()
+  const lang = resolveBeaconLang()
+
   return (
     <>
-      <div className={`theme__${getColorMode()}`}>
+      <div className={`theme__${getColorMode()}`} dir={dir} lang={lang}>
         {mount && config && (
           <Toast
             label={config.body}
             open={isOpen}
+            state={config.state}
             onClickClose={closeToast}
             actions={config.actions}
             walletInfo={config.walletInfo}
@@ -103,6 +128,7 @@ const ToastRoot = (props: ToastConfig) => {
 }
 
 const applyToastConfig = (config: ToastConfig) => {
+  syncToastHostAttributes()
   clearAutoCloseTimer()
   config$.next(config)
   show$.next(true)
@@ -117,6 +143,8 @@ const applyToastConfig = (config: ToastConfig) => {
 const createToast = (config: ToastConfig) => {
   // Create the host element
   const el = document.createElement('beacon-toast')
+  toastHostEl = el
+  syncToastHostAttributes(el)
   document.body.prepend(el)
 
   // Attach an open Shadow DOM to the host element

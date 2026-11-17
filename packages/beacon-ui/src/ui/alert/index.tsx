@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { useEffect, useState } from 'react'
+import { getBeaconDirection, resolveBeaconLang, subscribeBeaconI18n } from '@ecadlabs/beacon-types'
 import { getColorMode } from 'src/utils/colorMode'
 import { Subject, Subscription } from '../../utils/subject'
 import { runUICallback } from '../../utils/callback'
@@ -11,8 +12,19 @@ import { InfoAlert } from './components/info-alert'
 import cssText from './aggregated.css'
 
 let initDone: boolean = false
+let alertHostEl: HTMLElement | undefined
 const show$ = new Subject<boolean>()
 const config$ = new Subject<AlertConfig>()
+
+const syncAlertHostAttributes = (el?: HTMLElement): void => {
+  const target =
+    el ?? alertHostEl ?? document.querySelector<HTMLElement>('beacon-alert') ?? undefined
+  if (!target) {
+    return
+  }
+  target.setAttribute('dir', getBeaconDirection())
+  target.setAttribute('lang', resolveBeaconLang())
+}
 
 const closeAlert = () => {
   show$.next(false)
@@ -28,14 +40,26 @@ const AlertRoot = (props: AlertConfig) => {
   const [config, setConfig] = useState<AlertConfig>(() =>
     config$.hasEmitted() ? (config$.getValue() as AlertConfig) : props
   )
+  const [, setI18nRevision] = useState<number>(0)
 
   useEffect(() => {
     const subs: Subscription[] = []
     subs.push(show$.subscribe((value) => setIsOpen(value)))
     subs.push(config$.subscribe((value) => setConfig(value)))
+    const unsubscribeI18n = subscribeBeaconI18n(() => {
+      syncAlertHostAttributes()
+      setI18nRevision((rev) => rev + 1)
+    })
 
-    return () => subs.forEach((sub) => sub.unsubscribe())
+    return () => {
+      subs.forEach((sub) => sub.unsubscribe())
+      unsubscribeI18n()
+    }
   }, [])
+
+  useEffect(() => {
+    syncAlertHostAttributes()
+  }, [isOpen, config])
 
   useEffect(() => {
     // Wait before unmounting so the fade-out animation can complete,
@@ -62,8 +86,11 @@ const AlertRoot = (props: AlertConfig) => {
     closeOnBackdropClick: true
   }
 
+  const dir = getBeaconDirection()
+  const lang = resolveBeaconLang()
+
   return (
-    <div className={`theme__${getColorMode()}`}>
+    <div className={`theme__${getColorMode()}`} dir={dir} lang={lang}>
       {mount &&
         (config.pairingPayload ? (
           <PairingAlert {...filteredProps} pairingPayload={config.pairingPayload} />
@@ -77,6 +104,8 @@ const AlertRoot = (props: AlertConfig) => {
 const createAlert = (config: AlertConfig) => {
   // Create the host element
   const el = document.createElement('beacon-alert')
+  alertHostEl = el
+  syncAlertHostAttributes(el)
   document.body.prepend(el)
 
   // Attach an open Shadow DOM to the host element
@@ -97,6 +126,7 @@ const createAlert = (config: AlertConfig) => {
 }
 
 const openAlert = (config: AlertConfig) => {
+  syncAlertHostAttributes()
   config$.next(config)
   show$.next(true)
   if (!initDone) {
