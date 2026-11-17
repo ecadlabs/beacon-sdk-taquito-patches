@@ -39,9 +39,9 @@ function parseWallet(
       )
     } else if (part.length > 0) {
       return (
-        <span key={index} className="toast-label-segment">
+        <p key={index} className="toast-label">
           {part}
-        </span>
+        </p>
       )
     }
 
@@ -50,10 +50,14 @@ function parseWallet(
 }
 
 export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
-  const { ui } = getBeaconMessages()
+  const { ui, dapp } = getBeaconMessages()
   const [showMoreInfo, setShowMoreInfo] = useState<boolean>(true)
   const hasWalletObject = /\{\{\s*wallet\s*\}\}/.test(props.label) && Boolean(props.walletInfo)
-  const isRequestSentToast = props.state === 'loading'
+  const localizedSentPrefix = dapp.requestSent.replace(/\{\{\s*wallet\s*\}\}/g, '').trim()
+  const isRequestSentToast =
+    props.state === 'loading' ||
+    props.label.includes('Request sent to') ||
+    (localizedSentPrefix.length > 0 && props.label.includes(localizedSentPrefix))
 
   // Track the toast position (x, y)
   const [[x, y], setPosition] = useState<[number, number]>([0, 0])
