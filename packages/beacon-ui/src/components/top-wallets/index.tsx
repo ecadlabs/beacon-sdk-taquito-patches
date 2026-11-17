@@ -64,6 +64,7 @@ const TopWallets: React.FC<TopWalletsProps> = (props: TopWalletsProps) => {
             className="top-wallets-other-wallets"
             role="button"
             tabIndex={props.disabled ? -1 : 0}
+            aria-label={`${ui.otherWallets}, ${ui.otherWalletsDescription}`}
             aria-disabled={props.disabled ? 'true' : undefined}
             onClick={props.disabled ? undefined : props.otherWallets.onClick}
             onKeyDown={(e) => {

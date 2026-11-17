@@ -117,7 +117,7 @@ export const QR: React.FC<QRProps> = (props: QRProps) => {
         className="qr-right"
         role="button"
         tabIndex={0}
-        aria-label={copied ? aria.copiedToClipboard : aria.copyQrToClipboard}
+        aria-label={`${qrAriaLabel}. ${copied ? aria.copiedToClipboard : aria.copyQrToClipboard}`}
         style={props.isMobile ? { backgroundColor: 'transparent' } : {}}
         onClick={handleCopyClipboard}
         onKeyDown={handleKeyDownClipboard}

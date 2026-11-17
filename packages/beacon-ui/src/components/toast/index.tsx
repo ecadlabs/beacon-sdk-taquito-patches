@@ -99,11 +99,22 @@ export const Toast: React.FC<ToastProps> = (props: ToastProps) => {
     }
   }
 
+  const resolvedAnnouncement = [
+    hasWalletObject && props.walletInfo
+      ? props.label.replace(/\{\{\s*wallet\s*\}\}/g, props.walletInfo.name)
+      : props.label,
+    ...(props.actions && showMoreInfo ? props.actions.map((a) => a.text) : [])
+  ]
+    .map((s) => s.replace(/\s+/g, ' ').trim())
+    .filter((s) => s.length > 0)
+    .join('. ')
+
   return (
     <div
       role="status"
       aria-live="polite"
       aria-atomic="true"
+      aria-label={resolvedAnnouncement}
       onAnimationEnd={handleAnimationEnd}
       style={{
         transform: `translate3d(${x}px, ${y}px, 0)`,

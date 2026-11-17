@@ -169,10 +169,9 @@ describe('Toast Component', () => {
 
   test('does not set inline position: absolute or minWidth: 460 so CSS position: fixed and responsive width govern layout', () => {
     const { container } = render(<Toast label="Test Toast" open={true} onClickClose={vi.fn()} />)
-    const wrapper = container.querySelector<HTMLElement>('.toast-wrapper-show')
-    expect(wrapper).not.toBeNull()
-    expect(wrapper?.style.position).not.toBe('absolute')
-    expect(wrapper?.style.minWidth).toBe('')
+    const wrapper = container.firstChild as HTMLElement
+    expect(wrapper.style.position).not.toBe('absolute')
+    expect(wrapper.style.minWidth).toBe('')
   })
 
   test('immediately restores actions and clears the 3000ms timer when transitioning from "Request sent to" to another label', () => {
@@ -215,7 +214,7 @@ describe('Toast Component', () => {
     const { container, rerender } = render(
       <Toast label="Test Toast" open={true} onClickClose={vi.fn()} />
     )
-    const wrapper = container.querySelector<HTMLElement>('.toast-wrapper-show')!
+    const wrapper = container.firstChild as HTMLElement
 
     // Stub bounding rect at top-right (width 460, height 60, right 12, top 12 -> left 808)
     vi.spyOn(wrapper, 'getBoundingClientRect').mockReturnValue({

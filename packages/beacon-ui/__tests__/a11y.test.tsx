@@ -131,9 +131,10 @@ describe('Beacon UI accessibility (WCAG / WAI-ARIA, keyboard, focus, live region
       )
       expect(focusables.length).toBeGreaterThanOrEqual(2)
 
-      // Initial focus must move inside the shadow root dialog
+      // Initial focus must move inside the shadow root dialog onto the primary body action (not the header Close icon)
       expect(shadow?.activeElement).not.toBeNull()
       expect(dialog?.contains(shadow?.activeElement ?? null)).toBe(true)
+      expect(shadow?.activeElement).toHaveClass('info-button')
 
       // Tab on last focusable element wraps to first focusable element
       const firstEl = focusables[0]
@@ -200,6 +201,8 @@ describe('Beacon UI accessibility (WCAG / WAI-ARIA, keyboard, focus, live region
       const dialog = shadow?.querySelector<HTMLElement>('[role="dialog"]')
       expect(dialog).toBeTruthy()
       expect(dialog?.contains(shadow?.activeElement ?? null)).toBe(true)
+      // Initial focus on TopWallets lands on the first wallet tile inside .alert-body, not the header Close button
+      expect(shadow?.activeElement).toHaveClass('wallet-main')
 
       // 1. Expand "Show more" via keyboard
       const showMoreFooter = dialog?.querySelector<HTMLElement>('.alert-footer')
@@ -219,9 +222,10 @@ describe('Beacon UI accessibility (WCAG / WAI-ARIA, keyboard, focus, live region
         fireEvent.click(showQrBtn!)
       })
 
-      // Focus must remain inside the dialog after TopWallets/Wallets unmounts into PairOther
+      // Focus must remain inside the dialog and land on the first QR type choice button in .alert-body (not Back/Close)
       expect(shadow?.activeElement).not.toBeNull()
       expect(dialog?.contains(shadow?.activeElement ?? null)).toBe(true)
+      expect(shadow?.activeElement?.textContent).toBe(builtInLocales.en.ui.beaconQrOption)
 
       // 3. Activate "Beacon" button in PairOther (which unmounts the button and mounts QR)
       const beaconChoiceBtn = Array.from(
@@ -233,9 +237,10 @@ describe('Beacon UI accessibility (WCAG / WAI-ARIA, keyboard, focus, live region
         fireEvent.click(beaconChoiceBtn!)
       })
 
-      // Focus must remain inside the dialog after PairOther transitions to QR
+      // Focus must remain inside the dialog and land on the QR copy button (.qr-right) in .alert-body
       expect(shadow?.activeElement).not.toBeNull()
       expect(dialog?.contains(shadow?.activeElement ?? null)).toBe(true)
+      expect(shadow?.activeElement).toHaveClass('qr-right')
 
       // 4. Activate Back button (which unmounts the Back button when returning to TopWallets)
       const backBtn = dialog?.querySelector<HTMLElement>('.alert-header .button-icon')
@@ -245,9 +250,10 @@ describe('Beacon UI accessibility (WCAG / WAI-ARIA, keyboard, focus, live region
         fireEvent.keyDown(backBtn!, { key: 'Enter' })
       })
 
-      // Focus must remain inside the dialog after Back button unmounts
+      // Focus must remain inside the dialog and land on the first wallet tile in .alert-body
       expect(shadow?.activeElement).not.toBeNull()
       expect(dialog?.contains(shadow?.activeElement ?? null)).toBe(true)
+      expect(shadow?.activeElement).toHaveClass('wallet-main')
 
       // Verify dialog aria-labelledby resolves to a modal/section heading, never a wallet tile name
       const labelledById = dialog?.getAttribute('aria-labelledby')
@@ -291,11 +297,18 @@ describe('Beacon UI accessibility (WCAG / WAI-ARIA, keyboard, focus, live region
 
     const onWalletClick = vi.fn()
     const { unmount: unmountWallet } = render(
-      <Wallet name="Kukai" image="kukai.svg" description="Web App" onClick={onWalletClick} />
+      <Wallet
+        name="Kukai"
+        image="kukai.svg"
+        description="Web App"
+        tags={['popular']}
+        onClick={onWalletClick}
+      />
     )
-    const walletTile = screen.getByRole('button', { name: /Kukai/i })
+    const walletTile = screen.getByRole('button', { name: 'Kukai, Web App, popular' })
     expect(walletTile).toHaveClass('wallet-main')
     expect(walletTile).toHaveAttribute('tabindex', '0')
+    expect(walletTile.getAttribute('aria-label')).not.toContain('logo')
     fireEvent.keyDown(walletTile, { key: 'Enter' })
     fireEvent.keyDown(walletTile, { key: ' ' })
     expect(onWalletClick).toHaveBeenCalledTimes(2)
@@ -322,10 +335,11 @@ describe('Beacon UI accessibility (WCAG / WAI-ARIA, keyboard, focus, live region
       />
     )
     const otherWalletsTile = screen.getByRole('button', {
-      name: new RegExp(builtInLocales.en.ui.otherWallets, 'i')
+      name: `${builtInLocales.en.ui.otherWallets}, ${builtInLocales.en.ui.otherWalletsDescription}`
     })
     expect(otherWalletsTile).toHaveClass('top-wallets-other-wallets')
     expect(otherWalletsTile).toHaveAttribute('tabindex', '0')
+    expect(otherWalletsTile.getAttribute('aria-label')).not.toContain('Other Wallet 1')
     fireEvent.keyDown(otherWalletsTile, { key: 'Enter' })
     expect(onOtherWallets).toHaveBeenCalledTimes(1)
     unmountTop()
@@ -366,7 +380,10 @@ describe('Beacon UI accessibility (WCAG / WAI-ARIA, keyboard, focus, live region
     expect(qrRight).not.toBeNull()
     expect(qrRight).toHaveAttribute('role', 'button')
     expect(qrRight).toHaveAttribute('tabindex', '0')
-    expect(qrRight).toHaveAttribute('aria-label', builtInLocales.en.aria.copyQrToClipboard)
+    expect(qrRight).toHaveAttribute(
+      'aria-label',
+      `WalletConnect pairing QR code for Kukai. ${builtInLocales.en.aria.copyQrToClipboard}`
+    )
 
     // Persistent live region exists before copying and starts empty
     const liveStatus = container.querySelector('[role="status"][aria-live="polite"]')
@@ -384,7 +401,10 @@ describe('Beacon UI accessibility (WCAG / WAI-ARIA, keyboard, focus, live region
 
     expect(onClickQrCode).toHaveBeenCalledTimes(1)
     expect(writeText).toHaveBeenCalledWith('wc:test-uri@2')
-    expect(qrRight).toHaveAttribute('aria-label', builtInLocales.en.aria.copiedToClipboard)
+    expect(qrRight).toHaveAttribute(
+      'aria-label',
+      `WalletConnect pairing QR code for Kukai. ${builtInLocales.en.aria.copiedToClipboard}`
+    )
     expect(liveStatus?.textContent).toBe(builtInLocales.en.aria.copiedToClipboard)
 
     // Verify checkmark SVG path data was not corrupted
@@ -414,6 +434,9 @@ describe('Beacon UI accessibility (WCAG / WAI-ARIA, keyboard, focus, live region
     expect(toastWrapper).toHaveAttribute('role', 'status')
     expect(toastWrapper).toHaveAttribute('aria-live', 'polite')
     expect(toastWrapper).toHaveAttribute('aria-atomic', 'true')
+    expect(toastWrapper).toHaveAttribute('aria-label', 'Opération terminée. Détails')
+    expect(toastWrapper?.getAttribute('aria-label')).not.toContain(fr.ui.openWallet)
+    expect(toastWrapper?.getAttribute('aria-label')).not.toContain(fr.aria.closeToast)
     expect(container.querySelector('p.toast-label')?.textContent).toBe('Opération terminée')
 
     const loader = container.querySelector('.loader')

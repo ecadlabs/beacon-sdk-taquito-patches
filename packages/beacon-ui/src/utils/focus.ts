@@ -40,8 +40,18 @@ export const getDialogFocusables = (modal: HTMLElement): HTMLElement[] =>
   })
 
 export const ensureDialogFocus = (modal: HTMLElement): void => {
+  const body = modal.querySelector<HTMLElement>('.alert-body')
+  const bodyFocusables = body ? getDialogFocusables(body) : []
   const active = getRootActiveElement(modal)
   if (active && modal.contains(active) && !active.closest('[aria-hidden="true"], [inert]')) {
+    const isHeaderControl = Boolean(active.closest('.alert-header'))
+    if (!isHeaderControl || bodyFocusables.length === 0) {
+      return
+    }
+  }
+  if (bodyFocusables.length > 0) {
+    bodyFocusables[0].focus()
+
     return
   }
   const focusables = getDialogFocusables(modal)

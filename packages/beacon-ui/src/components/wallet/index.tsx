@@ -5,6 +5,9 @@ import { WalletProps } from 'src/ui/common'
 const Wallet: React.FC<WalletProps> = (props: WalletProps) => {
   const { aria } = getBeaconMessages()
   const logoAlt = interpolateBeaconMessage(aria.walletLogoAlt, { wallet: props.name })
+  const tileLabel = [props.name, props.description, ...(props.tags ?? [])]
+    .filter((segment): segment is string => Boolean(segment && segment.length > 0))
+    .join(', ')
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (props.disabled) {
       return
@@ -25,6 +28,7 @@ const Wallet: React.FC<WalletProps> = (props: WalletProps) => {
           className={`wallet-main ${props.mobile ? 'wallet-main-mobile' : ''}`}
           role="button"
           tabIndex={props.disabled ? -1 : 0}
+          aria-label={tileLabel}
           aria-disabled={props.disabled ? 'true' : undefined}
           onClick={props.disabled ? undefined : props.onClick}
           onKeyDown={handleKeyDown}
@@ -52,6 +56,7 @@ const Wallet: React.FC<WalletProps> = (props: WalletProps) => {
           className="wallet-small"
           role="button"
           tabIndex={props.disabled ? -1 : 0}
+          aria-label={props.name}
           aria-disabled={props.disabled ? 'true' : undefined}
           onClick={props.disabled ? undefined : props.onClick}
           onKeyDown={handleKeyDown}
