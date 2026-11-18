@@ -9,7 +9,7 @@ workspace version remains Node.js 22.12.0. Maintenance LTS releases remain
 supported; end-of-life and Current releases are outside the tested matrix.
 
 See [Node.js support](docs/node-support.md) for installed package checks and
-how Node loads imports.
+how Node loads imports. On the Node.js 22 line, ESLint 10 requires at least 22.13.0.
 
 This repository is the ECAD-maintained Beacon SDK package line published under
 the `@ecadlabs/beacon-*` scope.
@@ -35,6 +35,16 @@ npm run e2e:smoke
 
 Use `npm run e2e` when you need the full suite, including the longer reconnect
 scenarios that are not part of the required CI smoke gate.
+
+## TypeScript projects
+
+The root `tsconfig.json` supplies shared compiler options and the project for
+type-aware lint. Each package builds from `src`. The package `tsconfig.json`
+and `tsconfig-cjs.json` emit ESM and CommonJS respectively. Beacon UI uses
+Rollup for both formats and `tsconfig.build.json` for production declarations.
+Its editor config also includes UI tests. The wallet lifecycle typecheck uses
+`packages/beacon-wallet/__tests__/tsconfig.typecheck.json` so it can import
+shared test fixtures outside the wallet source tree.
 
 ## Formatting
 

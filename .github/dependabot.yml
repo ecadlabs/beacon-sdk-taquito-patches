@@ -31,14 +31,10 @@ updates:
       # WalletConnect 2.23+ normalizes requiredNamespaces into optionalNamespaces,
       # which breaks Kukai iOS until its WalletConnect SDK can be updated.
       - dependency-name: '@walletconnect/*'
-      # TypeScript 6.0 drops ES5 target, node10 moduleResolution, and baseUrl defaults.
+      # Rollup, TypeDoc and compiler-backed tests use the TypeScript 6 compiler API.
       - dependency-name: 'typescript'
         versions:
-          - '>= 6.0.0'
-      # Keep ESLint within the major supported by eslint-plugin-import.
-      - dependency-name: 'eslint'
-        versions:
-          - '>= 10.0.0'
+          - '>= 7.0.0'
       # Match the Node 22/24 LTS package baseline.
       - dependency-name: '@types/node'
         versions:

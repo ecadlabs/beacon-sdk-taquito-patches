@@ -1,6 +1,6 @@
 import React from 'react'
 import { getBeaconMessages, interpolateBeaconMessage } from '@ecadlabs/beacon-types'
-import { WalletProps } from 'src/ui/common'
+import { WalletProps } from '../../ui/common'
 
 const Wallet: React.FC<WalletProps> = (props: WalletProps) => {
   const { aria } = getBeaconMessages()

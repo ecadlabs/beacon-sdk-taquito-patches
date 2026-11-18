@@ -4,10 +4,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "noUnusedLocals": false,
-    "baseUrl": "..",
-    "paths": {
-      "@ecadlabs/beacon-wallet": ["./src"]
-    }
+    "rootDir": "../../.."
   },
   "include": ["../src/**/*", "./client/WalletClientObservabilityAndLifecycle.test.ts"]
 }

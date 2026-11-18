@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "types": ["node", "chrome"],
-    "baseUrl": ".",
+    "rootDir": "./src",
     "outDir": "./dist/esm",
     "paths": {
       "@ecadlabs/beacon-core": ["./src"]

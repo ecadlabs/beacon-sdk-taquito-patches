@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { useEffect, useState } from 'react'
 import { getBeaconDirection, resolveBeaconLang, subscribeBeaconI18n } from '@ecadlabs/beacon-types'
-import { Toast } from 'src/components/toast'
+import { Toast } from '../../components/toast'
 import { Subject, Subscription } from '../../utils/subject'
 import { ToastConfig } from '../common'
 

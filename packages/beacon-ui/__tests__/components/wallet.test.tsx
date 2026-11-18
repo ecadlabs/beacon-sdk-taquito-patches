@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { Wallet } from '../../src/components/wallet/index'
-import { WalletProps } from 'src/ui/common'
+import { WalletProps } from '../../src/ui/common'
 
 describe('Wallet Component', () => {
   const onClick = vi.fn()

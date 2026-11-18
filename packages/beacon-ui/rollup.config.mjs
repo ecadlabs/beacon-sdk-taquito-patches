@@ -26,13 +26,7 @@ export default [
         minimize: true,
         sourceMap: true
       }),
-      typescript({
-        tsconfig: 'tsconfig.json',
-        tsconfigOverride: {
-          include: ['src/**/*'],
-          exclude: ['**/__tests__/**', '**/*.test.ts', '**/*.spec.ts']
-        }
-      }),
+      typescript({ tsconfig: 'tsconfig.build.json' }),
       terser(),
       json()
     ]
@@ -64,13 +58,7 @@ export default [
         minimize: true,
         sourceMap: true
       }),
-      typescript({
-        tsconfig: 'tsconfig.json',
-        tsconfigOverride: {
-          include: ['src/**/*'],
-          exclude: ['**/__tests__/**', '**/*.test.ts', '**/*.spec.ts']
-        }
-      }),
+      typescript({ tsconfig: 'tsconfig.build.json' }),
       terser(),
       json()
     ]

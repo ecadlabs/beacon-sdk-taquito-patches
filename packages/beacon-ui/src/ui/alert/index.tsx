@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { getBeaconDirection, resolveBeaconLang, subscribeBeaconI18n } from '@ecadlabs/beacon-types'
-import { getColorMode } from 'src/utils/colorMode'
+import { getColorMode } from '../../utils/colorMode'
 import { Subject, Subscription } from '../../utils/subject'
 import { runUICallback } from '../../utils/callback'
 import { ensureDialogFocus, getActiveElementDeep } from '../../utils/focus'

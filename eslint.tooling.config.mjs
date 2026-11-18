@@ -2,7 +2,7 @@ import { readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import tsParser from '@typescript-eslint/parser'
 import tsPlugin from '@typescript-eslint/eslint-plugin'
-import importPlugin from 'eslint-plugin-import'
+import importPlugin from 'eslint-plugin-import-x'
 import globals from 'globals'
 
 const root = import.meta.dirname
@@ -108,7 +108,7 @@ export default [
   {
     // This consumer test exercises the SDK's own package exports.
     files: ['packages/beacon-sdk/__tests__/node-import.test.mjs'],
-    settings: { 'import/internal-regex': '^@ecadlabs/beacon-sdk(?:/|$)' }
+    settings: { 'import-x/internal-regex': '^@ecadlabs/beacon-sdk(?:/|$)' }
   },
   ...readdirSync(resolve(root, 'packages'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())

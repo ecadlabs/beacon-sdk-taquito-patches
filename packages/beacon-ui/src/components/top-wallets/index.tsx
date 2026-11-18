@@ -4,7 +4,7 @@ import {
   interpolateBeaconMessage,
   resolveBeaconLang
 } from '@ecadlabs/beacon-types'
-import { TopWalletsProps } from 'src/ui/common'
+import { TopWalletsProps } from '../../ui/common'
 import { Wallet } from '../wallet'
 
 interface IntlWithListFormat {

@@ -35,7 +35,7 @@
   "dependencies": {
     "@stablelib/blake2b": "^2.0.1",
     "@stablelib/bytes": "^2.0.1",
-    "@stablelib/ed25519": "^2.1.0",
+    "@stablelib/ed25519": "^2.1.1",
     "@stablelib/nacl": "^2.0.1",
     "@stablelib/random": "^2.0.1",
     "@stablelib/utf8": "^2.1.0",

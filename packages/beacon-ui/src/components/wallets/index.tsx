@@ -1,6 +1,6 @@
 import React from 'react'
 import { getBeaconMessages, resolveBeaconLang } from '@ecadlabs/beacon-types'
-import { WalletsProps } from 'src/ui/common'
+import { WalletsProps } from '../../ui/common'
 import { Wallet } from '../wallet'
 
 interface IntlWithListFormat {

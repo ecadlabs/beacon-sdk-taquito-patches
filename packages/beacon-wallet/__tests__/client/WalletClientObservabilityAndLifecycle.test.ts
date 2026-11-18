@@ -1490,7 +1490,7 @@ describe('WalletClient observability, pending requests, changeAccount, and lifec
       await wallet.addPeer(peer, false)
       let receivedPermRequest: PermissionRequestOutput | undefined
       await wallet.connect((msg) => {
-        if (msg.type === BeaconMessageType.PermissionRequest) {
+        if ('type' in msg && msg.type === BeaconMessageType.PermissionRequest) {
           receivedPermRequest = msg
         }
       })

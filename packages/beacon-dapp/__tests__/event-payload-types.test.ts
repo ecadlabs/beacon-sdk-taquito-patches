@@ -10,7 +10,7 @@ it.each(['event-payloads', 'message-observer', 'wire-responses'])(
     const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, process.cwd())
     const program = ts.createProgram({
       rootNames: [resolve(`__tests__/type-fixtures/${fixture}.ts`)],
-      options: { ...parsed.options, noEmit: true }
+      options: { ...parsed.options, rootDir: process.cwd(), noEmit: true }
     })
     const diagnostics = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)]
     const formatted = ts.formatDiagnosticsWithColorAndContext(diagnostics, {

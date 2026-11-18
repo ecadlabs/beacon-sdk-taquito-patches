@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { TopWallets } from '../../src/components/top-wallets/index'
-import { MergedWallet } from 'src/utils/wallets'
+import { MergedWallet } from '../../src/utils/wallets'
 
 // --- Mock the Wallet component ---
 // Replace the real Wallet component with a dummy that renders a div with data-testid="wallet"

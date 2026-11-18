@@ -43,7 +43,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "@stablelib/ed25519": "^2.1.0",
+    "@stablelib/ed25519": "^2.1.1",
     "@stablelib/x25519-session": "^2.0.1"
   }
 }

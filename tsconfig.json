@@ -3,14 +3,13 @@
     "target": "ESNext",
     "lib": ["es2015", "es2017.string", "dom"],
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "declaration": true,
     "outDir": "./dist/esm",
     "typeRoots": ["./node_modules/@types", "./src/typings", "./node_modules"],
     "types": ["node", "chrome", "vitest/globals"],
     "sourceMap": true,
     "inlineSources": true,
-    "baseUrl": ".",
     /* Strict Type-Checking Options */
     "strict": true /* Enable all strict type-checking options. */,
     "noImplicitAny": true /* Raise error on expressions and declarations with an implied 'any' type. */,
@@ -26,29 +25,5 @@
     "noImplicitReturns": true /* Report error when not all code paths in function return a value. */,
     "noFallthroughCasesInSwitch": true /* Report errors for fallthrough cases in switch statement. */,
     "allowSyntheticDefaultImports": true
-  },
-  "paths": {
-    "beacon-core": ["packages/beacon-core/lib/beacon-core", "packages/beacon-core/lib"],
-    "beacon-dapp": ["packages/beacon-dapp/lib/beacon-dapp", "packages/beacon-dapp/lib"],
-    "beacon-blockchain-tezos": [
-      "packages/beacon-blockchain-tezos/lib/beacon-blockchain-tezos",
-      "packages/beacon-blockchain-tezos/lib"
-    ],
-    "beacon-blockchain-tezos-sapling": [
-      "packages/beacon-blockchain-tezos-sapling/lib/beacon-blockchain-tezos-sapling",
-      "packages/beacon-blockchain-tezos-sapling/lib"
-    ],
-    "beacon-transport-matrix": [
-      "packages/beacon-transport-matrix/lib/beacon-transport-matrix",
-      "packages/beacon-transport-matrix/lib"
-    ],
-    "beacon-transport-postmessage": [
-      "packages/beacon-transport-postmessage/lib/beacon-transport-postmessage",
-      "packages/beacon-transport-postmessage/lib"
-    ],
-    "beacon-types": ["packages/beacon-types/lib/beacon-types", "packages/beacon-types/lib"],
-    "beacon-ui": ["packages/beacon-ui/lib/beacon-ui", "packages/beacon-ui/lib"],
-    "beacon-utils": ["packages/beacon-utils/lib/beacon-utils", "packages/beacon-utils/lib"],
-    "beacon-wallet": ["packages/beacon-wallet/lib/beacon-wallet", "packages/beacon-wallet/lib"]
   }
 }

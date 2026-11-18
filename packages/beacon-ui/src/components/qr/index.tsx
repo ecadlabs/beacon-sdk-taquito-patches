@@ -1,7 +1,7 @@
 import { reportDiagnostic } from '@ecadlabs/beacon-core'
 import { getBeaconMessages, interpolateBeaconMessage } from '@ecadlabs/beacon-types'
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { QRProps } from 'src/ui/common'
+import { QRProps } from '../../ui/common'
 import { getTzip10Link } from '../../utils/get-tzip10-link'
 import { getQrData } from '../../utils/qr'
 import { runUICallback } from '../../utils/callback'

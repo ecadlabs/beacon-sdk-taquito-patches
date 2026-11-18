@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { Wallets } from '../../src/components/wallets/index'
-import { WalletsProps } from 'src/ui/common'
+import { WalletsProps } from '../../src/ui/common'
 
 // --- Mock the Wallet component ---
 // Replace the real Wallet component with a dummy that renders a div with data-testid="wallet".
