@@ -45,8 +45,9 @@ it('serves the newly advertised wallet account while session acknowledgement is 
     }
   }
   const context = vm.createContext({
+    URLSearchParams,
     window: {
-      location: { origin: 'http://localhost:1234' },
+      location: { origin: 'http://localhost:1234', search: '?projectId=test-project-id' },
       SignClient: { init: async () => signClient },
       addEventListener: (event, handler) => handlers.set(`window:${event}`, handler)
     },
