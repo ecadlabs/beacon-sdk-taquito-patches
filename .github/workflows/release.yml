@@ -35,6 +35,8 @@ jobs:
         run: ./scripts/npm11.sh run build
 
       - name: Run end-to-end tests
+        env:
+          BEACON_WC_PROJECT_ID: ${{ secrets.BEACON_WC_PROJECT_ID }}
         run: ./scripts/npm11.sh run e2e:smoke
 
   publish-packages:
