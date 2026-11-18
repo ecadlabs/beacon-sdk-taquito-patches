@@ -10,10 +10,6 @@
 /local-tarballs/**
 /lib/**
 
-# TypeDoc output shares docs/ with authored top-level Markdown guides.
-/docs/*
-!/docs/*.md
-
 # Package-manager and snapshot output is owned by its generator.
 **/package-lock.json
 **/__snapshots__/**

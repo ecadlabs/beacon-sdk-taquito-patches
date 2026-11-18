@@ -31,7 +31,7 @@ updates:
       # WalletConnect 2.23+ normalizes requiredNamespaces into optionalNamespaces,
       # which breaks Kukai iOS until its WalletConnect SDK can be updated.
       - dependency-name: '@walletconnect/*'
-      # Rollup, TypeDoc and compiler-backed tests use the TypeScript 6 compiler API.
+      # Rollup and compiler-backed tests use the TypeScript 6 compiler API.
       - dependency-name: 'typescript'
         versions:
           - '>= 7.0.0'

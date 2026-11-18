@@ -55,7 +55,7 @@ Run `npm run format:check` to check formatting without writing files. Run
 These commands select Prettier-supported repository files, including source,
 tests, scripts, examples, configuration and the authored Markdown guides in
 `docs/`. Root `.gitignore` and `.prettierignore` exclude generated SDK files and
-generator-managed package READMEs, package locks, build/documentation output,
+generator-managed package READMEs, package locks, build output,
 coverage, browser reports and minified bundles. The SDK generator is
 `npm run prebuild`. `scripts/sync-package-readmes.mjs` owns the package README
 scaffolds. Keep formatting changes to generated portions in their generator.
