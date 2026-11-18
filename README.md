@@ -113,7 +113,12 @@ npm install @ecadlabs/beacon-sdk
 ```ts
 import { BeaconEvent, DAppClient } from '@ecadlabs/beacon-sdk'
 
-const dAppClient = new DAppClient({ name: 'My Sample DApp' })
+const dAppClient = new DAppClient({
+  name: 'My Sample DApp',
+  walletConnectOptions: {
+    projectId: import.meta.env.VITE_REOWN_PROJECT_ID
+  }
+})
 
 dAppClient.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, async (account) => {
   console.log(`${BeaconEvent.ACTIVE_ACCOUNT_SET} triggered: `, account)
@@ -129,6 +134,47 @@ try {
 ```
 
 For a more complete example, see [`examples/dapp.html`](./examples/dapp.html).
+
+## WalletConnect (Reown) project ID
+
+Beacon selects a transport based on the wallet and how the user connects:
+
+- **Browser `postMessage`:** Browser extensions (such as the Temple browser extension).
+- **Beacon P2P (Matrix relay nodes):** Kukai Web (via the web wallet link), Temple Mobile, and Umami (Desktop and Mobile).
+- **WalletConnect v2:** Kukai Mobile (iOS) and the Kukai QR code.
+
+`walletConnectOptions` only configures the WalletConnect v2 transport and does not affect browser extensions or Matrix P2P connections.
+
+### Why every dApp must configure its own `projectId`
+
+Historically, Beacon included a shared demo `projectId` fallback when `walletConnectOptions.projectId` was omitted. Relying on that shared default in production has three problems:
+
+1. **Ecosystem-wide blast radius:** Every unconfigured dApp shares one rate-limit bucket and credential; a quota cap, allowlist change, or revocation breaks WalletConnect pairing for all of them at once.
+2. **No per-domain origin enforcement:** A shared credential cannot lock down allowed origins per application.
+3. **Terms of Service violation:** The [Reown Terms of Service](https://reown.com/terms-of-service) (_Part A, Section 1: Registration and Account_) require each application to register its own project rather than sharing third-party credentials.
+
+In `4.9.0-ecad`, omitting `walletConnectOptions.projectId` logs a runtime deprecation warning via [`reportDiagnostic`](docs/logging.md) (#181). **The built-in fallback will be removed in the next minor release.** After removal, a dApp without `walletConnectOptions.projectId` loses WalletConnect pairing (Kukai Mobile and the Kukai QR code), while browser extensions and Matrix P2P connections continue to work. See [WalletConnect project ID setup and migration](docs/walletconnect-project-id.md) for the release migration note.
+
+### How to get and configure a `projectId`
+
+1. **Create a project at [dashboard.reown.com](https://dashboard.reown.com/):**
+   - The free plan is sufficient for Beacon dApps. Because the free plan allows **one project and one member per team**, create a separate Reown team for each application or environment (for example, production dApp vs. CI test runner).
+   - In the project feature toggles, turn off **Social & Email**, **Onramp**, and **Swaps**, which Beacon does not use.
+2. **Pass `projectId` via `walletConnectOptions` from an environment variable:**
+   - A `projectId` is a public client identifier (not a secret); access control is enforced by your Reown Cloud domain allowlist.
+   - Inject it from a build-time environment variable (such as `VITE_REOWN_PROJECT_ID` or `NEXT_PUBLIC_REOWN_PROJECT_ID`) and pass `walletConnectOptions: { projectId }` to `DAppClient` (or `BeaconWallet` in Taquito). Consider failing your production build if the variable is unset.
+
+### Domain allowlist rules and gotchas
+
+Configure your project's domain allowlist in Reown Cloud:
+
+- **Empty allowlist allows every origin:** An empty allowlist permits connections from any domain. Lock this down before deploying to production.
+- **`localhost` is always allowed:** Local development origins (`http://localhost:*`) are permitted even when an allowlist is configured.
+- **Subdomain wildcards do not match the apex domain:** `https://*.example.com` matches `https://app.example.com`, but does **not** match `https://example.com` itself. Add both entries if your dApp is served on the apex and subdomains.
+- **Preview deploys and tunnels need explicit entries:** Add your preview deployment domains explicitly. Never wildcard a shared tunnel domain such as `*.trycloudflare.com` (doing so authorizes every tunnel on that provider to use your `projectId`).
+- **Propagation delay:** Allowlist changes can take several minutes to apply at the WalletConnect relay.
+- **How rejected origins fail:** When an origin is not on the allowlist, the WalletConnect relay closes the WebSocket with code `3000 (Unauthorized)`. In the dApp's Beacon pairing modal, this surfaces as **`"Origin not allowed."`** (#216 / #245; on `@ecadlabs/beacon-* <= 4.9.0-ecad-beta.3`, it surfaced as `"A network error occurred."`).
+- **Verify both allowed and unallowed origins:** Because `localhost` and an empty allowlist always succeed, verify your production setup by testing WalletConnect pairing from your allowed origin **and** from an unallowed origin (such as a temporary tunnel URL not on the allowlist) to confirm that unauthorized origins are rejected.
 
 ## dApp event correlation
 
@@ -263,6 +309,7 @@ Once the SDK is built, you can open [`examples/dapp.html`](./examples/dapp.html)
 [`examples/wallet.html`](./examples/wallet.html) in your
 browser and try the basic functionality. To support browser extensions, the
 examples should be served over HTTP rather than opened directly from disk.
+For [`examples/wallet-wc.html`](./examples/wallet-wc.html) and the Playwright WalletConnect E2E suite, set `BEACON_WC_PROJECT_ID` in your environment (or pass `?projectId=<id>` in the page URL) so `scripts/static-server.js` provides your Reown project ID via `/env.js`.
 
 ## Node.js support
 

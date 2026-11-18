@@ -14,6 +14,7 @@
       window.beaconSdkDebugEnabled = true
     </script>
 
+    <script src="./env.js"></script>
     <script src="./walletbeacon.min.js"></script>
 
     <style>
@@ -223,11 +224,16 @@
             NOT_OWNER: 'You are not the owner of this token.'
           }
         },
-        // Register your own WalletConnect projectId at https://dashboard.reown.com/:
-        // walletConnectOptions: {
-        //   projectId: 'YOUR_PROJECT_ID',
-        //   relayUrl: 'wss://relay.walletconnect.com'
-        // },
+        // Set BEACON_WC_PROJECT_ID when running scripts/static-server.js (served via /env.js)
+        // or pass your own projectId from https://dashboard.reown.com/:
+        ...(window.BEACON_WC_PROJECT_ID
+          ? {
+              walletConnectOptions: {
+                projectId: window.BEACON_WC_PROJECT_ID,
+                relayUrl: 'wss://relay.walletconnect.com'
+              }
+            }
+          : {}),
         matrixNodes: {
           [beacon.Regions.EUROPE_WEST]: [
             'beacon-node-1.diamond.papers.tech',

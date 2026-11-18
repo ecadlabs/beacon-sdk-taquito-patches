@@ -70,6 +70,25 @@ function createStaticServer({ rootPath, port, name = 'beacon' }) {
       return
     }
 
+    const requestPath = decodeURIComponent(request.url.split('?')[0].split('#')[0])
+
+    if (requestPath === '/env.js') {
+      const projectId = process.env.BEACON_WC_PROJECT_ID || ''
+      const body = `window.BEACON_WC_PROJECT_ID = ${JSON.stringify(projectId)}\n`
+      response.writeHead(200, {
+        'Cache-Control': 'no-store',
+        'Content-Type': CONTENT_TYPES['.js'],
+        'X-Powered-By': name
+      })
+      if (request.method === 'HEAD') {
+        response.end()
+      } else {
+        response.end(body)
+      }
+
+      return
+    }
+
     const filePath = await resolveFilePath(absoluteRootPath, request.url)
 
     if (filePath === null) {

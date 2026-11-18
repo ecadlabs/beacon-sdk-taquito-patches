@@ -8,6 +8,7 @@
     <meta http-equiv="Content-Style-Type" content="text/css" />
     <title>WalletConnect Tezos Example Wallet</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css" />
+    <script src="./env.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@walletconnect/sign-client@2.18.0/dist/index.umd.js"></script>
   </head>
 
@@ -41,7 +42,12 @@
       // exercise the post-pairing rejection paths (requestOperation /
       // requestSignPayload) without changes to wallet-side approval UX.
       let rejectNextOperation = false
-      const projectId = '97f804b46f0db632c52af0556586a5f3' // Demo/e2e testing only; replace with your own Project ID from https://dashboard.reown.com/
+      // Set BEACON_WC_PROJECT_ID when running scripts/static-server.js (served via /env.js)
+      // or pass ?projectId=<id> in the URL (register at https://dashboard.reown.com/).
+      const projectId =
+        new URLSearchParams(window.location.search).get('projectId') ||
+        window.BEACON_WC_PROJECT_ID ||
+        ''
 
       // Mock Tezos wallet data
       let walletData = {
@@ -459,9 +465,8 @@
       window.addEventListener('load', () => {
         setTimeout(() => {
           if (!projectId || projectId === 'YOUR_PROJECT_ID') {
-            setStatus('Please set your WalletConnect Project ID')
-            alert(
-              'Please replace YOUR_PROJECT_ID with your actual WalletConnect Project ID from https://cloud.walletconnect.com/'
+            setStatus(
+              'Please set BEACON_WC_PROJECT_ID (or pass ?projectId=...) from https://dashboard.reown.com/'
             )
             return
           }
