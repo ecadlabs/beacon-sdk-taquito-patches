@@ -234,16 +234,18 @@ export class PostMessageTransport<
   public async listen(publicKey: string): Promise<void> {
     logger.log('listen', publicKey)
 
+    const deliver = (
+      message: string,
+      context: ConnectionContext,
+      decoded?: object
+    ): Promise<void> => {
+      const connectionContext: ConnectionContext = { origin: Origin.EXTENSION, id: context.id }
+
+      return this.notifyVerifiedListeners(message, connectionContext, decoded)
+    }
     await this.client.listenForEncryptedMessage(
       publicKey,
-      (message: string, context: ConnectionContext) => {
-        const connectionContext: ConnectionContext = {
-          origin: Origin.EXTENSION,
-          id: context.id
-        }
-
-        return this.notifyListeners(message, connectionContext)
-      }
+      Object.assign(deliver, { onVerifiedBase58: deliver })
     )
   }
 }

@@ -1,6 +1,12 @@
 import type { Mock, MockInstance } from 'vitest'
 import { PostMessageClient } from '../../../beacon-transport-postmessage/src/PostMessageClient'
-import { Serializer, getSenderId, PendingPairingRequests, windowRef } from '@ecadlabs/beacon-core'
+import {
+  LocalStorage,
+  Serializer,
+  getSenderId,
+  PendingPairingRequests,
+  windowRef
+} from '@ecadlabs/beacon-core'
 // __tests__/communication-client/P2PCommunicationClient.test.ts
 
 // Mock external dependencies
@@ -69,8 +75,10 @@ import {
   toHex,
   getKeypairFromSeed
 } from '@ecadlabs/beacon-utils'
+import { VerifiedReceiver } from '../../../beacon-core/__tests__/helpers/verified-receiver'
+import { P2PTransport } from '../../src/P2PTransport'
 import { MatrixClient } from '../../src/matrix-client/MatrixClient'
-import { P2PPairingRequest, Regions, StorageKey } from '@ecadlabs/beacon-types'
+import { Origin, P2PPairingRequest, Regions, StorageKey } from '@ecadlabs/beacon-types'
 import {
   MatrixClientEvent,
   MatrixClientEventType
@@ -667,6 +675,57 @@ describe('P2PCommunicationClient', () => {
       await expect(client.isSender(event as any, '11'.repeat(32))).resolves.toBe(false)
       event.content.message.sender = '@hex-hash:relay'
       await expect(client.isSender(event as any, '11'.repeat(32))).resolves.toBe(true)
+    })
+
+    it('decodes once across Matrix verification and core delivery', async () => {
+      const key = '11'.repeat(32)
+      const storage = new LocalStorage()
+      const transport = new P2PTransport(
+        'matrix',
+        { publicKey: new Uint8Array(32), secretKey: new Uint8Array(64) },
+        storage,
+        {},
+        StorageKey.TRANSPORT_P2P_PEERS_DAPP
+      )
+      vi.spyOn(transport['client'], 'listenForEncryptedMessage').mockImplementation(
+        client.listenForEncryptedMessage.bind(client)
+      )
+      const receiver = new VerifiedReceiver(storage)
+      const raw = vi.fn()
+      await transport.addListener(raw)
+      await receiver.register(transport)
+      vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
+      vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
+      const sharedKey = new Uint8Array(32)
+      client['createCryptoBoxServer'] = vi.fn().mockResolvedValue({ receive: sharedKey })
+      await transport.listen(key)
+      const listener = fakeMatrixClient.subscribe.mock.calls.at(-1)![1]
+      const message = {
+        senderId: await getSenderId(key),
+        id: 'verified',
+        payload: 'x'.repeat(2048)
+      }
+      const wire = await new Serializer().serialize(message)
+      vi.mocked(decryptCryptoboxPayload).mockResolvedValue(wire)
+      const decoded = vi.spyOn(Serializer.prototype, 'deserialize')
+      try {
+        await listener({
+          content: {
+            roomId: '!room',
+            message: {
+              type: MatrixMessageType.TEXT,
+              sender: '@hex-hash:relay',
+              content: '00'.repeat(64)
+            }
+          }
+        })
+        const context = { origin: Origin.P2P, id: key }
+        expect(raw).toHaveBeenCalledExactlyOnceWith(wire, context)
+        expect(receiver.received).toHaveBeenCalledExactlyOnceWith(message, context, transport.type)
+        expect(decoded).toHaveBeenCalledTimes(1)
+      } finally {
+        decoded.mockRestore()
+      }
     })
 
     it.each(['base58', 'json'])(

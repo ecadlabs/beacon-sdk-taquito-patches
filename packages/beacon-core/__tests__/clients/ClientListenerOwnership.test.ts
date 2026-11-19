@@ -40,6 +40,10 @@ class ListenerTransport extends Transport<
 
   public async listen(_publicKey: string): Promise<void> {}
 
+  public deliverVerified(wire: string, context: ConnectionContext, message: object): Promise<void> {
+    return this.notifyVerifiedListeners(wire, context, message)
+  }
+
   public deliver(message: string, context: ConnectionContext): Promise<void> {
     return this.notifyListeners(message, context)
   }
@@ -84,13 +88,37 @@ describe('Client listener ownership', () => {
 
   async function setup() {
     const storage = new LocalStorage('client-listener-ownership')
-    const handler = vi.fn(async () => undefined)
+    const handler = vi.fn<Client['handleResponse']>(async () => undefined)
     const client = new ListenerClient(storage, handler)
     const first = new ListenerTransport(storage)
     const second = new ListenerTransport(storage)
     const wire = await new Serializer().serialize(message)
     return { storage, handler, client, first, second, wire }
   }
+
+  it('honors cleanup started by a raw observer during verified delivery', async () => {
+    const { client, first, handler, wire } = await setup()
+    await client.register(first)
+    await first.addListener(() => client.clear([first]))
+    await first.deliverVerified(wire, context, message)
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('isolates parsed messages between core listeners', async () => {
+    const { client, first, handler, storage, wire } = await setup()
+    const secondHandler = vi.fn()
+    const secondClient = new ListenerClient(storage, secondHandler)
+    await client.register(first)
+    await secondClient.register(first)
+    try {
+      await first.deliverVerified(wire, context, { ...message })
+      expect(handler).toHaveBeenCalledExactlyOnceWith(message, context, first.type)
+      expect(secondHandler).toHaveBeenCalledExactlyOnceWith(message, context, first.type)
+      expect(handler.mock.lastCall?.at(0)).not.toBe(secondHandler.mock.lastCall?.at(0))
+    } finally {
+      await Promise.all([client.clear(), secondClient.clear()])
+    }
+  })
 
   it('moves its subscription to a replacement instance without removing another observer', async () => {
     const { client, handler, first, second, wire } = await setup()

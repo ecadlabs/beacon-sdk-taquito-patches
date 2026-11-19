@@ -1205,7 +1205,7 @@ export class P2PCommunicationClient extends CommunicationClient {
     receiveKey: Uint8Array,
     session: MatrixSessionIdentity,
     replay: InitialMessageReplay
-  ): Promise<{ ciphertext: string; decryptedMessage: string } | undefined> {
+  ): Promise<{ ciphertext: string; decryptedMessage: string; decoded?: object } | undefined> {
     if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
       return
     }
@@ -1229,7 +1229,8 @@ export class P2PCommunicationClient extends CommunicationClient {
           if (replay !== this.initialReplay || !this.isCurrentSession(session)) {
             return
           }
-          const message: unknown = decryptedMessage.startsWith('{')
+          const plainJson = decryptedMessage.startsWith('{')
+          const message: unknown = plainJson
             ? JSON.parse(decryptedMessage)
             : await new Serializer().deserialize(decryptedMessage)
           if (
@@ -1240,12 +1241,12 @@ export class P2PCommunicationClient extends CommunicationClient {
           ) {
             return
           }
+
+          return { ciphertext, decryptedMessage, decoded: plainJson ? undefined : message }
         } catch {
           // Some messages are encrypted for other recipients.
           return
         }
-
-        return { ciphertext, decryptedMessage }
       }
     }
 
@@ -1280,7 +1281,9 @@ export class P2PCommunicationClient extends CommunicationClient {
 
   public async listenForEncryptedMessage(
     senderPublicKey: string,
-    messageCallback: (message: string) => void | Promise<void>
+    messageCallback: ((message: string) => void | Promise<void>) & {
+      onVerifiedBase58?: (message: string, decoded: object) => void | Promise<void>
+    }
   ): Promise<void> {
     if (this.activeListeners.has(senderPublicKey)) {
       return
@@ -1347,7 +1350,11 @@ export class P2PCommunicationClient extends CommunicationClient {
             decryptedMessage
           )
           if (this.isCurrentSession(session)) {
-            await messageCallback(decryptedMessage)
+            if (messageCallback.onVerifiedBase58 && prepared.decoded) {
+              await messageCallback.onVerifiedBase58(decryptedMessage, prepared.decoded)
+            } else {
+              await messageCallback(decryptedMessage)
+            }
           }
         } finally {
           inFlightCiphertexts.delete(ciphertext)

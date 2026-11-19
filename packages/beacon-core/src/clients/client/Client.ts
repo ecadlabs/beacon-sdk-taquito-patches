@@ -17,7 +17,7 @@ import {
 import { BeaconClient } from '../beacon-client/BeaconClient'
 import { AccountManager } from '../../managers/AccountManager'
 import { getSenderId } from '../../utils/get-sender-id'
-import type { Transport } from '../../transports/Transport'
+import { receiveDecoded, type Transport } from '../../transports/Transport'
 import type { ClientTransport } from '../../transports/ClientTransport'
 import { Serializer } from '../../Serializer'
 import { ClientOptions } from './ClientOptions'
@@ -301,23 +301,43 @@ export abstract class Client extends BeaconClient {
     await transport.addListener(listener)
   }
 
+  private async deliverTransportMessage(
+    subscription: TransportSubscription,
+    pending: object | Promise<unknown>,
+    context: ConnectionContext
+  ): Promise<void> {
+    // A raw observer can retire this subscription during the same fan-out.
+    const message = await pending
+    if (subscription.active) {
+      await this.handleResponse(
+        message as BeaconRequestMessage,
+        context,
+        subscription.transport.type
+      )
+    }
+  }
+
   protected async addListener(transport: TransportListenerTarget): Promise<void> {
     const subscription: TransportSubscription = {
       transport,
       registration: new ExposedPromise<void>(),
       active: true,
       registered: false,
-      listener: async (message, connectionInfo) => {
-        if (!subscription.active || typeof message !== 'string') {
-          return
+      listener: Object.assign(
+        async (message: unknown, connectionInfo: ConnectionContext) => {
+          if (subscription.active && typeof message === 'string') {
+            await this.deliverTransportMessage(
+              subscription,
+              new Serializer().deserialize(message),
+              connectionInfo
+            )
+          }
+        },
+        {
+          [receiveDecoded]: (message: object, context: ConnectionContext) =>
+            this.deliverTransportMessage(subscription, message, context)
         }
-        const deserializedMessage = (await new Serializer().deserialize(
-          message
-        )) as BeaconRequestMessage
-        if (subscription.active) {
-          await this.handleResponse(deserializedMessage, connectionInfo, transport.type)
-        }
-      }
+      )
     }
     subscription.registration.promise.catch(() => undefined)
     this.transportListeners.add(subscription)

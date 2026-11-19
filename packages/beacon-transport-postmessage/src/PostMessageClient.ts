@@ -90,7 +90,13 @@ export class PostMessageClient extends MessageBasedClient {
 
   public async listenForEncryptedMessage(
     senderPublicKey: string,
-    messageCallback: (message: string, context: ConnectionContext) => void | Promise<void>
+    messageCallback: ((message: string, context: ConnectionContext) => void | Promise<void>) & {
+      onVerifiedBase58?: (
+        message: string,
+        context: ConnectionContext,
+        decoded: object
+      ) => void | Promise<void>
+    }
   ): Promise<void> {
     this.subscribeToMessages()
     if (this.activeListeners.has(senderPublicKey)) {
@@ -102,15 +108,20 @@ export class PostMessageClient extends MessageBasedClient {
       context: ConnectionContext
     ): Promise<void> => {
       let decryptedMessage: string
+      let decoded: object | undefined
       try {
         decryptedMessage = await this.decryptMessage(senderPublicKey, message.encryptedPayload)
+        const plainJson = decryptedMessage.startsWith('{')
         const beaconMessage = (
-          decryptedMessage.startsWith('{')
+          plainJson
             ? JSON.parse(decryptedMessage)
             : await new Serializer().deserialize(decryptedMessage)
         ) as { senderId?: string }
         if (beaconMessage.senderId !== (await getSenderId(senderPublicKey))) {
           return
+        }
+        if (!plainJson) {
+          decoded = beaconMessage
         }
       } catch {
         // Some messages are encrypted for other recipients.
@@ -118,7 +129,11 @@ export class PostMessageClient extends MessageBasedClient {
       }
 
       if (this.activeListeners.get(senderPublicKey) === callbackFunction) {
-        await messageCallback(decryptedMessage, context)
+        if (messageCallback.onVerifiedBase58 && decoded) {
+          await messageCallback.onVerifiedBase58(decryptedMessage, context, decoded)
+        } else {
+          await messageCallback(decryptedMessage, context)
+        }
       }
     }
 

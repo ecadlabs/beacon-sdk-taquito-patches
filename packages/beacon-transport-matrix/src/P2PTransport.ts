@@ -159,13 +159,14 @@ export class P2PTransport<
   }
 
   public async listen(publicKey: string): Promise<void> {
-    await this.client.listenForEncryptedMessage(publicKey, (message) => {
-      const connectionContext: ConnectionContext = {
-        origin: Origin.P2P,
-        id: publicKey
-      }
+    const deliver = (message: string, decoded?: object): Promise<void> => {
+      const connectionContext: ConnectionContext = { origin: Origin.P2P, id: publicKey }
 
-      return this.notifyListeners(message, connectionContext)
-    })
+      return this.notifyVerifiedListeners(message, connectionContext, decoded)
+    }
+    await this.client.listenForEncryptedMessage(
+      publicKey,
+      Object.assign(deliver, { onVerifiedBase58: deliver })
+    )
   }
 }

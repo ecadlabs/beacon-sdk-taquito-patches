@@ -22,6 +22,15 @@ type PeerStorageKey =
   | StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP
   | StorageKey.TRANSPORT_WALLETCONNECT_PEERS_WALLET
 
+// Private to the core package. Raw transport observers keep their string callback contract.
+export const receiveDecoded = Symbol('receiveDecoded')
+type TransportListener = ((
+  message: unknown,
+  context: ConnectionContext
+) => void | Promise<void>) & {
+  [receiveDecoded]?: (message: object, context: ConnectionContext) => Promise<void>
+}
+
 const logger = new Logger('Transport')
 
 const pairingPeerOwnership = new WeakMap<object, WeakMap<PeerInfo, () => boolean>>()
@@ -412,6 +421,31 @@ export abstract class Transport<
       if (this.client) {
         await this.client.unsubscribeFromEncryptedMessages()
       }
+    })
+  }
+
+  protected notifyVerifiedListeners(
+    wire: string,
+    context: ConnectionContext,
+    decoded?: object
+  ): Promise<void> {
+    if (!decoded) {
+      return this.notifyListeners(wire, context)
+    }
+    // Give the parsed object to one subscriber. Other clients decode their own
+    // copy, so mutations by one handler cannot affect another handler's view.
+    let available: object | undefined = decoded
+
+    return this.notifyListeners(wire, context, (listener: TransportListener) => {
+      const receive = listener[receiveDecoded]
+      if (receive && available) {
+        const message = available
+        available = undefined
+
+        return receive(message, context)
+      }
+
+      return listener(wire, context)
     })
   }
 

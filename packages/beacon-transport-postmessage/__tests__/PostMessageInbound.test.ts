@@ -1,4 +1,11 @@
-import { PendingPairingRequests, getSenderId, Logger, windowRef } from '@ecadlabs/beacon-core'
+import {
+  LocalStorage,
+  Serializer,
+  PendingPairingRequests,
+  getSenderId,
+  Logger,
+  windowRef
+} from '@ecadlabs/beacon-core'
 import {
   ExposedPromise,
   KeyPair,
@@ -6,7 +13,9 @@ import {
   secretbox_NONCEBYTES,
   secretbox_MACBYTES
 } from '@ecadlabs/beacon-utils'
-import { ExtensionMessageTarget, Origin } from '@ecadlabs/beacon-types'
+import { ExtensionMessageTarget, Origin, StorageKey } from '@ecadlabs/beacon-types'
+import { VerifiedReceiver } from '../../beacon-core/__tests__/helpers/verified-receiver'
+import { PostMessageTransport } from '../src/PostMessageTransport'
 import { PostMessageClient } from '../src/PostMessageClient'
 
 vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
@@ -107,6 +116,38 @@ describe('PostMessageClient inbound envelopes', () => {
     const pendingPairings = new PendingPairingRequests()
     pendingPairings.add(pairingResponse.id)
     client = new TestClient('Dapp', keyPair, pendingPairings)
+  })
+
+  it('decodes once across extension verification and core delivery', async () => {
+    const storage = new LocalStorage()
+    const transport = new PostMessageTransport(
+      'extension',
+      keyPair,
+      storage,
+      StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP
+    )
+    vi.spyOn(transport['client'], 'listenForEncryptedMessage').mockImplementation(
+      client.listenForEncryptedMessage.bind(client)
+    )
+    const receiver = new VerifiedReceiver(storage)
+    const raw = vi.fn()
+    await transport.addListener(raw)
+    await receiver.register(transport)
+    await transport.listen('peer-public-key')
+    const message = { senderId: 'beacon-sender-id', id: 'verified', payload: 'x'.repeat(2048) }
+    const wire = await new Serializer().serialize(message)
+    const decoded = vi.spyOn(Serializer.prototype, 'deserialize')
+    try {
+      client.decrypt.mockResolvedValue(wire)
+      await dispatchMessage(encryptedEvent())
+      await vi.waitFor(() => expect(receiver.received).toHaveBeenCalledTimes(1))
+      const context = { origin: Origin.EXTENSION, id: 'extension-id' }
+      expect(raw).toHaveBeenCalledExactlyOnceWith(wire, context)
+      expect(receiver.received).toHaveBeenCalledExactlyOnceWith(message, context, transport.type)
+      expect(decoded).toHaveBeenCalledTimes(1)
+    } finally {
+      decoded.mockRestore()
+    }
   })
 
   it.each([
