@@ -85,21 +85,7 @@ export const QR: React.FC<QRProps> = (props: QRProps) => {
   const accessibleQrSvg = withAccessibleSvgAttributes(qrSVG, qrAriaLabel)
 
   return (
-    <div
-      className="qr-wrapper"
-      style={
-        props.isMobile
-          ? {
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '340px',
-              textAlign: 'center',
-              border: 'none'
-            }
-          : {}
-      }
-    >
+    <div className={props.isMobile ? 'qr-wrapper qr-mobile' : 'qr-wrapper'}>
       <div className="qr-left">
         {!props.isMobile && <h3>{ui.orScanToConnect}</h3>}
         {!props.isMobile && (

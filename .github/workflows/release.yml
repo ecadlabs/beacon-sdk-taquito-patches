@@ -37,7 +37,9 @@ jobs:
       - name: Run end-to-end tests
         env:
           BEACON_WC_PROJECT_ID: ${{ secrets.BEACON_WC_PROJECT_ID }}
-        run: ./scripts/npm11.sh run e2e:smoke
+        run: |
+          ./scripts/npm11.sh run e2e:smoke
+          ./scripts/npm11.sh run e2e -- --project=chromium --grep @extended --retries=0
 
   publish-packages:
     name: publish-packages

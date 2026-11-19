@@ -23,6 +23,7 @@ const VIEWPORT_PROFILES: ViewportProfile[] = [
   { name: 'mobile-iphone-se (375x667)', width: 375, height: 667, userAgent: IOS_USER_AGENT },
   { name: 'mobile-galaxy-s21 (360x800)', width: 360, height: 800, userAgent: ANDROID_USER_AGENT },
   { name: 'mobile-small (320x568)', width: 320, height: 568, userAgent: IOS_USER_AGENT },
+  { name: 'mobile-landscape-small (667x375)', width: 667, height: 375, userAgent: IOS_USER_AGENT },
   { name: 'mobile-landscape (844x390)', width: 844, height: 390, userAgent: IOS_USER_AGENT }
 ]
 
@@ -165,7 +166,7 @@ async function inspectAlertLayout(page: Page): Promise<LayoutCheckResult> {
 
     const overflowingChildren: string[] = []
     const children = modal.querySelectorAll<HTMLElement>(
-      '.alert-header, .alert-modal-loading-wrapper, .alert-body, .info-wrapper, .info-title, .info-description, .info-buttons, .info-button, .info-button-secondary, #qr-code-icon, .qr-wrapper'
+      '.alert-header, .alert-modal-loading-wrapper, .alert-body, .info-wrapper, .info-title, .info-description, .info-buttons, .info-button, .info-button-secondary, #qr-code-icon, .qr-wrapper, .qr-right, .qr-svg-wrapper'
     )
     children.forEach((child) => {
       const cRect = child.getBoundingClientRect()
@@ -356,19 +357,25 @@ test.describe('beacon-ui Desktop and Mobile Viewport Rendering & Scroll Conforma
           window.scrollTo(0, 600)
           beacon.openAlert({
             title: 'Choose your preferred wallet',
+            featuredWallets: ['kukai'],
             body: '',
             pairingPayload: {
               p2pSyncCode: Promise.resolve('tezos://?type=tzip10&data=mock-p2p-payload'),
               postmessageSyncCode: Promise.resolve('mock-postmessage-payload'),
-              walletConnectSyncCode: new Promise((resolve) =>
-                setTimeout(() => resolve('wc:mock@2?relay-protocol=irn&symKey=deadbeef'), 150)
+              walletConnectSyncCode: new Promise<string>((resolve) =>
+                window.addEventListener(
+                  'release-pairing',
+                  () => resolve('wc:mock@2?relay-protocol=irn&symKey=deadbeef'),
+                  { once: true }
+                )
               ),
               networkType: beacon.NetworkType.SHADOWNET
             }
           })
         })
 
-        await page.waitForTimeout(400)
+        const kukai = page.locator('.wallet-main').filter({ hasText: 'Kukai' })
+        await kukai.click({ trial: true })
 
         // 1. Check initial TopWallets view
         const topWalletsLayout = await inspectAlertLayout(page)
@@ -384,20 +391,23 @@ test.describe('beacon-ui Desktop and Mobile Viewport Rendering & Scroll Conforma
         expect(topWalletsLayout.closeButtonHitTestable).toBe(true)
         expect(topWalletsLayout.overflowingChildren).toEqual([])
 
-        // 2. Click the first top wallet card to enter INSTALL / QR view (which triggers loading state and Info / QR cards)
-        await page.evaluate(() => {
-          const host = document.querySelector('beacon-alert')
-          const firstWallet = host?.shadowRoot?.querySelector<HTMLElement>('.wallet-main')
-          firstWallet?.click()
-        })
-
-        // Check while loading indicator is active
-        await page.waitForTimeout(50)
+        await kukai.click()
+        await expect(page.getByRole('dialog')).toHaveAttribute('aria-busy', 'true')
         const loadingLayout = await inspectAlertLayout(page)
         expect(loadingLayout.overflowingChildren).toEqual([])
 
         // Check after QR / install cards finish rendering
-        await page.waitForTimeout(300)
+        await page.evaluate(() => window.dispatchEvent(new Event('release-pairing')))
+        await expect(page.getByRole('button', { name: 'Use Browser' })).toBeVisible()
+        if (profile.userAgent) await page.locator('#qr-code-icon').click()
+        const qr = page.locator('.qr-svg-wrapper svg')
+        await expect(qr).toBeVisible()
+        const { width, height } = await qr.evaluate((svg) => {
+          const rect = svg.getBoundingClientRect()
+          return { width: rect.width, height: rect.height }
+        })
+        expect(width).toBeGreaterThanOrEqual(160)
+        expect(Math.abs(width - height)).toBeLessThan(1)
         const installLayout = await inspectAlertLayout(page)
         expect(installLayout.containerRect.top).toBeGreaterThanOrEqual(0)
         expect(installLayout.containerRect.left).toBeGreaterThanOrEqual(0)
@@ -413,6 +423,7 @@ test.describe('beacon-ui Desktop and Mobile Viewport Rendering & Scroll Conforma
         await page.evaluate(() => {
           beacon.openAlert({
             title: 'Choose your preferred wallet',
+            featuredWallets: ['kukai'],
             body: '',
             pairingPayload: {
               p2pSyncCode: Promise.resolve('tezos://?type=tzip10&data=mock-p2p-payload'),
@@ -425,13 +436,8 @@ test.describe('beacon-ui Desktop and Mobile Viewport Rendering & Scroll Conforma
             }
           })
         })
-        await page.waitForTimeout(100)
-        await page.evaluate(() => {
-          const host = document.querySelector('beacon-alert')
-          const firstWallet = host?.shadowRoot?.querySelector<HTMLElement>('.wallet-main')
-          firstWallet?.click()
-        })
-        await page.waitForTimeout(150)
+        await kukai.click()
+        await expect(page.getByRole('heading', { name: 'A network error occurred.' })).toBeVisible()
         const errorInstallLayout = await inspectAlertLayout(page)
         expect(errorInstallLayout.containerRect.top).toBeGreaterThanOrEqual(0)
         expect(errorInstallLayout.containerRect.left).toBeGreaterThanOrEqual(0)

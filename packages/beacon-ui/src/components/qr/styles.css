@@ -148,3 +148,38 @@
     font-size: 0.75em;
   }
 }
+
+.qr-mobile {
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  border: none;
+  padding-block: 0.5em;
+}
+
+.qr-mobile .qr-right,
+.qr-mobile .qr-svg-wrapper {
+  max-width: 100%;
+}
+
+.qr-mobile .qr-svg-wrapper svg {
+  display: block;
+  width: min(300px, 55svh);
+  max-width: 100%;
+  height: auto;
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .qr-mobile {
+    flex-direction: row;
+  }
+
+  .qr-mobile .qr-left {
+    height: auto;
+  }
+
+  .qr-mobile .qr-right {
+    flex-shrink: 0;
+  }
+}

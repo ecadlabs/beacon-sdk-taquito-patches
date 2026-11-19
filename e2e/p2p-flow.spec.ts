@@ -197,7 +197,9 @@ test('@extended should disconnect on tab1 and reconnect on tab2', async () => {
   await dapp.click('#sendToSelf')
 
   await dapp.waitForSelector('p.toast-label', { state: 'visible', timeout: 30_000 })
-  await dapp.waitForSelector('div:has-text("Aborted")', { state: 'visible', timeout: 30_000 })
+  await expect(
+    dapp.locator('beacon-toast .toast-action-label').filter({ hasText: /^Aborted$/ })
+  ).toBeVisible()
 })
 
 test('@extended should disconnect on tab2 and reconnect on tab3', async () => {
@@ -263,5 +265,7 @@ test('@extended should disconnect on tab2 and reconnect on tab3', async () => {
   await dapp2.click('#sendToSelf')
 
   await dapp2.waitForSelector('p.toast-label', { state: 'visible', timeout: 30_000 })
-  await dapp2.waitForSelector('div:has-text("Aborted")', { state: 'visible', timeout: 30_000 })
+  await expect(
+    dapp2.locator('beacon-toast .toast-action-label').filter({ hasText: /^Aborted$/ })
+  ).toBeVisible()
 })

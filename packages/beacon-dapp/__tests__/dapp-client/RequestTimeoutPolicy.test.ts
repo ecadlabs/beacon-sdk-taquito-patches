@@ -572,6 +572,8 @@ describe('Request timeout policy', () => {
             : BeaconEvent.OPERATION_REQUEST_ERROR,
           unexpected
         )
+        const timerStarts = vi.spyOn(console, 'time').mockImplementation(() => {})
+        const timerEnds = vi.spyOn(console, 'timeEnd').mockImplementation(() => {})
         const signCase: RequestCase = { kind: 'sign', version: '2' }
         const signOutcome = observe(publicRequest(signCase))
         await vi.advanceTimersByTimeAsync(0)
@@ -615,6 +617,10 @@ describe('Request timeout policy', () => {
           receivedAt: epoch + (reverse ? 0 : 100)
         })
         expect(unexpected).not.toHaveBeenCalled()
+        const started = timerStarts.mock.calls.map(([label]) => label)
+        const ended = timerEnds.mock.calls.map(([label]) => label)
+        expect(new Set(started).size).toBe(2)
+        expect(ended.sort()).toEqual(started.sort())
       }
     )
 

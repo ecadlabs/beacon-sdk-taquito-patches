@@ -95,6 +95,11 @@ for (const dirName of packageDirs) {
   const packageJson = JSON.parse(readFileSync(path.join(packageDir, 'package.json'), 'utf8'))
   const readmePath = path.join(packageDir, 'README.md')
 
+  const guide =
+    dirName === 'beacon-dapp'
+      ? '\n' + readFileSync(new URL('./readme-sections/beacon-dapp.md', import.meta.url), 'utf8')
+      : ''
+
   mkdirSync(packageDir, { recursive: true })
   writeFileSync(
     readmePath,
@@ -102,7 +107,7 @@ for (const dirName of packageDirs) {
       packageName: packageJson.name,
       description: packageJson.description,
       dirName
-    }),
+    }) + guide,
     'utf8'
   )
 }

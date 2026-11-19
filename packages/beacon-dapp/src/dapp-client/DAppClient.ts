@@ -202,6 +202,14 @@ interface RequestHandle {
 }
 
 const logger = new Logger('DAppClient')
+let requestTimerSequence = 0
+
+function startRequestTimer(method: 'makeRequest' | 'makeRequestV3'): string {
+  const label = `${method} ${++requestTimerSequence}`
+  logger.time(true, label)
+
+  return label
+}
 // Only permission requests get a default deadline. Beacon cannot cancel a request at the wallet,
 // so a timed-out operation or signature can still complete there, and a retry can pay twice.
 const DEFAULT_PERMISSION_TIMEOUT_MS = 60_000
@@ -3183,8 +3191,7 @@ export class DAppClient extends Client {
 
     logger.log('REQUESTION PERMIMISSION V3', 'xxx', request)
 
-    const logId = `makeRequestV3 ${Date.now()}`
-    logger.time(true, logId)
+    const logId = startRequestTimer('makeRequestV3')
 
     return this.runPermissionRequest(request, logId, async (owner) => {
       const { message: response, connectionInfo } = await this.makeRequestV3<
@@ -3288,12 +3295,11 @@ export class DAppClient extends Client {
       accountId: activeAccount.accountIdentifier
     }
 
-    const logId = `makeRequestV3 ${Date.now()}`
-    logger.time(true, logId)
     const res = (await this.checkMakeRequest())
       ? this.makeRequestV3<BlockchainRequestV3, BeaconMessageWrapper<BlockchainResponseV3>>(request)
       : this.makeRequestBC<BlockchainRequestV3, BeaconMessageWrapper<BlockchainResponseV3>>(request)
 
+    const logId = startRequestTimer('makeRequestV3')
     let resolved
     try {
       resolved = await res
@@ -3301,12 +3307,12 @@ export class DAppClient extends Client {
       await this.runRequestErrorSideEffects(request, requestError, logId)
       throw this.toPublicError(requestError)
     }
+    logger.time(false, logId)
+
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
     }
     const { message: response, connectionInfo } = resolved
-
-    logger.time(false, logId)
 
     await blockchain.handleResponse({
       request,
@@ -3378,8 +3384,7 @@ export class DAppClient extends Client {
 
     this.analytics.track('event', 'DAppClient', 'Permission requested')
 
-    const logId = `makeRequest ${Date.now()}`
-    logger.time(true, logId)
+    const logId = startRequestTimer('makeRequest')
 
     return this.runPermissionRequest(request, logId, async (owner) => {
       const resolved =
@@ -3491,12 +3496,11 @@ export class DAppClient extends Client {
       contractAddress: activeAccount.address,
       payload: input.payload
     }
-    const logId = `makeRequest ${Date.now()}`
-    logger.time(true, logId)
     const res = (await this.checkMakeRequest())
       ? this.makeRequest<ProofOfEventChallengeRequest, ProofOfEventChallengeResponse>(request)
       : this.makeRequestBC<ProofOfEventChallengeRequest, ProofOfEventChallengeResponse>(request)
 
+    const logId = startRequestTimer('makeRequest')
     let resolved
     try {
       resolved = await res
@@ -3504,12 +3508,12 @@ export class DAppClient extends Client {
       await this.runRequestErrorSideEffects(request, requestError, logId)
       throw this.toPublicError(requestError)
     }
+    logger.time(false, logId)
+
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
     }
     const { message, connectionInfo } = resolved
-
-    logger.time(false, logId)
 
     this.analytics.track(
       'event',
@@ -3574,9 +3578,6 @@ export class DAppClient extends Client {
       contractAddress: activeAccount.address,
       ...input
     }
-    const logId = `makeRequest ${Date.now()}`
-    logger.time(true, logId)
-
     const res = (await this.checkMakeRequest())
       ? this.makeRequest<
           SimulatedProofOfEventChallengeRequest,
@@ -3587,6 +3588,7 @@ export class DAppClient extends Client {
           SimulatedProofOfEventChallengeResponse
         >(request)
 
+    const logId = startRequestTimer('makeRequest')
     let resolved
     try {
       resolved = await res
@@ -3594,12 +3596,12 @@ export class DAppClient extends Client {
       await this.runRequestErrorSideEffects(request, requestError, logId)
       throw this.toPublicError(requestError)
     }
+    logger.time(false, logId)
+
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
     }
     const { message, connectionInfo } = resolved
-
-    logger.time(false, logId)
     this.analytics.track(
       'event',
       'DAppClient',
@@ -3695,12 +3697,11 @@ export class DAppClient extends Client {
       payload,
       sourceAddress: input.sourceAddress || activeAccount.address
     }
-    const logId = `makeRequest ${Date.now()}`
-    logger.time(true, logId)
     const res = (await this.checkMakeRequest())
       ? this.makeRequest<SignPayloadRequest, SignPayloadResponse>(request)
       : this.makeRequestBC<SignPayloadRequest, SignPayloadResponse>(request)
 
+    const logId = startRequestTimer('makeRequest')
     let resolved
     try {
       resolved = await res
@@ -3708,12 +3709,12 @@ export class DAppClient extends Client {
       await this.runRequestErrorSideEffects(request, requestError, logId)
       throw this.toPublicError(requestError)
     }
+    logger.time(false, logId)
+
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
     }
     const { message, connectionInfo } = resolved
-
-    logger.time(false, logId)
 
     await this.notifySuccess(
       request,
@@ -3813,13 +3814,11 @@ export class DAppClient extends Client {
     }
 
     this.analytics.track('event', 'DAppClient', 'Operation requested')
-    const logId = `makeRequest ${Date.now()}`
-    logger.time(true, logId)
-
     const res = (await this.checkMakeRequest())
       ? this.makeRequest<OperationRequest, OperationResponse>(request)
       : this.makeRequestBC<OperationRequest, OperationResponse>(request)
 
+    const logId = startRequestTimer('makeRequest')
     let resolved
     try {
       resolved = await res
@@ -3827,12 +3826,12 @@ export class DAppClient extends Client {
       await this.runRequestErrorSideEffects(request, requestError, logId)
       throw this.toPublicError(requestError)
     }
+    logger.time(false, logId)
+
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
     }
     const { message, connectionInfo } = resolved
-
-    logger.time(false, logId)
 
     await this.notifySuccess(
       request,
@@ -3882,12 +3881,11 @@ export class DAppClient extends Client {
     }
 
     this.analytics.track('event', 'DAppClient', 'Broadcast requested')
-    const logId = `makeRequest ${Date.now()}`
-    logger.time(true, logId)
     const res = (await this.checkMakeRequest())
       ? this.makeRequest<BroadcastRequest, BroadcastResponse>(request)
       : this.makeRequestBC<BroadcastRequest, BroadcastResponse>(request)
 
+    const logId = startRequestTimer('makeRequest')
     let resolved
     try {
       resolved = await res
@@ -3895,12 +3893,12 @@ export class DAppClient extends Client {
       await this.runRequestErrorSideEffects(request, requestError, logId)
       throw this.toPublicError(requestError)
     }
+    logger.time(false, logId)
+
     if (!resolved) {
       throw new Error('Internal error: makeRequest returned no result')
     }
     const { message, connectionInfo } = resolved
-
-    logger.time(false, logId)
 
     await this.notifySuccess(
       request,
