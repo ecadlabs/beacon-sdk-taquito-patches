@@ -395,7 +395,6 @@ export interface BeaconEventType {
  * Show a "Request sent" toast
  */
 const showSentToast = async (data: RequestSentInfo): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   let openWalletAction
   const actions: ToastAction[] = []
   if (data.walletInfo.deeplink) {
@@ -415,12 +414,18 @@ const showSentToast = async (data: RequestSentInfo): Promise<void> => {
     }
   }
   actions.push({
-    text: dapp.noAnswerFromWallet,
+    get text() {
+      return getBeaconMessages().dapp.noAnswerFromWallet
+    },
     isBold: true
   })
   actions.push({
-    text: dapp.walletNotReceivingRequest,
-    actionText: dapp.resetConnection,
+    get text() {
+      return getBeaconMessages().dapp.walletNotReceivingRequest
+    },
+    get actionText() {
+      return getBeaconMessages().dapp.resetConnection
+    },
     actionCallback: async (): Promise<void> => {
       closeToast()
       // eslint-disable-next-line @typescript-eslint/unbound-method
@@ -433,7 +438,9 @@ const showSentToast = async (data: RequestSentInfo): Promise<void> => {
   })
 
   openToast({
-    body: dapp.requestSent,
+    get body() {
+      return getBeaconMessages().dapp.requestSent
+    },
     walletInfo: data.walletInfo,
     state: 'loading',
     timer: isMobileOS(window) ? SUCCESS_TIMER : 0,
@@ -443,19 +450,22 @@ const showSentToast = async (data: RequestSentInfo): Promise<void> => {
 }
 
 const showAcknowledgedToast = async (data: AcknowledgeInfo): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   openToast({
-    body: dapp.awaitingConfirmation,
+    get body() {
+      return getBeaconMessages().dapp.awaitingConfirmation
+    },
     state: 'acknowledge',
     walletInfo: data.walletInfo
   })
 }
 
 const showPrepare = async (data: { walletInfo?: WalletInfo }): Promise<void> => {
-  const { dapp } = getBeaconMessages()
-  const text = data.walletInfo ? dapp.preparingRequestForWallet : dapp.preparingRequest
   openToast({
-    body: text,
+    get body() {
+      const { dapp } = getBeaconMessages()
+
+      return data.walletInfo ? dapp.preparingRequestForWallet : dapp.preparingRequest
+    },
     state: 'prepare',
     walletInfo: data.walletInfo
   })
@@ -475,10 +485,13 @@ const hideUI = (elements?: ('alert' | 'toast')[]) => {
  * Show a "No Permission" alert
  */
 const showNoPermissionAlert = async (): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   openAlert({
-    title: dapp.noPermissionTitle,
-    body: dapp.noPermissionBody
+    get title() {
+      return getBeaconMessages().dapp.noPermissionTitle
+    },
+    get body() {
+      return getBeaconMessages().dapp.noPermissionBody
+    }
   })
 }
 
@@ -486,10 +499,13 @@ const showNoPermissionAlert = async (): Promise<void> => {
  * Show an "Invalid state" alert
  */
 const showInvalidActiveAccountState = async (): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   openAlert({
-    title: dapp.invalidStateTitle,
-    body: dapp.invalidStateBody
+    get title() {
+      return getBeaconMessages().dapp.invalidStateTitle
+    },
+    get body() {
+      return getBeaconMessages().dapp.invalidStateBody
+    }
   })
 }
 
@@ -505,10 +521,13 @@ const showInvalidAccountDeactivated = async (
     return
   }
 
-  const { dapp } = getBeaconMessages()
   openAlert({
-    title: dapp.errorTitle,
-    body: dapp.sessionExpiredBody
+    get title() {
+      return getBeaconMessages().dapp.errorTitle
+    },
+    get body() {
+      return getBeaconMessages().dapp.sessionExpiredBody
+    }
   })
 }
 
@@ -516,10 +535,11 @@ const showInvalidAccountDeactivated = async (
  * Show an "Invalid state" alert
  */
 const showGenericErrorAlert = async (errorMessage: string): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   openAlert({
     title: `${errorMessage}`,
-    body: dapp.pleaseTryAgain
+    get body() {
+      return getBeaconMessages().dapp.pleaseTryAgain
+    }
   })
 }
 
@@ -555,15 +575,17 @@ const showErrorToast = async (
   },
   buttons?: AlertButton[]
 ): Promise<void> => {
-  const { dapp } = getBeaconMessages()
-  const error = response.errorResponse.errorType
-    ? getError(response.errorResponse.errorType, response.errorResponse.errorData)
-    : new UnknownBeaconError()
+  const resolveError = () =>
+    response.errorResponse.errorType
+      ? getError(response.errorResponse.errorType, response.errorResponse.errorData)
+      : new UnknownBeaconError()
   const local = response.errorResponse.errorOrigin === 'local'
 
   const actions: ToastAction[] = [
     {
-      text: error.title,
+      get text() {
+        return resolveError().title
+      },
       isBold: true
     }
   ]
@@ -571,7 +593,11 @@ const showErrorToast = async (
   // A local timeout is not an answer: the wallet may still approve the request, so the user
   // needs the explanation before deciding whether to retry.
   if (local && response.errorResponse.errorType === BeaconErrorType.PEER_UNREACHABLE) {
-    actions.push({ text: error.description })
+    actions.push({
+      get text() {
+        return resolveError().description
+      }
+    })
   }
 
   if (
@@ -583,18 +609,32 @@ const showErrorToast = async (
       response.errorMessages
     )
     actions.push(
-      contractMessage ? { text: contractMessage, isBold: true } : { text: error.description }
+      contractMessage
+        ? { text: contractMessage, isBold: true }
+        : {
+            get text() {
+              return resolveError().description
+            }
+          }
     )
 
     actions.push({
       text: '',
-      actionText: dapp.showDetails,
+      get actionText() {
+        return getBeaconMessages().dapp.showDetails
+      },
       actionCallback: async (): Promise<void> => {
         closeToast()
         openAlert({
-          title: error.title,
-          body: error.fullDescription.description,
-          data: error.fullDescription.data,
+          get title() {
+            return resolveError().title
+          },
+          get body() {
+            return resolveError().fullDescription.description
+          },
+          get data() {
+            return resolveError().fullDescription.data
+          },
           buttons
         })
       }
@@ -602,7 +642,9 @@ const showErrorToast = async (
   }
 
   openToast({
-    body: errorToastBody(response.errorResponse.errorType, local),
+    get body() {
+      return errorToastBody(response.errorResponse.errorType, local)
+    },
     timer:
       response.errorResponse.errorType === BeaconErrorType.ABORTED_ERROR
         ? SUCCESS_TIMER
@@ -617,11 +659,21 @@ const showErrorToast = async (
  * Show a rate limit reached toast
  */
 const showRateLimitReached = async (): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   openAlert({
-    title: dapp.errorTitle,
-    body: dapp.rateLimitReachedBody,
-    buttons: [{ text: dapp.done, style: 'outline' }],
+    get title() {
+      return getBeaconMessages().dapp.errorTitle
+    },
+    get body() {
+      return getBeaconMessages().dapp.rateLimitReachedBody
+    },
+    buttons: [
+      {
+        get text() {
+          return getBeaconMessages().dapp.done
+        },
+        style: 'outline'
+      }
+    ],
     timer: 3000
   })
 }
@@ -634,11 +686,21 @@ const showExtensionConnectedAlert = () => {
 }
 
 const showRelayerErrorAlert = async (): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   openAlert({
-    title: dapp.errorTitle,
-    body: dapp.relayerErrorBody,
-    buttons: [{ text: dapp.done, style: 'outline' }],
+    get title() {
+      return getBeaconMessages().dapp.errorTitle
+    },
+    get body() {
+      return getBeaconMessages().dapp.relayerErrorBody
+    },
+    buttons: [
+      {
+        get text() {
+          return getBeaconMessages().dapp.done
+        },
+        style: 'outline'
+      }
+    ],
     timer: 1500
   })
 }
@@ -650,19 +712,24 @@ const showLateResponseToast = async (data: LateResponseInfo): Promise<void> => {
   if (data.kind !== 'success' || !data.transactionHash) {
     return
   }
-  const { dapp } = getBeaconMessages()
   const hash = data.transactionHash
   const broadcast = data.requestType === BeaconMessageType.BroadcastRequest
 
   openToast({
-    body: broadcast ? dapp.lateBroadcastToast : dapp.lateOperationToast,
+    get body() {
+      const { dapp } = getBeaconMessages()
+
+      return broadcast ? dapp.lateBroadcastToast : dapp.lateOperationToast
+    },
     state: 'finished',
     walletInfo: data.walletInfo,
     actions: [
       {
         text: shortenString(hash),
         isBold: true,
-        actionText: dapp.copyToClipboard,
+        get actionText() {
+          return getBeaconMessages().dapp.copyToClipboard
+        },
         actionCallback: async (): Promise<void> => {
           navigator.clipboard.writeText(hash).then(
             () => logger.log('showLateResponseToast', 'Copying to clipboard was successful!'),
@@ -688,14 +755,22 @@ const showChannelClosedAlert = async (): Promise<void> => {
 const showInternalErrorAlert = async (
   data: BeaconEventType[BeaconEvent.INTERNAL_ERROR]
 ): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   const buttons: AlertButton[] = [...(data.buttons ?? [])]
 
-  buttons.push({ text: dapp.done, style: 'outline' })
+  buttons.push({
+    get text() {
+      return getBeaconMessages().dapp.done
+    },
+    style: 'outline'
+  })
 
   const alertConfig: AlertConfig = {
-    title: dapp.internalErrorTitle,
-    body: data.text,
+    get title() {
+      return getBeaconMessages().dapp.internalErrorTitle
+    },
+    get body() {
+      return data.text
+    },
     buttons
   }
   openAlert(alertConfig)
@@ -708,9 +783,10 @@ const showInternalErrorAlert = async (
  */
 const showPairAlert = async (data: BeaconEventType[BeaconEvent.PAIR_INIT]): Promise<void> => {
   logger.log('showPairAlert')
-  const { dapp } = getBeaconMessages()
   const alertConfig: AlertConfig = {
-    title: dapp.choosePreferredWallet,
+    get title() {
+      return getBeaconMessages().dapp.choosePreferredWallet
+    },
     body: `<p></p>`,
     pairingPayload: {
       p2pSyncCode: data.p2pPeerInfo,
@@ -735,11 +811,12 @@ const showPairAlert = async (data: BeaconEventType[BeaconEvent.PAIR_INIT]): Prom
 const showPermissionSuccessAlert = async (
   data: BeaconEventType[BeaconEvent.PERMISSION_REQUEST_SUCCESS]
 ): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   const address = data.protocolVersion === '3' ? data.account.address : data.output.address
   const actions: ToastAction[] = [
     {
-      text: dapp.addressLabel,
+      get text() {
+        return getBeaconMessages().dapp.addressLabel
+      },
       actionText: shortenString(address),
       isBold: true
     }
@@ -749,17 +826,23 @@ const showPermissionSuccessAlert = async (
   if (data.protocolVersion !== '3') {
     const { output } = data
     actions.push({
-      text: dapp.networkLabel,
+      get text() {
+        return getBeaconMessages().dapp.networkLabel
+      },
       actionText: `${output.network.type}`
     })
     actions.push({
-      text: dapp.permissionsLabel,
+      get text() {
+        return getBeaconMessages().dapp.permissionsLabel
+      },
       actionText: output.scopes.join(', ')
     })
   }
 
   openToast({
-    body: dapp.permissionGrantedToast,
+    get body() {
+      return getBeaconMessages().dapp.permissionGrantedToast
+    },
     timer: SUCCESS_TIMER,
     walletInfo: data.walletInfo,
     state: 'finished',
@@ -770,21 +853,28 @@ const showPermissionSuccessAlert = async (
 const showProofOfEventChallengeSuccessAlert = async (
   data: BeaconEventType[BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS]
 ): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   const { output } = data
 
   openToast({
-    body: output.isAccepted ? dapp.challengeAcceptedToast : dapp.challengeRefusedToast,
+    get body() {
+      const { dapp } = getBeaconMessages()
+
+      return output.isAccepted ? dapp.challengeAcceptedToast : dapp.challengeRefusedToast
+    },
     timer: SUCCESS_TIMER,
     walletInfo: data.walletInfo,
     state: 'finished',
     actions: output.isAccepted
       ? [
           {
-            text: interpolateBeaconMessage(dapp.payloadHashLabel, {
-              payloadHash: output.payloadHash
-            }),
-            actionText: dapp.copyToClipboard,
+            get text() {
+              return interpolateBeaconMessage(getBeaconMessages().dapp.payloadHashLabel, {
+                payloadHash: output.payloadHash
+              })
+            },
+            get actionText() {
+              return getBeaconMessages().dapp.copyToClipboard
+            },
             actionCallback: async (): Promise<void> => {
               navigator.clipboard.writeText(output.payloadHash).then(
                 () => {
@@ -805,19 +895,26 @@ const showProofOfEventChallengeSuccessAlert = async (
 const showSimulatedProofOfEventChallengeSuccessAlert = async (
   data: BeaconEventType[BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SUCCESS]
 ): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   const { output } = data
 
   openToast({
-    body: !output.errorMessage ? dapp.operationListReturnedToast : dapp.walletReturnedError,
+    get body() {
+      const { dapp } = getBeaconMessages()
+
+      return !output.errorMessage ? dapp.operationListReturnedToast : dapp.walletReturnedError
+    },
     timer: SUCCESS_TIMER,
     walletInfo: data.walletInfo,
     state: 'finished',
     actions: !output.errorMessage
       ? [
           {
-            text: dapp.operationListLabel,
-            actionText: dapp.copyToClipboard,
+            get text() {
+              return getBeaconMessages().dapp.operationListLabel
+            },
+            get actionText() {
+              return getBeaconMessages().dapp.copyToClipboard
+            },
             actionCallback: async (): Promise<void> => {
               navigator.clipboard.writeText(output.operationsList).then(
                 () => {
@@ -831,7 +928,14 @@ const showSimulatedProofOfEventChallengeSuccessAlert = async (
             }
           }
         ]
-      : [{ text: dapp.errorMessageLabel, actionText: output.errorMessage }]
+      : [
+          {
+            get text() {
+              return getBeaconMessages().dapp.errorMessageLabel
+            },
+            actionText: output.errorMessage
+          }
+        ]
   })
 }
 
@@ -843,11 +947,12 @@ const showSimulatedProofOfEventChallengeSuccessAlert = async (
 const showOperationSuccessAlert = async (
   data: BeaconEventType[BeaconEvent.OPERATION_REQUEST_SUCCESS]
 ): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   const { account, output, blockExplorer } = data
 
   openToast({
-    body: dapp.operationSubmittedToast,
+    get body() {
+      return getBeaconMessages().dapp.operationSubmittedToast
+    },
     timer: SUCCESS_TIMER,
     state: 'finished',
     walletInfo: data.walletInfo,
@@ -855,7 +960,9 @@ const showOperationSuccessAlert = async (
       {
         text: shortenString(output.transactionHash),
         isBold: true,
-        actionText: dapp.openBlockexplorer,
+        get actionText() {
+          return getBeaconMessages().dapp.openBlockexplorer
+        },
         actionLogo: 'external',
         actionCallback: async (): Promise<void> => {
           const link: string = await blockExplorer.getTransactionLink(
@@ -878,19 +985,24 @@ const showOperationSuccessAlert = async (
 const showSignSuccessAlert = async (
   data: BeaconEventType[BeaconEvent.SIGN_REQUEST_SUCCESS]
 ): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   const output = data.output
   openToast({
-    body: dapp.payloadSignedToast,
+    get body() {
+      return getBeaconMessages().dapp.payloadSignedToast
+    },
     timer: SUCCESS_TIMER,
     state: 'finished',
     walletInfo: data.walletInfo,
     actions: [
       {
-        text: interpolateBeaconMessage(dapp.signatureLabel, {
-          signature: shortenString(output.signature)
-        }),
-        actionText: dapp.copyToClipboard,
+        get text() {
+          return interpolateBeaconMessage(getBeaconMessages().dapp.signatureLabel, {
+            signature: shortenString(output.signature)
+          })
+        },
+        get actionText() {
+          return getBeaconMessages().dapp.copyToClipboard
+        },
         actionCallback: async (): Promise<void> => {
           navigator.clipboard.writeText(output.signature).then(
             () => {
@@ -947,9 +1059,10 @@ const showSignSuccessAlert = async (
 const showBlockchainRequestSuccessToast = async (
   data: BeaconEventType[BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]
 ): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   openToast({
-    body: dapp.blockchainRequestExecutedToast,
+    get body() {
+      return getBeaconMessages().dapp.blockchainRequestExecutedToast
+    },
     timer: SUCCESS_TIMER,
     state: 'finished',
     walletInfo: data.walletInfo
@@ -964,11 +1077,12 @@ const showBlockchainRequestSuccessToast = async (
 const showBroadcastSuccessAlert = async (
   data: BeaconEventType[BeaconEvent.BROADCAST_REQUEST_SUCCESS]
 ): Promise<void> => {
-  const { dapp } = getBeaconMessages()
   const { network, output, blockExplorer } = data
 
   openToast({
-    body: dapp.operationInjectedToast,
+    get body() {
+      return getBeaconMessages().dapp.operationInjectedToast
+    },
     timer: SUCCESS_TIMER,
     state: 'finished',
     walletInfo: data.walletInfo,
@@ -976,7 +1090,9 @@ const showBroadcastSuccessAlert = async (
       {
         text: shortenString(output.transactionHash),
         isBold: true,
-        actionText: dapp.openBlockexplorer,
+        get actionText() {
+          return getBeaconMessages().dapp.openBlockexplorer
+        },
         actionLogo: 'external',
         actionCallback: async (): Promise<void> => {
           const link: string = await blockExplorer.getTransactionLink(

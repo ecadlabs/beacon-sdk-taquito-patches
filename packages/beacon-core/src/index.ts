@@ -71,7 +71,11 @@ export {
   jaMessages,
   arMessages,
   configureBeaconI18n,
+  detectBrowserLocale,
+  hasBuiltInLocale,
+  normalizeLocaleTag,
   resetBeaconI18n,
+  resolveBuiltInLocaleCatalog,
   subscribeBeaconI18n,
   setBeaconLocale,
   getBeaconLocale,
@@ -93,7 +97,11 @@ export {
   type BeaconTranslationOverrides,
   type BeaconDAppMessages,
   type BeaconUIMessages,
-  type BeaconAriaMessages
+  type BeaconAriaMessages,
+  type BeaconWalletTypeMessages,
+  type DeepPartial,
+  type DisplayableWalletConnectFailureReason,
+  type WalletConnectErrorCopy
 } from '@ecadlabs/beacon-types'
 
 // Transport

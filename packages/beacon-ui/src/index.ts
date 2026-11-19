@@ -15,7 +15,7 @@ export {
 
 export { closeToast, openToast } from './ui/toast'
 
-export { getColorMode, setColorMode } from './utils/colorMode'
+export { getColorMode, setColorMode, subscribeColorMode } from './utils/colorMode'
 
 export {
   isMobile,
@@ -30,6 +30,10 @@ export {
 
 export {
   configureBeaconI18n,
+  detectBrowserLocale,
+  hasBuiltInLocale,
+  normalizeLocaleTag,
+  resolveBuiltInLocaleCatalog,
   setBeaconLocale,
   getBeaconLocale,
   resolveBeaconLang,
@@ -38,15 +42,31 @@ export {
   setBeaconTranslations,
   getBeaconTranslations,
   getBeaconMessages,
+  getBeaconErrorCopy,
   interpolateBeaconMessage,
   resetBeaconI18n,
   subscribeBeaconI18n,
-  builtInLocales
+  builtInLocales,
+  frMessages,
+  esMessages,
+  deMessages,
+  jaMessages,
+  arMessages
 } from './i18n/messages'
 export type {
+  DisplayableWalletConnectFailureReason,
+  WalletConnectErrorCopy,
+  BeaconErrorCopy,
   BeaconI18nConfig,
+  BeaconLocaleMetadata,
+  BeaconLocaleStatus,
   BeaconResolvedDirection,
   BeaconTextDirection,
   BeaconLocaleMessages,
-  BeaconTranslationOverrides
+  BeaconTranslationOverrides,
+  BeaconDAppMessages,
+  BeaconUIMessages,
+  BeaconAriaMessages,
+  BeaconWalletTypeMessages,
+  DeepPartial
 } from './i18n/messages'

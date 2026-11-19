@@ -71,8 +71,18 @@ import {
   ConnectionInfo,
   PendingRequestInfo,
   Storage,
+  BeaconI18nConfig,
+  BeaconLocaleMessages,
+  BeaconResolvedDirection,
+  BeaconTextDirection,
+  BeaconTranslationOverrides,
+  builtInLocales,
+  getBeaconDirection,
+  getBeaconLocale,
   getBeaconMessages,
+  getBeaconTranslations,
   registerBeaconClientI18n,
+  resolveBeaconLang,
   unregisterBeaconClientI18n
   // PermissionRequestV3
   // RequestEncryptPayloadInput,
@@ -533,6 +543,8 @@ export class DAppClient extends Client {
 
   private readonly i18nOwnerId: symbol = Symbol('BeaconDAppClientI18n')
 
+  private i18nReleased: boolean = false
+
   private readonly storageValidator: StorageValidator
 
   private debounceSetActiveAccount: boolean = false
@@ -592,11 +604,13 @@ export class DAppClient extends Client {
     )
     this.blockExplorer = config.blockExplorer ?? new TzktBlockExplorer()
     this.network = config.network ?? { type: config.preferredNetwork ?? NetworkType.MAINNET }
-    setColorMode(config.colorMode ?? ColorMode.LIGHT)
+    if (config.colorMode !== undefined) {
+      setColorMode(config.colorMode)
+    }
     registerBeaconClientI18n(this.i18nOwnerId, {
-      locale: config.locale,
-      direction: config.direction,
-      translations: config.translations
+      ...(config.locale !== undefined ? { locale: config.locale } : {}),
+      ...(config.direction !== undefined ? { direction: config.direction } : {}),
+      ...(config.translations !== undefined ? { translations: config.translations } : {})
     })
 
     this.disclaimerText = config.disclaimerText
@@ -2654,6 +2668,92 @@ export class DAppClient extends Client {
   }
 
   /**
+   * @internal
+   * Release this client's i18n registration when the singleton is replaced via `getDAppClientInstance(config, true)`.
+   */
+  public releaseI18n(): void {
+    this.i18nReleased = true
+    unregisterBeaconClientI18n(this.i18nOwnerId)
+  }
+
+  /**
+   * Configure i18n locale, text direction, and/or custom translation overrides on Beacon's shared UI i18n state,
+   * scoped to this client's lifecycle.
+   */
+  public configureI18n(config: BeaconI18nConfig): void {
+    if (this.destroyed || this.i18nReleased) {
+      return
+    }
+    registerBeaconClientI18n(this.i18nOwnerId, config)
+  }
+
+  /**
+   * Set or clear the active BCP-47 locale override on Beacon's shared UI i18n state, scoped to this client's lifecycle.
+   * Passing `undefined` clears this client's override and reverts to global baseline configuration or browser/document language detection.
+   */
+  public setLocale(locale?: string): void {
+    if (this.destroyed || this.i18nReleased) {
+      return
+    }
+    registerBeaconClientI18n(this.i18nOwnerId, { locale })
+  }
+
+  /**
+   * Return the effective active locale override across Beacon's i18n state, or `undefined` when using browser/document detection.
+   */
+  public getLocale(): string | undefined {
+    return getBeaconLocale()
+  }
+
+  /**
+   * Return the effective resolved BCP-47 language tag (from explicit configuration, browser/document detection, or `'en'` fallback).
+   */
+  public resolveLang(documentLang?: string): string {
+    return resolveBeaconLang(documentLang)
+  }
+
+  /**
+   * Set the text direction override (`'ltr' | 'rtl' | 'auto'`) on Beacon's shared UI i18n state, scoped to this client's lifecycle.
+   */
+  public setDirection(direction?: BeaconTextDirection): void {
+    if (this.destroyed || this.i18nReleased) {
+      return
+    }
+    registerBeaconClientI18n(this.i18nOwnerId, { direction })
+  }
+
+  /**
+   * Return the effective resolved text direction (`'ltr' | 'rtl'`).
+   */
+  public getDirection(documentDir?: string): BeaconResolvedDirection {
+    return getBeaconDirection(documentDir)
+  }
+
+  /**
+   * Set or clear custom partial translation overrides on Beacon's shared UI i18n state, scoped to this client's lifecycle.
+   */
+  public setTranslations(translations?: BeaconTranslationOverrides): void {
+    if (this.destroyed || this.i18nReleased) {
+      return
+    }
+    registerBeaconClientI18n(this.i18nOwnerId, { translations })
+  }
+
+  /**
+   * Return the effective active custom translation overrides, if any.
+   */
+  public getTranslations(): BeaconTranslationOverrides | undefined {
+    return getBeaconTranslations()
+  }
+
+  /**
+   * Return the effective active localized message catalog (including any merged custom translation overrides).
+   */
+  public getMessages(): BeaconLocaleMessages {
+    return getBeaconMessages()
+  }
+
+  /**
    * @deprecated
    *
    * Use getOwnAppMetadata instead
@@ -3927,7 +4027,11 @@ export class DAppClient extends Client {
   ): Promise<void> {
     const localizedMessage = getBeaconMessages().dapp[errorKey]
 
-    await this.events.emit(BeaconEvent.INTERNAL_ERROR, { text: localizedMessage })
+    await this.events.emit(BeaconEvent.INTERNAL_ERROR, {
+      get text() {
+        return getBeaconMessages().dapp[errorKey]
+      }
+    })
     if (errorKey === 'noActiveAccount' || errorKey === 'noActiveAccountSet') {
       throw new NoAddressBeaconError({
         description: localizedMessage,
@@ -4094,7 +4198,10 @@ export class DAppClient extends Client {
       beaconError instanceof ParametersInvalidBeaconError ||
       (beaconError instanceof UnknownBeaconError &&
         (beaconError.description === 'BeaconID not defined' ||
-          beaconError.description === getBeaconMessages().dapp.beaconIdNotDefined))
+          beaconError.description === getBeaconMessages().dapp.beaconIdNotDefined ||
+          Object.values(builtInLocales).some(
+            (catalog) => beaconError.description === catalog.dapp.beaconIdNotDefined
+          )))
     if (beaconError.errorType && !isPreconditionError) {
       const errorResponse = errorEventResponse(beaconError)
       const buttons: AlertButton[] = []
@@ -4471,13 +4578,16 @@ export class DAppClient extends Client {
     if (owned && !this.requestTracker.reject(owned.key, sendError)) {
       return
     }
-    const dappMessages = getBeaconMessages().dapp
     this.events
       .emit(BeaconEvent.INTERNAL_ERROR, {
-        text: dappMessages.unableToSendMessage,
+        get text() {
+          return getBeaconMessages().dapp.unableToSendMessage
+        },
         buttons: [
           {
-            text: dappMessages.resetConnection,
+            get text() {
+              return getBeaconMessages().dapp.resetConnection
+            },
             actionCallback: async () => {
               closeToast()
               await this.disconnect()

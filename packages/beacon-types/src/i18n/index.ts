@@ -55,20 +55,23 @@ const RTL_PRIMARY_SUBTAGS = new Set([
   'yi'
 ])
 
+interface SequencedValue<T> {
+  readonly value: T
+  readonly seq: number
+}
+
 interface BeaconClientI18nEntry {
   readonly ownerId: symbol
-  readonly locale?: string
-  readonly direction?: BeaconTextDirection
-  readonly translations?: BeaconTranslationOverrides
+  readonly locale?: SequencedValue<string>
+  readonly direction?: SequencedValue<BeaconTextDirection>
+  readonly translations?: SequencedValue<BeaconTranslationOverrides>
 }
 
 interface BeaconI18nSharedState {
-  globalLocale?: string
-  globalDirection?: BeaconTextDirection
-  globalOverrides?: BeaconTranslationOverrides
-  globalLocaleTakesPrecedence: boolean
-  globalDirectionTakesPrecedence: boolean
-  globalOverridesTakesPrecedence: boolean
+  seq: number
+  globalLocale?: SequencedValue<string>
+  globalDirection?: SequencedValue<BeaconTextDirection>
+  globalOverrides?: SequencedValue<BeaconTranslationOverrides>
   clientStack: BeaconClientI18nEntry[]
   listeners: Set<() => void>
 }
@@ -79,9 +82,7 @@ const getSharedState = (): BeaconI18nSharedState => {
   const host = globalThis as Record<symbol, BeaconI18nSharedState | undefined>
   if (!host[I18N_GLOBAL_SYMBOL]) {
     host[I18N_GLOBAL_SYMBOL] = {
-      globalLocaleTakesPrecedence: false,
-      globalDirectionTakesPrecedence: false,
-      globalOverridesTakesPrecedence: false,
+      seq: 0,
       clientStack: [],
       listeners: new Set()
     }
@@ -109,13 +110,29 @@ export const subscribeBeaconI18n = (listener: () => void): (() => void) => {
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
+const hasNonEmptyTranslations = (value: unknown): boolean => {
+  if (!isPlainObject(value)) {
+    return false
+  }
+  for (const entry of Object.values(value)) {
+    if (typeof entry === 'string' && entry.trim().length > 0) {
+      return true
+    }
+    if (isPlainObject(entry) && hasNonEmptyTranslations(entry)) {
+      return true
+    }
+  }
+
+  return false
+}
+
 const deepMergeRecord = <T extends object>(base: T, overrides?: DeepPartial<T>): T => {
   if (!overrides) {
     return base
   }
   const clone: Record<string, unknown> = { ...(base as Record<string, unknown>) }
   for (const [key, value] of Object.entries(overrides as Record<string, unknown>)) {
-    if (value === undefined) {
+    if (value === undefined || (typeof value === 'string' && value.trim().length === 0)) {
       continue
     }
     const existing = clone[key]
@@ -228,49 +245,103 @@ const getDocumentLang = (documentLang?: string): string | undefined =>
     documentLang ?? (typeof document !== 'undefined' ? document.documentElement?.lang : undefined)
   )
 
-const getEffectiveLocale = (): string | undefined => {
-  const state = getSharedState()
-  if (state.globalLocaleTakesPrecedence) {
-    return state.globalLocale
+const isEnglishLocaleTag = (locale: string): boolean => {
+  const lower = locale.toLowerCase()
+
+  return lower === 'en' || lower.startsWith('en-')
+}
+
+const getNavigatorLocales = (): string[] => {
+  if (typeof document === 'undefined' || typeof navigator === 'undefined') {
+    return []
   }
-  for (let i = state.clientStack.length - 1; i >= 0; i--) {
-    const entry = state.clientStack[i]
-    if (entry?.locale !== undefined) {
-      return entry.locale
+
+  const rawCandidates = [
+    ...(Array.isArray(navigator.languages) ? navigator.languages : []),
+    ...(typeof navigator.language === 'string' ? [navigator.language] : [])
+  ]
+
+  const seen = new Set<string>()
+  const normalized: string[] = []
+  for (const candidate of rawCandidates) {
+    const tag = normalizeLocaleTag(candidate)
+    if (tag && !seen.has(tag)) {
+      seen.add(tag)
+      normalized.push(tag)
     }
   }
 
-  return state.globalLocale
+  return normalized
+}
+
+export const detectBrowserLocale = (
+  _translations?: BeaconTranslationOverrides,
+  documentLang?: string
+): string | undefined => {
+  const docLang = getDocumentLang(documentLang)
+  const browserCandidates = getNavigatorLocales()
+
+  if (docLang && !isEnglishLocaleTag(docLang)) {
+    if (hasBuiltInLocale(docLang)) {
+      return docLang
+    }
+    const firstSupportedBrowserMatch = browserCandidates.find((candidate) =>
+      hasBuiltInLocale(candidate)
+    )
+    if (firstSupportedBrowserMatch) {
+      return isEnglishLocaleTag(firstSupportedBrowserMatch)
+        ? enMessages.meta.locale
+        : firstSupportedBrowserMatch
+    }
+
+    return undefined
+  }
+
+  for (const candidate of browserCandidates) {
+    if (hasBuiltInLocale(candidate)) {
+      return candidate
+    }
+  }
+
+  if (docLang && hasBuiltInLocale(docLang)) {
+    return docLang
+  }
+
+  return undefined
+}
+
+const pickMostRecent = <T>(
+  globalCandidate: SequencedValue<T> | undefined,
+  stack: readonly BeaconClientI18nEntry[],
+  selector: (entry: BeaconClientI18nEntry) => SequencedValue<T> | undefined
+): T | undefined => {
+  let best = globalCandidate
+  for (const entry of stack) {
+    const candidate = selector(entry)
+    if (candidate && (!best || candidate.seq >= best.seq)) {
+      best = candidate
+    }
+  }
+
+  return best?.value
+}
+
+const getEffectiveLocale = (): string | undefined => {
+  const state = getSharedState()
+
+  return pickMostRecent(state.globalLocale, state.clientStack, (entry) => entry.locale)
 }
 
 const getEffectiveDirection = (): BeaconTextDirection | undefined => {
   const state = getSharedState()
-  if (state.globalDirectionTakesPrecedence) {
-    return state.globalDirection
-  }
-  for (let i = state.clientStack.length - 1; i >= 0; i--) {
-    const entry = state.clientStack[i]
-    if (entry?.direction !== undefined) {
-      return entry.direction
-    }
-  }
 
-  return state.globalDirection
+  return pickMostRecent(state.globalDirection, state.clientStack, (entry) => entry.direction)
 }
 
 const getEffectiveOverrides = (): BeaconTranslationOverrides | undefined => {
   const state = getSharedState()
-  if (state.globalOverridesTakesPrecedence) {
-    return state.globalOverrides
-  }
-  for (let i = state.clientStack.length - 1; i >= 0; i--) {
-    const entry = state.clientStack[i]
-    if (entry?.translations !== undefined) {
-      return entry.translations
-    }
-  }
 
-  return state.globalOverrides
+  return pickMostRecent(state.globalOverrides, state.clientStack, (entry) => entry.translations)
 }
 
 /**
@@ -286,21 +357,34 @@ const getEffectiveOverrides = (): BeaconTranslationOverrides | undefined => {
  */
 export const registerBeaconClientI18n = (ownerId: symbol, config: BeaconI18nConfig): void => {
   const state = getSharedState()
-  const normalizedLocale = normalizeLocaleTag(config.locale)
-  if (normalizedLocale !== undefined) {
-    state.globalLocaleTakesPrecedence = false
+  const existing = state.clientStack.find((item) => item.ownerId === ownerId)
+
+  let nextLocale = existing?.locale
+  if ('locale' in config) {
+    const normalizedLocale = normalizeLocaleTag(config.locale)
+    nextLocale =
+      normalizedLocale !== undefined ? { value: normalizedLocale, seq: ++state.seq } : undefined
   }
-  if (config.direction !== undefined) {
-    state.globalDirectionTakesPrecedence = false
+
+  let nextDirection = existing?.direction
+  if ('direction' in config) {
+    nextDirection =
+      config.direction !== undefined ? { value: config.direction, seq: ++state.seq } : undefined
   }
-  if (config.translations !== undefined) {
-    state.globalOverridesTakesPrecedence = false
+
+  let nextTranslations = existing?.translations
+  if ('translations' in config) {
+    nextTranslations =
+      config.translations !== undefined
+        ? { value: config.translations, seq: ++state.seq }
+        : undefined
   }
+
   const entry: BeaconClientI18nEntry = {
     ownerId,
-    locale: normalizedLocale,
-    direction: config.direction,
-    translations: config.translations
+    locale: nextLocale,
+    direction: nextDirection,
+    translations: nextTranslations
   }
   state.clientStack = state.clientStack.filter((item) => item.ownerId !== ownerId)
   state.clientStack.push(entry)
@@ -315,16 +399,19 @@ export const activateBeaconClientI18n = (ownerId: symbol): void => {
   }
   const [entry] = state.clientStack.splice(index, 1)
   if (entry) {
-    if (entry.locale !== undefined) {
-      state.globalLocaleTakesPrecedence = false
-    }
-    if (entry.direction !== undefined) {
-      state.globalDirectionTakesPrecedence = false
-    }
-    if (entry.translations !== undefined) {
-      state.globalOverridesTakesPrecedence = false
-    }
-    state.clientStack.push(entry)
+    state.clientStack.push({
+      ownerId: entry.ownerId,
+      locale:
+        entry.locale !== undefined ? { value: entry.locale.value, seq: ++state.seq } : undefined,
+      direction:
+        entry.direction !== undefined
+          ? { value: entry.direction.value, seq: ++state.seq }
+          : undefined,
+      translations:
+        entry.translations !== undefined
+          ? { value: entry.translations.value, seq: ++state.seq }
+          : undefined
+    })
   }
   notifyListeners()
 }
@@ -341,36 +428,38 @@ export const unregisterBeaconClientI18n = (ownerId: symbol): void => {
 export const configureBeaconI18n = (config: BeaconI18nConfig): void => {
   const state = getSharedState()
   if ('locale' in config) {
-    state.globalLocale = normalizeLocaleTag(config.locale)
-    state.globalLocaleTakesPrecedence = true
+    const normalizedLocale = normalizeLocaleTag(config.locale)
+    state.globalLocale =
+      normalizedLocale !== undefined ? { value: normalizedLocale, seq: ++state.seq } : undefined
   }
   if ('direction' in config) {
-    state.globalDirection = config.direction
-    state.globalDirectionTakesPrecedence = true
+    state.globalDirection =
+      config.direction !== undefined ? { value: config.direction, seq: ++state.seq } : undefined
   }
   if ('translations' in config) {
-    state.globalOverrides = config.translations
-    state.globalOverridesTakesPrecedence = true
+    state.globalOverrides =
+      config.translations !== undefined
+        ? { value: config.translations, seq: ++state.seq }
+        : undefined
   }
   notifyListeners()
 }
 
 export const resetBeaconI18n = (): void => {
   const state = getSharedState()
+  state.seq = 0
   state.globalLocale = undefined
   state.globalDirection = undefined
   state.globalOverrides = undefined
-  state.globalLocaleTakesPrecedence = false
-  state.globalDirectionTakesPrecedence = false
-  state.globalOverridesTakesPrecedence = false
   state.clientStack = []
   notifyListeners()
 }
 
 export const setBeaconLocale = (locale?: string): void => {
   const state = getSharedState()
-  state.globalLocale = normalizeLocaleTag(locale)
-  state.globalLocaleTakesPrecedence = true
+  const normalizedLocale = normalizeLocaleTag(locale)
+  state.globalLocale =
+    normalizedLocale !== undefined ? { value: normalizedLocale, seq: ++state.seq } : undefined
   notifyListeners()
 }
 
@@ -379,17 +468,18 @@ export const getBeaconLocale = (): string | undefined => getEffectiveLocale()
 export const resolveBeaconLang = (documentLang?: string): string => {
   const effectiveLocale = getEffectiveLocale()
   const effectiveOverrides = getEffectiveOverrides()
+  const hasCustomTranslations = hasNonEmptyTranslations(effectiveOverrides)
   if (effectiveLocale) {
-    if (hasBuiltInLocale(effectiveLocale) || effectiveOverrides) {
+    if (hasBuiltInLocale(effectiveLocale) || hasCustomTranslations) {
       return effectiveLocale
     }
 
     return enMessages.meta.locale
   }
 
-  const docLang = getDocumentLang(documentLang)
-  if (docLang && (hasBuiltInLocale(docLang) || effectiveOverrides)) {
-    return docLang
+  const detectedLocale = detectBrowserLocale(effectiveOverrides, documentLang)
+  if (detectedLocale && hasBuiltInLocale(detectedLocale)) {
+    return detectedLocale
   }
 
   return enMessages.meta.locale
@@ -397,8 +487,8 @@ export const resolveBeaconLang = (documentLang?: string): string => {
 
 export const setBeaconDirection = (direction?: BeaconTextDirection): void => {
   const state = getSharedState()
-  state.globalDirection = direction
-  state.globalDirectionTakesPrecedence = true
+  state.globalDirection =
+    direction !== undefined ? { value: direction, seq: ++state.seq } : undefined
   notifyListeners()
 }
 
@@ -410,11 +500,22 @@ export const getBeaconDirection = (documentDir?: string): BeaconResolvedDirectio
 
   const effectiveLocale = getEffectiveLocale()
   const effectiveOverrides = getEffectiveOverrides()
+  const hasCustomTranslations = hasNonEmptyTranslations(effectiveOverrides)
   if (effectiveLocale) {
-    if (hasBuiltInLocale(effectiveLocale) || effectiveOverrides) {
+    if (hasBuiltInLocale(effectiveLocale) || hasCustomTranslations) {
       return isRtlLocaleTag(effectiveLocale) ? 'rtl' : 'ltr'
     }
 
+    return 'ltr'
+  }
+
+  const detectedLocale = detectBrowserLocale(effectiveOverrides)
+  if (detectedLocale && hasBuiltInLocale(detectedLocale)) {
+    return isRtlLocaleTag(detectedLocale) ? 'rtl' : 'ltr'
+  }
+
+  const docLang = getDocumentLang()
+  if (docLang && !hasBuiltInLocale(docLang) && documentDir === undefined) {
     return 'ltr'
   }
 
@@ -427,18 +528,13 @@ export const getBeaconDirection = (documentDir?: string): BeaconResolvedDirectio
     return rawDocDir
   }
 
-  const docLang = getDocumentLang()
-  if (docLang && (hasBuiltInLocale(docLang) || effectiveOverrides) && isRtlLocaleTag(docLang)) {
-    return 'rtl'
-  }
-
   return 'ltr'
 }
 
 export const setBeaconTranslations = (translations?: BeaconTranslationOverrides): void => {
   const state = getSharedState()
-  state.globalOverrides = translations
-  state.globalOverridesTakesPrecedence = true
+  state.globalOverrides =
+    translations !== undefined ? { value: translations, seq: ++state.seq } : undefined
   notifyListeners()
 }
 
@@ -446,15 +542,9 @@ export const getBeaconTranslations = (): BeaconTranslationOverrides | undefined 
   getEffectiveOverrides()
 
 export const getBeaconMessages = (): BeaconLocaleMessages => {
-  const effectiveLocale =
-    getEffectiveLocale() ??
-    (() => {
-      const docLang = getDocumentLang()
-
-      return docLang && hasBuiltInLocale(docLang) ? docLang : undefined
-    })()
-  const base = resolveBuiltInLocaleCatalog(effectiveLocale)
   const effectiveOverrides = getEffectiveOverrides()
+  const effectiveLocale = getEffectiveLocale() ?? detectBrowserLocale(effectiveOverrides)
+  const base = resolveBuiltInLocaleCatalog(effectiveLocale)
   if (!effectiveOverrides) {
     return base
   }

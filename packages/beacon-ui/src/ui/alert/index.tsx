@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { getBeaconDirection, resolveBeaconLang, subscribeBeaconI18n } from '@ecadlabs/beacon-types'
-import { getColorMode } from '../../utils/colorMode'
+import { getColorMode, subscribeColorMode } from '../../utils/colorMode'
 import { Subject, Subscription } from '../../utils/subject'
 import { runUICallback } from '../../utils/callback'
 import { ensureDialogFocus, getActiveElementDeep } from '../../utils/focus'
@@ -80,14 +80,36 @@ const AlertRoot = (props: AlertConfig) => {
     const subs: Subscription[] = []
     subs.push(show$.subscribe((value) => setIsOpen(value)))
     subs.push(config$.subscribe((value) => setConfig(value)))
-    const unsubscribeI18n = subscribeBeaconI18n(() => {
+    const notifyUiStateChange = () => {
       syncAlertHostAttributes()
       setI18nRevision((rev) => rev + 1)
-    })
+    }
+    const unsubscribeI18n = subscribeBeaconI18n(notifyUiStateChange)
+    const unsubscribeColorMode = subscribeColorMode(notifyUiStateChange)
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('languagechange', notifyUiStateChange)
+    }
+    let docObserver: MutationObserver | undefined
+    if (
+      typeof MutationObserver !== 'undefined' &&
+      typeof document !== 'undefined' &&
+      document.documentElement
+    ) {
+      docObserver = new MutationObserver(notifyUiStateChange)
+      docObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['lang', 'dir']
+      })
+    }
 
     return () => {
       subs.forEach((sub) => sub.unsubscribe())
       unsubscribeI18n()
+      unsubscribeColorMode()
+      if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+        window.removeEventListener('languagechange', notifyUiStateChange)
+      }
+      docObserver?.disconnect()
     }
   }, [])
 

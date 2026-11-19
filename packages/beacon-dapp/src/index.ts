@@ -5,6 +5,51 @@ export * from '@ecadlabs/beacon-types'
 export * from '@ecadlabs/beacon-utils'
 export * from '@ecadlabs/beacon-ui'
 
+export {
+  activateBeaconClientI18n,
+  arMessages,
+  builtInLocales,
+  configureBeaconI18n,
+  deMessages,
+  detectBrowserLocale,
+  enMessages,
+  esMessages,
+  frMessages,
+  getBeaconDirection,
+  getBeaconErrorCopy,
+  getBeaconLocale,
+  getBeaconMessages,
+  getBeaconTranslations,
+  hasBuiltInLocale,
+  interpolateBeaconMessage,
+  jaMessages,
+  normalizeLocaleTag,
+  registerBeaconClientI18n,
+  resetBeaconI18n,
+  resolveBeaconLang,
+  resolveBuiltInLocaleCatalog,
+  setBeaconDirection,
+  setBeaconLocale,
+  setBeaconTranslations,
+  subscribeBeaconI18n,
+  unregisterBeaconClientI18n,
+  type BeaconAriaMessages,
+  type BeaconDAppMessages,
+  type BeaconErrorCopy,
+  type BeaconI18nConfig,
+  type BeaconLocaleMessages,
+  type BeaconLocaleMetadata,
+  type BeaconLocaleStatus,
+  type BeaconResolvedDirection,
+  type BeaconTextDirection,
+  type BeaconTranslationOverrides,
+  type BeaconUIMessages,
+  type BeaconWalletTypeMessages,
+  type DeepPartial,
+  type DisplayableWalletConnectFailureReason,
+  type WalletConnectErrorCopy
+} from '@ecadlabs/beacon-types'
+
 import type { ConnectionInfo, PendingRequestInfo } from '@ecadlabs/beacon-types'
 import {
   DAppClient,

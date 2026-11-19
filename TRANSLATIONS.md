@@ -44,9 +44,11 @@ npm run tsc --workspace=@ecadlabs/beacon-types
 npx vitest run packages/beacon-types/__tests__/i18n.test.ts
 ```
 
-## 3. Overriding Translations in Your dApp
+## 3. Browser Language Detection and Overriding Translations in Your dApp
 
-If you want to customize specific strings or test translation tweaks locally in your dApp before opening a pull request, pass `locale`, `direction`, and `translations` in `DAppClientOptions`:
+By default, when no explicit `locale` is configured, Beacon automatically detects the user's preferred language from `navigator.languages` / `navigator.language` (or a non-English `<html lang="...">` document attribute) and falls back to English (`en`) when no built-in locale matches. To pin your dApp's Beacon modals and toasts to English regardless of the user's browser language, pass `locale: 'en'` explicitly.
+
+If you want to set a specific language, text direction, or custom strings in your dApp, pass `locale`, `direction`, and `translations` in `DAppClientOptions`, or update them at runtime on the `DAppClient` instance:
 
 ```ts
 import { DAppClient } from '@ecadlabs/beacon-dapp'
@@ -64,6 +66,12 @@ const dAppClient = new DAppClient({
     }
   }
 })
+
+// Switch language at runtime, or pass undefined to clear this client's override
+// (reverting to any global baseline set via configureBeaconI18n / setBeaconLocale,
+// or to automatic browser/document language detection):
+dAppClient.setLocale('ar')
+dAppClient.setLocale(undefined)
 ```
 
-Any keys omitted in `translations` automatically fall back to the built-in locale catalog, and then to English (`en`).
+Any keys omitted in `translations` automatically fall back to the built-in locale catalog, and then to English (`en`). If you provide custom `translations` for a language not in `builtInLocales` (such as Italian `'it'` or Persian `'fa'`), pass `locale: 'it'` (or `locale: 'fa'`) alongside `translations` so Beacon sets `lang` and `dir` appropriately on its shadow hosts.

@@ -113,8 +113,10 @@ export interface DAppClientOptions {
 
   /**
    * BCP-47 language tag for UI components, toasts, alerts, and error messages
-   * (for example: 'en', 'fr', 'es', 'de', 'ja', 'ar'). When omitted, inherits a
-   * supported `document.documentElement.lang` tag or falls back to 'en'.
+   * (for example: 'en', 'fr', 'es', 'de', 'ja', 'ar'). When omitted, automatically
+   * selects the first supported browser locale from `navigator.languages` /
+   * `navigator.language` (or a non-English `document.documentElement.lang`), falling
+   * back to 'en'.
    */
   locale?: string
 

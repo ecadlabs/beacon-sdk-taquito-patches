@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import {
   BeaconErrorType,
   AbortedBeaconError,
@@ -17,15 +17,19 @@ import {
   enMessages,
   builtInLocales,
   configureBeaconI18n,
+  detectBrowserLocale,
   resetBeaconI18n,
   getBeaconLocale,
   getBeaconDirection,
   getBeaconMessages,
+  getBeaconTranslations,
   interpolateBeaconMessage,
   resolveBeaconLang,
   registerBeaconClientI18n,
   unregisterBeaconClientI18n,
-  setBeaconLocale
+  setBeaconDirection,
+  setBeaconLocale,
+  setBeaconTranslations
 } from '../src'
 
 const extractPlaceholders = (text: string): string[] => {
@@ -206,6 +210,68 @@ describe('Beacon i18n catalog and error localization', () => {
     unregisterBeaconClientI18n(clientB)
     expect(getBeaconMessages().meta.locale).toBe('ja')
     unregisterBeaconClientI18n(clientA)
+
+    // Clearing a client field only clears that client's override and never erases the global baseline
+    resetBeaconI18n()
+    configureBeaconI18n({
+      locale: 'fr',
+      direction: 'rtl',
+      translations: { ui: { close: 'Fermer global' } }
+    })
+    registerBeaconClientI18n(clientA, {
+      locale: 'es',
+      direction: 'ltr',
+      translations: { ui: { close: 'Cerrar cliente' } }
+    })
+    expect(getBeaconLocale()).toBe('es')
+    expect(getBeaconDirection()).toBe('ltr')
+    expect(getBeaconMessages().ui.close).toBe('Cerrar cliente')
+
+    registerBeaconClientI18n(clientA, {
+      locale: undefined,
+      direction: undefined,
+      translations: undefined
+    })
+    expect(getBeaconLocale()).toBe('fr')
+    expect(getBeaconDirection()).toBe('rtl')
+    expect(getBeaconMessages().ui.close).toBe('Fermer global')
+    unregisterBeaconClientI18n(clientA)
+    expect(getBeaconLocale()).toBe('fr')
+
+    // Partial client updates do not reclaim precedence for untouched fields
+    resetBeaconI18n()
+    registerBeaconClientI18n(clientA, { locale: 'fr' })
+    setBeaconLocale('ja')
+    expect(getBeaconLocale()).toBe('ja')
+    registerBeaconClientI18n(clientA, { direction: 'rtl' })
+    expect(getBeaconLocale()).toBe('ja')
+    expect(getBeaconDirection()).toBe('rtl')
+
+    // Two clients: partial update on older client A does not steal locale from newer client B
+    resetBeaconI18n()
+    registerBeaconClientI18n(clientA, { locale: 'fr' })
+    registerBeaconClientI18n(clientB, { locale: 'de' })
+    expect(getBeaconLocale()).toBe('de')
+    registerBeaconClientI18n(clientA, { direction: 'rtl' })
+    expect(getBeaconLocale()).toBe('de')
+    expect(getBeaconDirection()).toBe('rtl')
+    registerBeaconClientI18n(clientA, {})
+    expect(getBeaconLocale()).toBe('de')
+    unregisterBeaconClientI18n(clientA)
+    unregisterBeaconClientI18n(clientB)
+
+    // Interleaved client and global updates restore in exact recency order on teardown
+    resetBeaconI18n()
+    registerBeaconClientI18n(clientA, { locale: 'es' })
+    setBeaconLocale('ja')
+    registerBeaconClientI18n(clientB, { locale: 'fr' })
+    expect(getBeaconLocale()).toBe('fr')
+    unregisterBeaconClientI18n(clientB)
+    expect(getBeaconLocale()).toBe('ja')
+    setBeaconLocale(undefined)
+    expect(getBeaconLocale()).toBe('es')
+    unregisterBeaconClientI18n(clientA)
+    expect(getBeaconLocale()).toBeUndefined()
   })
 
   it('merges custom partial translation overrides deeply without mutating built-in catalogs', () => {
@@ -312,5 +378,242 @@ describe('Beacon i18n catalog and error localization', () => {
       title: 'Custom TX Invalid Title'
     })
     expect(txOptionsOnly.title).toBe('Custom TX Invalid Title')
+  })
+
+  describe('browser language auto-detection and clearing global overrides', () => {
+    const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+    const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'document')
+
+    const setMockBrowserEnv = (options: {
+      languages?: readonly string[]
+      language?: string
+      docLang?: string
+      docDir?: string
+    }) => {
+      Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        writable: true,
+        value: {
+          languages: options.languages,
+          language: options.language
+        }
+      })
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        writable: true,
+        value: {
+          documentElement: {
+            lang: options.docLang ?? '',
+            dir: options.docDir ?? ''
+          }
+        }
+      })
+    }
+
+    afterEach(() => {
+      resetBeaconI18n()
+      if (navigatorDescriptor) {
+        Object.defineProperty(globalThis, 'navigator', navigatorDescriptor)
+      } else {
+        delete (globalThis as Record<string, unknown>).navigator
+      }
+      if (documentDescriptor) {
+        Object.defineProperty(globalThis, 'document', documentDescriptor)
+      } else {
+        delete (globalThis as Record<string, unknown>).document
+      }
+    })
+
+    it('detects browser locale from navigator.languages even when document.documentElement.lang is boilerplate en', () => {
+      setMockBrowserEnv({
+        languages: ['fr-CA', 'fr', 'en-US'],
+        language: 'fr-CA',
+        docLang: 'en'
+      })
+
+      expect(detectBrowserLocale()).toBe('fr-CA')
+      expect(getBeaconLocale()).toBeUndefined()
+      expect(resolveBeaconLang()).toBe('fr-CA')
+      expect(getBeaconDirection()).toBe('ltr')
+      expect(getBeaconMessages().meta.locale).toBe('fr')
+      expect(new AbortedBeaconError().title).toBe(
+        builtInLocales.fr.errors[BeaconErrorType.ABORTED_ERROR].title
+      )
+    })
+
+    it('skips unsupported preferred languages in navigator.languages and selects the first supported built-in locale', () => {
+      setMockBrowserEnv({
+        languages: ['pt-BR', 'es-MX', 'en-US'],
+        language: 'pt-BR',
+        docLang: 'en'
+      })
+
+      expect(detectBrowserLocale()).toBe('es-MX')
+      expect(resolveBeaconLang()).toBe('es-MX')
+      expect(getBeaconMessages().meta.locale).toBe('es')
+    })
+
+    it('resolves RTL direction automatically when browser language is Arabic even on an LTR boilerplate document', () => {
+      setMockBrowserEnv({
+        languages: ['ar-EG', 'ar'],
+        language: 'ar-EG',
+        docLang: 'en',
+        docDir: 'ltr'
+      })
+
+      expect(detectBrowserLocale()).toBe('ar-EG')
+      expect(resolveBeaconLang()).toBe('ar-EG')
+      expect(getBeaconDirection()).toBe('rtl')
+      expect(getBeaconMessages().meta.locale).toBe('ar')
+    })
+
+    it('honors an explicitly localized non-English document lang when browser language is default English, and falls back to en for unsupported locales without custom translations', () => {
+      setMockBrowserEnv({
+        languages: ['en-US', 'en'],
+        language: 'en-US',
+        docLang: 'de'
+      })
+
+      expect(detectBrowserLocale()).toBe('de')
+      expect(resolveBeaconLang()).toBe('de')
+      expect(getBeaconMessages().meta.locale).toBe('de')
+
+      setMockBrowserEnv({
+        languages: ['it-IT'],
+        language: 'it-IT',
+        docLang: ''
+      })
+
+      expect(detectBrowserLocale()).toBeUndefined()
+      expect(resolveBeaconLang()).toBe('en')
+      expect(getBeaconDirection()).toBe('ltr')
+      expect(getBeaconMessages().meta.locale).toBe('en')
+
+      // Custom translation overrides without an explicit locale do NOT claim unsupported auto-detected browser locales (e.g. it-IT or fa-IR)
+      setBeaconTranslations({
+        ui: {
+          connectWallet: 'Connect to MyDapp'
+        }
+      })
+      expect(detectBrowserLocale(getBeaconTranslations())).toBeUndefined()
+      expect(resolveBeaconLang()).toBe('en')
+      expect(getBeaconDirection()).toBe('ltr')
+      expect(getBeaconMessages().ui.connectWallet).toBe('Connect to MyDapp')
+
+      setMockBrowserEnv({
+        languages: ['fa-IR'],
+        language: 'fa-IR',
+        docLang: 'en'
+      })
+      expect(detectBrowserLocale(getBeaconTranslations())).toBe('en')
+      expect(resolveBeaconLang()).toBe('en')
+      expect(getBeaconDirection()).toBe('ltr')
+
+      // Setting an explicit locale alongside custom translations preserves that custom locale tag and RTL direction
+      configureBeaconI18n({
+        locale: 'fa-IR',
+        translations: {
+          ui: {
+            connectWallet: 'اتصال کیف پول'
+          }
+        }
+      })
+      expect(resolveBeaconLang()).toBe('fa-IR')
+      expect(getBeaconDirection()).toBe('rtl')
+      expect(getBeaconMessages().ui.connectWallet).toBe('اتصال کیف پول')
+
+      // Empty translation objects or whitespace-only string leaves do not count as custom translations or blank out base labels
+      resetBeaconI18n()
+      setMockBrowserEnv({
+        languages: ['he-IL'],
+        language: 'he-IL',
+        docLang: 'en'
+      })
+      configureBeaconI18n({
+        translations: {
+          ui: {
+            connectWallet: '',
+            close: '   '
+          }
+        }
+      })
+      expect(detectBrowserLocale(getBeaconTranslations())).toBe('en')
+      expect(resolveBeaconLang()).toBe('en')
+      expect(getBeaconDirection()).toBe('ltr')
+      expect(getBeaconMessages().ui.connectWallet).toBe(builtInLocales.en.ui.connectWallet)
+      expect(getBeaconMessages().ui.close).toBe(builtInLocales.en.ui.close)
+
+      setMockBrowserEnv({
+        languages: ['he-IL'],
+        language: 'he-IL',
+        docLang: ''
+      })
+      expect(detectBrowserLocale(getBeaconTranslations())).toBeUndefined()
+
+      configureBeaconI18n({ locale: 'he-IL', translations: { ui: {} } })
+      expect(resolveBeaconLang()).toBe('en')
+      expect(getBeaconDirection()).toBe('ltr')
+
+      // Unsupported non-English document lang respects navigator.languages priority order and does not render English fallback as RTL when document.dir is rtl
+      resetBeaconI18n()
+      setMockBrowserEnv({
+        languages: ['en-GB', 'ar-EG'],
+        language: 'en-GB',
+        docLang: 'he',
+        docDir: 'rtl'
+      })
+      expect(detectBrowserLocale()).toBe('en')
+      expect(resolveBeaconLang()).toBe('en')
+      expect(getBeaconDirection()).toBe('ltr')
+      expect(getBeaconMessages().meta.locale).toBe('en')
+
+      // Unsupported RTL document with unsupported browser language still renders the English fallback catalog as LTR
+      setMockBrowserEnv({
+        languages: ['he-IL'],
+        language: 'he-IL',
+        docLang: 'he',
+        docDir: 'rtl'
+      })
+      expect(detectBrowserLocale()).toBeUndefined()
+      expect(resolveBeaconLang()).toBe('en')
+      expect(getBeaconDirection()).toBe('ltr')
+      expect(getBeaconMessages().meta.locale).toBe('en')
+    })
+
+    it('clears global precedence when setBeaconLocale(undefined), setBeaconDirection(undefined), or setBeaconTranslations(undefined) is called', () => {
+      setMockBrowserEnv({
+        languages: ['fr-FR', 'fr'],
+        language: 'fr-FR',
+        docLang: 'en'
+      })
+
+      const clientA = Symbol('clientA')
+      registerBeaconClientI18n(clientA, {
+        locale: 'es',
+        direction: 'rtl',
+        translations: { ui: { close: 'Cerrar cliente' } }
+      })
+
+      setBeaconLocale('de')
+      setBeaconDirection('ltr')
+      setBeaconTranslations({ ui: { close: 'Schließen global' } })
+      expect(getBeaconLocale()).toBe('de')
+      expect(getBeaconDirection()).toBe('ltr')
+      expect(getBeaconMessages().ui.close).toBe('Schließen global')
+
+      // Passing undefined clears the global overrides so the active client entry takes effect again
+      setBeaconLocale(undefined)
+      setBeaconDirection(undefined)
+      setBeaconTranslations(undefined)
+      expect(getBeaconLocale()).toBe('es')
+      expect(getBeaconDirection()).toBe('rtl')
+      expect(getBeaconMessages().ui.close).toBe('Cerrar cliente')
+
+      // Unregistering the client then falls back to browser auto-detection ('fr-FR')
+      unregisterBeaconClientI18n(clientA)
+      expect(getBeaconLocale()).toBeUndefined()
+      expect(resolveBeaconLang()).toBe('fr-FR')
+      expect(getBeaconMessages().meta.locale).toBe('fr')
+    })
   })
 })

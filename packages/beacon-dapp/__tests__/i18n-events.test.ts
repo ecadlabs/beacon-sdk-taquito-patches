@@ -1,9 +1,10 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import { openAlert, openToast } from '@ecadlabs/beacon-ui'
+import { openAlert, openToast, setColorMode } from '@ecadlabs/beacon-ui'
 import {
   BeaconErrorType,
   BeaconMessageType,
   builtInLocales,
+  ColorMode,
   configureBeaconI18n,
   getBeaconDirection,
   getBeaconMessages,
@@ -14,6 +15,7 @@ import {
 } from '@ecadlabs/beacon-types'
 import { BeaconEvent, defaultEventCallbacks } from '../src/events'
 import { DAppClient } from '../src/dapp-client/DAppClient'
+import { getDAppClientInstance } from '../src/utils/get-instance'
 
 vi.mock('@ecadlabs/beacon-ui', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@ecadlabs/beacon-ui')>()
@@ -24,7 +26,9 @@ vi.mock('@ecadlabs/beacon-ui', async (importOriginal) => {
     isMobile: vi.fn().mockReturnValue(false),
     isMobileOS: vi.fn().mockReturnValue(false),
     openAlert: vi.fn(),
-    openToast: vi.fn()
+    openToast: vi.fn(),
+    setColorMode: vi.fn(actual.setColorMode),
+    getColorMode: vi.fn(actual.getColorMode)
   }
 })
 
@@ -187,5 +191,246 @@ describe('BeaconEvent i18n and DAppClientOptions locale configuration', () => {
     } finally {
       await defaultClient.destroy()
     }
+  })
+
+  it('supports runtime i18n instance methods on DAppClient and forwards updated i18n/colorMode options through getDAppClientInstance', async () => {
+    const languagesSpy = vi
+      .spyOn(window.navigator, 'languages', 'get')
+      .mockReturnValue(['fr-FR', 'fr'])
+    const languageSpy = vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('fr-FR')
+    document.documentElement.lang = 'en'
+    document.documentElement.removeAttribute('dir')
+
+    const client = getDAppClientInstance(
+      {
+        name: 'Singleton dApp'
+      },
+      true
+    )
+
+    try {
+      // Auto-detects French from navigator.languages despite <html lang="en">
+      expect(client.getLocale()).toBeUndefined()
+      expect(client.resolveLang()).toBe('fr-FR')
+      expect(client.getDirection()).toBe('ltr')
+      expect(client.getMessages().meta.locale).toBe('fr')
+
+      // Programmatic updates via DAppClient instance methods preserve sibling fields
+      client.setTranslations({
+        ui: {
+          connectWallet: 'Conectar billetera personalizada'
+        }
+      })
+      client.setLocale('es')
+      expect(client.getLocale()).toBe('es')
+      expect(client.resolveLang()).toBe('es')
+      expect(client.getMessages().meta.locale).toBe('es')
+      expect(client.getMessages().ui.connectWallet).toBe('Conectar billetera personalizada')
+
+      client.setDirection('rtl')
+      expect(client.getDirection()).toBe('rtl')
+      client.setDirection('auto')
+      expect(client.getDirection()).toBe('ltr')
+
+      // Clearing locale override via setLocale(undefined) falls back to browser locale ('fr-FR')
+      client.setLocale(undefined)
+      expect(client.getLocale()).toBeUndefined()
+      expect(client.resolveLang()).toBe('fr-FR')
+      expect(client.getMessages().meta.locale).toBe('fr')
+
+      // Reusing getDAppClientInstance without reset forwards updated i18n and colorMode options
+      const reused = getDAppClientInstance({
+        name: 'Singleton dApp',
+        locale: 'ar',
+        direction: 'auto',
+        colorMode: ColorMode.DARK,
+        translations: {
+          dapp: {
+            preparingRequest: 'تحضير مخصص...'
+          }
+        }
+      })
+      expect(reused).toBe(client)
+      expect(client.getLocale()).toBe('ar')
+      expect(client.getDirection()).toBe('rtl')
+      expect(client.getMessages().meta.locale).toBe('ar')
+      expect(client.getMessages().dapp.preparingRequest).toBe('تحضير مخصص...')
+      expect(setColorMode).toHaveBeenLastCalledWith(ColorMode.DARK)
+
+      client.configureI18n({
+        locale: 'ja',
+        direction: 'ltr',
+        translations: undefined
+      })
+      expect(client.getLocale()).toBe('ja')
+      expect(client.getDirection()).toBe('ltr')
+      expect(client.getTranslations()).toBeUndefined()
+      expect(client.getMessages().meta.locale).toBe('ja')
+
+      // Singleton reuse forwards explicit undefined clears for locale, direction, and translations
+      const clearedViaReuse = getDAppClientInstance({
+        name: 'Singleton dApp',
+        locale: undefined,
+        direction: undefined,
+        translations: undefined
+      })
+      expect(clearedViaReuse).toBe(client)
+      expect(client.getLocale()).toBeUndefined()
+      expect(client.resolveLang()).toBe('fr-FR')
+      expect(client.getDirection()).toBe('ltr')
+      expect(client.getTranslations()).toBeUndefined()
+
+      // Re-apply an override on the singleton, then verify repeat calls with identical config (e.g. StrictMode/HMR) do not clobber runtime setLocale
+      const initialStrictConfig = {
+        name: 'Singleton dApp',
+        locale: 'en'
+      }
+      getDAppClientInstance(initialStrictConfig)
+      expect(client.getLocale()).toBe('en')
+      client.setLocale('ar')
+      expect(client.getLocale()).toBe('ar')
+      // Calling getDAppClientInstance again with the same initial config object or same config values must not overwrite 'ar' back to 'en'
+      getDAppClientInstance(initialStrictConfig)
+      expect(client.getLocale()).toBe('ar')
+      getDAppClientInstance({ name: 'Singleton dApp', locale: 'en' })
+      expect(client.getLocale()).toBe('ar')
+
+      // Reset with getDAppClientInstance(..., true)
+      const replacement = getDAppClientInstance(
+        {
+          name: 'Replacement dApp'
+        },
+        true
+      )
+      try {
+        expect(replacement).not.toBe(client)
+        // Old singleton's i18n registration was unregistered on reset, and late setLocale calls on the retired instance are ignored
+        expect(replacement.getLocale()).toBeUndefined()
+        expect(replacement.resolveLang()).toBe('fr-FR')
+        expect(replacement.getDirection()).toBe('ltr')
+        client.setLocale('es')
+        client.configureI18n({ locale: 'es', direction: 'rtl' })
+        expect(replacement.getLocale()).toBeUndefined()
+        expect(replacement.resolveLang()).toBe('fr-FR')
+        expect(replacement.getDirection()).toBe('ltr')
+      } finally {
+        await replacement.destroy()
+      }
+    } finally {
+      await client.destroy()
+      languagesSpy.mockRestore()
+      languageSpy.mockRestore()
+      document.documentElement.removeAttribute('lang')
+      document.documentElement.removeAttribute('dir')
+    }
+  })
+
+  it('dynamically re-evaluates defaultEventCallbacks toast, alert, and internal-error copy when the locale changes while mounted, and preserves preconfigured colorMode when omitted', async () => {
+    configureBeaconI18n({ locale: 'fr' })
+    vi.mocked(setColorMode).mockClear()
+    const clientWithoutColorMode = new DAppClient({ name: 'No ColorMode dApp' })
+    try {
+      expect(setColorMode).not.toHaveBeenCalled()
+
+      await defaultEventCallbacks[BeaconEvent.PERMISSION_REQUEST_SENT]({
+        requestId: 'req-live-1',
+        requestType: BeaconMessageType.PermissionRequest,
+        transport: TransportType.P2P,
+        dispatchStage: 'transport',
+        sentAt: 1,
+        walletInfo: { name: 'Kukai' },
+        extraInfo: {}
+      })
+
+      const lastToastCall = vi.mocked(openToast).mock.calls.at(-1)?.[0]
+      expect(lastToastCall).toBeDefined()
+      expect(lastToastCall?.body).toBe(builtInLocales.fr.dapp.requestSent)
+      expect(lastToastCall?.actions?.[0]?.text).toBe(builtInLocales.fr.dapp.noAnswerFromWallet)
+      expect(lastToastCall?.actions?.[1]?.actionText).toBe(builtInLocales.fr.dapp.resetConnection)
+
+      // Trigger an internal error alert (empty payload) while locale is French
+      await expect(
+        clientWithoutColorMode.requestSignPayload({ payload: '' })
+      ).rejects.toMatchObject({
+        description: builtInLocales.fr.dapp.payloadRequired
+      })
+      const lastAlertCall = vi.mocked(openAlert).mock.calls.at(-1)?.[0]
+      expect(lastAlertCall?.title).toBe(builtInLocales.fr.dapp.internalErrorTitle)
+      expect(lastAlertCall?.body).toBe(builtInLocales.fr.dapp.payloadRequired)
+
+      // Switch locale while the toast and internal-error alert configs are active
+      configureBeaconI18n({ locale: 'de' })
+      expect(lastToastCall?.body).toBe(builtInLocales.de.dapp.requestSent)
+      expect(lastToastCall?.actions?.[0]?.text).toBe(builtInLocales.de.dapp.noAnswerFromWallet)
+      expect(lastToastCall?.actions?.[1]?.actionText).toBe(builtInLocales.de.dapp.resetConnection)
+      expect(lastAlertCall?.title).toBe(builtInLocales.de.dapp.internalErrorTitle)
+      expect(lastAlertCall?.body).toBe(builtInLocales.de.dapp.payloadRequired)
+    } finally {
+      await clientWithoutColorMode.destroy()
+    }
+  })
+
+  it('resolves named i18n exports from the built @ecadlabs/beacon-dapp browser ESM entrypoint without Rollup NAMESPACE_CONFLICT or MISSING_EXPORT warnings', async () => {
+    const path = await import('node:path')
+    const { rollup } = await import('rollup')
+    const { nodeResolve } = await import('@rollup/plugin-node-resolve')
+    const dappEsmEntry = path.resolve(__dirname, '../dist/esm/index.js')
+    const warnings: Array<{ code?: string; message: string }> = []
+
+    const bundle = await rollup({
+      input: 'entry.js',
+      onwarn(warning) {
+        if (warning.code === 'NAMESPACE_CONFLICT' || warning.code === 'MISSING_EXPORT') {
+          warnings.push({ code: warning.code, message: warning.message })
+        }
+      },
+      external: (id) =>
+        id !== 'entry.js' &&
+        !id.startsWith('.') &&
+        !id.startsWith('/') &&
+        !id.startsWith('@ecadlabs/beacon-'),
+      plugins: [
+        {
+          name: 'virtual-entry',
+          resolveId(id) {
+            return id === 'entry.js' ? id : null
+          },
+          load(id) {
+            if (id !== 'entry.js') {
+              return null
+            }
+            return `export {
+              configureBeaconI18n,
+              detectBrowserLocale,
+              hasBuiltInLocale,
+              normalizeLocaleTag,
+              resolveBuiltInLocaleCatalog,
+              setBeaconLocale,
+              getBeaconLocale,
+              resolveBeaconLang,
+              setBeaconDirection,
+              getBeaconDirection,
+              setBeaconTranslations,
+              getBeaconTranslations,
+              getBeaconMessages,
+              getBeaconErrorCopy,
+              interpolateBeaconMessage,
+              resetBeaconI18n,
+              subscribeBeaconI18n,
+              builtInLocales,
+              enMessages,
+              frMessages,
+              esMessages,
+              deMessages,
+              jaMessages,
+              arMessages
+            } from ${JSON.stringify(dappEsmEntry)}`
+          }
+        },
+        nodeResolve({ browser: true })
+      ]
+    })
+    await bundle.close()
+    expect(warnings).toEqual([])
   })
 })

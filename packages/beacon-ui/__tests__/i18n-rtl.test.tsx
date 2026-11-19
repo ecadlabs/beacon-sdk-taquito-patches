@@ -229,4 +229,81 @@ describe('Beacon UI i18n, lang, and RTL support', () => {
     expect(builtUi.getBeaconDirection()).toBe('rtl')
     expect(builtUi.getBeaconMessages().meta.locale).toBe('ar')
   })
+
+  it('repaints mounted <beacon-alert> and <beacon-toast> on runtime setColorMode, window languagechange, and <html lang/dir> mutations', async () => {
+    const { ColorMode } = await import('@ecadlabs/beacon-types')
+    const { setColorMode, getColorMode } = await import('../src/utils/colorMode')
+    const { openAlert, closeAlert } = await import('../src/ui/alert')
+    const { openToast, closeToast } = await import('../src/ui/toast')
+
+    setColorMode(ColorMode.LIGHT)
+    document.documentElement.lang = 'en'
+    document.documentElement.dir = 'ltr'
+
+    await act(async () => {
+      openAlert({ title: 'Test', body: 'Body' })
+      openToast({
+        body: builtInLocales.en.dapp.requestSent,
+        state: 'loading',
+        walletInfo: { name: 'Kukai' },
+        openWalletAction: vi.fn()
+      })
+    })
+
+    const alertHost = document.querySelector('beacon-alert')
+    const alertThemeContainer = alertHost?.shadowRoot?.querySelector('[dir]')
+    const toastHost = document.querySelector('beacon-toast')
+    const toastThemeContainer = toastHost?.shadowRoot?.querySelector('[dir]')
+
+    expect(alertThemeContainer?.className).toContain('theme__light')
+    expect(toastThemeContainer?.className).toContain('theme__light')
+
+    // Runtime colorMode update repaints both open roots
+    await act(async () => {
+      setColorMode(ColorMode.DARK)
+    })
+    expect(getColorMode()).toBe(ColorMode.DARK)
+    expect(alertThemeContainer?.className).toContain('theme__dark')
+    expect(toastThemeContainer?.className).toContain('theme__dark')
+
+    // Host SPA mutating <html lang="de"> updates open modals/toasts when browser language is default English
+    const languagesSpy = vi
+      .spyOn(window.navigator, 'languages', 'get')
+      .mockReturnValue(['en-US', 'en'])
+    const languageSpy = vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('en-US')
+
+    await act(async () => {
+      document.documentElement.lang = 'de'
+      await Promise.resolve()
+    })
+    expect(alertHost?.getAttribute('lang')).toBe('de')
+    expect(alertHost?.shadowRoot?.textContent).toContain(builtInLocales.de.ui.close)
+    expect(toastHost?.getAttribute('lang')).toBe('de')
+    expect(toastHost?.shadowRoot?.textContent).toContain(builtInLocales.de.ui.openWallet)
+
+    // Browser languagechange event updates open modals/toasts when <html lang="en"> is boilerplate
+    document.documentElement.lang = 'en'
+    languagesSpy.mockReturnValue(['ar-EG', 'ar'])
+    languageSpy.mockReturnValue('ar-EG')
+
+    await act(async () => {
+      window.dispatchEvent(new Event('languagechange'))
+    })
+    expect(alertHost?.getAttribute('lang')).toBe('ar-EG')
+    expect(alertHost?.getAttribute('dir')).toBe('rtl')
+    expect(alertHost?.shadowRoot?.textContent).toContain(builtInLocales.ar.ui.close)
+    expect(toastHost?.getAttribute('lang')).toBe('ar-EG')
+    expect(toastHost?.getAttribute('dir')).toBe('rtl')
+    expect(toastHost?.shadowRoot?.textContent).toContain(builtInLocales.ar.ui.openWallet)
+
+    languagesSpy.mockRestore()
+    languageSpy.mockRestore()
+    setColorMode(ColorMode.LIGHT)
+
+    await act(async () => {
+      closeAlert()
+      closeToast()
+      vi.advanceTimersByTime(350)
+    })
+  })
 })

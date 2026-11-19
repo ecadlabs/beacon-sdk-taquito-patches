@@ -3,8 +3,18 @@ import {
   DisplayableWalletConnectFailureReason,
   WalletConnectErrorCopy,
   enMessages as rootEnMessages,
+  frMessages,
+  esMessages,
+  deMessages,
+  jaMessages,
+  arMessages,
   getBeaconMessages,
+  getBeaconErrorCopy,
   configureBeaconI18n,
+  detectBrowserLocale,
+  hasBuiltInLocale,
+  normalizeLocaleTag,
+  resolveBuiltInLocaleCatalog,
   setBeaconLocale,
   getBeaconLocale,
   resolveBeaconLang,
@@ -16,15 +26,27 @@ import {
   resetBeaconI18n,
   subscribeBeaconI18n,
   builtInLocales,
+  BeaconErrorCopy,
   BeaconI18nConfig,
+  BeaconLocaleMetadata,
+  BeaconLocaleStatus,
   BeaconResolvedDirection,
   BeaconTextDirection,
   BeaconLocaleMessages,
-  BeaconTranslationOverrides
+  BeaconTranslationOverrides,
+  BeaconDAppMessages,
+  BeaconUIMessages,
+  BeaconAriaMessages,
+  BeaconWalletTypeMessages,
+  DeepPartial
 } from '@ecadlabs/beacon-types'
 
 export {
   configureBeaconI18n,
+  detectBrowserLocale,
+  hasBuiltInLocale,
+  normalizeLocaleTag,
+  resolveBuiltInLocaleCatalog,
   setBeaconLocale,
   getBeaconLocale,
   resolveBeaconLang,
@@ -33,20 +55,34 @@ export {
   setBeaconTranslations,
   getBeaconTranslations,
   getBeaconMessages,
+  getBeaconErrorCopy,
   interpolateBeaconMessage,
   resetBeaconI18n,
   subscribeBeaconI18n,
-  builtInLocales
+  builtInLocales,
+  frMessages,
+  esMessages,
+  deMessages,
+  jaMessages,
+  arMessages
 }
 
 export type {
   DisplayableWalletConnectFailureReason,
   WalletConnectErrorCopy,
+  BeaconErrorCopy,
   BeaconI18nConfig,
+  BeaconLocaleMetadata,
+  BeaconLocaleStatus,
   BeaconResolvedDirection,
   BeaconTextDirection,
   BeaconLocaleMessages,
-  BeaconTranslationOverrides
+  BeaconTranslationOverrides,
+  BeaconDAppMessages,
+  BeaconUIMessages,
+  BeaconAriaMessages,
+  BeaconWalletTypeMessages,
+  DeepPartial
 }
 
 export interface BeaconUIMessageCatalog {

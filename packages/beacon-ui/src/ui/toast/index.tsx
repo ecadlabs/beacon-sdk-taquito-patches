@@ -6,7 +6,7 @@ import { Subject, Subscription } from '../../utils/subject'
 import { ToastConfig } from '../common'
 
 // Import the bundled CSS as a raw string
-import { getColorMode } from '../../utils/colorMode'
+import { getColorMode, subscribeColorMode } from '../../utils/colorMode'
 import cssText from './aggregated.css'
 
 let initDone: boolean = false
@@ -81,14 +81,36 @@ const ToastRoot = (props: ToastConfig) => {
         setIsOpen(value)
       })
     )
-    const unsubscribeI18n = subscribeBeaconI18n(() => {
+    const notifyUiStateChange = () => {
       syncToastHostAttributes()
       setI18nRevision((rev) => rev + 1)
-    })
+    }
+    const unsubscribeI18n = subscribeBeaconI18n(notifyUiStateChange)
+    const unsubscribeColorMode = subscribeColorMode(notifyUiStateChange)
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('languagechange', notifyUiStateChange)
+    }
+    let docObserver: MutationObserver | undefined
+    if (
+      typeof MutationObserver !== 'undefined' &&
+      typeof document !== 'undefined' &&
+      document.documentElement
+    ) {
+      docObserver = new MutationObserver(notifyUiStateChange)
+      docObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['lang', 'dir']
+      })
+    }
 
     return () => {
       subs.forEach((sub) => sub.unsubscribe())
       unsubscribeI18n()
+      unsubscribeColorMode()
+      if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+        window.removeEventListener('languagechange', notifyUiStateChange)
+      }
+      docObserver?.disconnect()
     }
   }, [])
 
