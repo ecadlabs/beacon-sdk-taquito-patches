@@ -12,7 +12,9 @@ test('shipped source and maintained guides are free of retired Beacon documentat
   const paths = execFileSync('git', ['ls-files', '-z', 'packages/*/src/**', 'docs/**', '*.md'], {
     cwd: root,
     encoding: 'utf8'
-  }).split('\0').filter(Boolean)
+  })
+    .split('\0')
+    .filter(Boolean)
   const stale = paths.filter((name) =>
     /\b(?:docs|typedocs)\.walletbeacon\.io\b/i.test(fs.readFileSync(path.join(root, name), 'utf8'))
   )
