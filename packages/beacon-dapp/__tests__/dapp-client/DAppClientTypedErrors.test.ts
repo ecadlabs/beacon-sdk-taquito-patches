@@ -222,7 +222,7 @@ describe('DAppClient typed error rejections', () => {
         ...account,
         accountIdentifier: await getAccountIdentifier(account.address, account.network)
       }
-      const otherNetwork = { type: NetworkType.GHOSTNET }
+      const otherNetwork = { type: NetworkType.SHADOWNET }
       const unrelated = {
         ...account,
         accountIdentifier: await getAccountIdentifier(account.address, otherNetwork),

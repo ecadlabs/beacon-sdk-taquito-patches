@@ -28,6 +28,13 @@
     <br /><br />
     <div id="status"></div>
     <br /><br />
+    <form>
+      <label
+        >Shadownet contract with a proof_of_event_challenge entrypoint
+        <input id="contract" name="contract" required pattern="KT1[1-9A-HJ-NP-Za-km-z]{33}" />
+      </label>
+      <button>Use contract</button>
+    </form>
     <button id="paste">Paste Sync Code</button>
     <br /><br />
     ---
@@ -260,7 +267,11 @@
       }
     </script>
     <script>
-      const ABSTRACTED_ACCOUNT_ADDRESS = 'KT1FwoPj4mVmHrTcfmWiq5PaXnHVXsnw7zZv'
+      const contractInput = document.getElementById('contract')
+      contractInput.value = new URLSearchParams(window.location.search).get('contract') || ''
+      const abstractedAccountAddress = contractInput.validity.valid
+        ? contractInput.value
+        : undefined
       const challengeData = {
         challenge_id: undefined,
         payload: undefined
@@ -277,10 +288,10 @@
         //   relayUrl: 'wss://relay.walletconnect.com'
         // },
         storage: new beacon.LocalStorage('DAPP'),
-        preferredNetwork: beacon.NetworkType.GHOSTNET
+        preferredNetwork: beacon.NetworkType.SHADOWNET
       })
 
-      const Tezos = new taquito.TezosToolkit('https://ghostnet.tezos.marigold.dev/')
+      const Tezos = new taquito.TezosToolkit('https://rpc.shadownet.teztnets.com')
       Tezos.setWalletProvider(new BeaconWallet(dappClient))
 
       const updateActiveAccount = () => {
@@ -304,7 +315,7 @@
       const signProofOfEvent = async ({ challenge_id, payload }) => {
         const encoder = new TextEncoder()
 
-        const contract = await Tezos.wallet.at(ABSTRACTED_ACCOUNT_ADDRESS)
+        const contract = await Tezos.wallet.at(abstractedAccountAddress)
 
         return contract.methodsObject
           .proof_of_event_challenge({
@@ -377,14 +388,24 @@
             console.log('message', message)
             // Example: Handle PermissionRequest. A wallet should handle all request types
             if (message.type === beacon.BeaconMessageType.PermissionRequest) {
-              // Show a UI to the user where he can confirm sharing an account with the DApp
+              if (
+                !abstractedAccountAddress ||
+                message.network.type !== beacon.NetworkType.SHADOWNET
+              ) {
+                setStatus('Select a Shadownet contract and request Shadownet permissions.')
+                return client.respond({
+                  type: beacon.BeaconMessageType.Error,
+                  id: message.id,
+                  errorType: beacon.BeaconErrorType.ABORTED_ERROR
+                })
+              }
 
               const response = {
                 type: beacon.BeaconMessageType.PermissionResponse,
                 network: message.network, // Use the same network that the user requested
                 scopes: message.scopes, // Ignore the scopes that have been requested and instead give only operation permissions
                 id: message.id,
-                address: ABSTRACTED_ACCOUNT_ADDRESS,
+                address: abstractedAccountAddress,
                 publicKey: '',
                 walletType: 'abstracted_account',
                 verificationType: 'proof_of_event'
@@ -402,9 +423,9 @@
               // Send response back to DApp
               client.respond(response)
             } else if (message.type === beacon.BeaconMessageType.ProofOfEventChallengeRequest) {
-              const isAccepted = window.confirm(
-                'Do you want to accept the Proof Of Event Challenge ?'
-              )
+              const isAccepted =
+                Boolean(abstractedAccountAddress) &&
+                window.confirm('Do you want to accept the Proof Of Event Challenge ?')
 
               challengeData.challenge_id = message.dAppChallengeId
               challengeData.payload = message.payload
@@ -451,7 +472,7 @@
         dappClient
           .requestPermissions({
             network: {
-              type: beacon.NetworkType.GHOSTNET
+              type: beacon.NetworkType.SHADOWNET
             }
           })
           .then((permissions) => {

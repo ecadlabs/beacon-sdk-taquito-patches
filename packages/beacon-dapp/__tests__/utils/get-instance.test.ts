@@ -104,7 +104,7 @@ describe('getDAppClientInstance config mismatch warning (09-C)', () => {
     diagnostics.length = 0
     const thirdByNetwork = getDAppClientInstance({
       name: 'FirstDApp',
-      network: { type: NetworkType.GHOSTNET },
+      network: { type: NetworkType.SHADOWNET },
       disableDefaultEvents: true,
       walletConnectOptions: { projectId: 'test-project-id' }
     })
@@ -150,7 +150,7 @@ describe('getDAppClientInstance config mismatch warning (09-C)', () => {
       {
         name: 'ResetDApp',
         storage: new LocalStorage('get-instance-reset-2'),
-        network: { type: NetworkType.GHOSTNET },
+        network: { type: NetworkType.SHADOWNET },
         disableDefaultEvents: true,
         walletConnectOptions: { projectId: 'test-project-id' }
       },
@@ -160,7 +160,7 @@ describe('getDAppClientInstance config mismatch warning (09-C)', () => {
 
     expect(second).not.toBe(first)
     expect(second.name).toBe('ResetDApp')
-    expect(second.network.type).toBe(NetworkType.GHOSTNET)
+    expect(second.network.type).toBe(NetworkType.SHADOWNET)
     expect(
       diagnostics.filter(
         (d) =>

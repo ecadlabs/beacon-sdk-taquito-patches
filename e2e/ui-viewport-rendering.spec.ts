@@ -363,7 +363,7 @@ test.describe('beacon-ui Desktop and Mobile Viewport Rendering & Scroll Conforma
               walletConnectSyncCode: new Promise((resolve) =>
                 setTimeout(() => resolve('wc:mock@2?relay-protocol=irn&symKey=deadbeef'), 150)
               ),
-              networkType: beacon.NetworkType.GHOSTNET
+              networkType: beacon.NetworkType.SHADOWNET
             }
           })
         })
@@ -421,7 +421,7 @@ test.describe('beacon-ui Desktop and Mobile Viewport Rendering & Scroll Conforma
                 ok: false as const,
                 reason: 'relay-unreachable' as const
               }),
-              networkType: beacon.NetworkType.GHOSTNET
+              networkType: beacon.NetworkType.SHADOWNET
             }
           })
         })

@@ -223,14 +223,14 @@ describe('WalletConnect transport ownership', () => {
     const next = await create(
       'next-project',
       vi.fn(() => true),
-      NetworkType.GHOSTNET
+      NetworkType.SHADOWNET
     )
     await next.connect()
 
     expect(nextRemote.connect).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         requiredNamespaces: expect.objectContaining({
-          tezos: expect.objectContaining({ chains: ['tezos:ghostnet'] })
+          tezos: expect.objectContaining({ chains: ['tezos:shadownet'] })
         })
       })
     )

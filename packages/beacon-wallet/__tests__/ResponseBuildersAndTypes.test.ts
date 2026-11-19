@@ -413,7 +413,7 @@ describe('ResponseBuildersAndTypes (Issue #143)', () => {
       })
 
       it('builds implicit account response preserving overrides for scopes, network, address, threshold, notification, verificationType', () => {
-        const customNetwork = { type: NetworkType.GHOSTNET }
+        const customNetwork = { type: NetworkType.SHADOWNET }
         const customScopes = [PermissionScope.SIGN]
         const threshold = { amount: '100', timeframe: 'daily' }
         const notification = {

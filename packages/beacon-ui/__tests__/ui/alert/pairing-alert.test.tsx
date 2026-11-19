@@ -110,7 +110,7 @@ const pairingPayload = {
   walletConnectSyncCode: Promise.resolve('wcCode'),
   p2pSyncCode: Promise.resolve('p2pCode'),
   postmessageSyncCode: Promise.resolve('postCode'),
-  networkType: NetworkType.GHOSTNET
+  networkType: NetworkType.SHADOWNET
 }
 
 const walletObj = {

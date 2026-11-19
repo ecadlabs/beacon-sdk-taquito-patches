@@ -15,9 +15,9 @@ test.afterEach(async () => {
   await dappCtx.close()
 })
 
-test('opens the configured Kukai Ghostnet URL with this dApp pairing request', async () => {
+test('opens the configured Kukai Shadownet URL with this dApp pairing request', async () => {
   // Stub the external page response; the SDK still generates the URL and pairing request.
-  await dappCtx.route('https://ghostnet.kukai.app/**', (route) =>
+  await dappCtx.route('https://*.kukai.app/**', (route) =>
     route.fulfill({
       contentType: 'text/html',
       body: '<!doctype html><title>Kukai pairing target</title>'
@@ -38,7 +38,7 @@ test('opens the configured Kukai Ghostnet URL with this dApp pairing request', a
   const popup = dapp.waitForEvent('popup')
   await dapp.getByRole('button', { name: 'Use Browser', exact: true }).click()
   const walletPage = await popup
-  await expect(walletPage).toHaveURL(/^https:\/\/ghostnet\.kukai\.app\//)
+  await expect(walletPage).toHaveURL(/^https:\/\/shadownet\.kukai\.app\//)
   await expect(walletPage).toHaveTitle('Kukai pairing target')
 
   const walletUrl = new URL(walletPage.url())

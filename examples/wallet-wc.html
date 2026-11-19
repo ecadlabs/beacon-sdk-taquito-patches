@@ -55,9 +55,9 @@
         publicKey: 'edpkvGfYw3LyB1UcCahKQk4rF2tvbMUk8GFiTuMjL75uGXrpvKXhjn',
         privateKey: 'edsktesttesttesttesttesttesttesttesttesttesttestte',
         network: {
-          type: 'ghostnet',
-          name: 'Tezos Ghostnet',
-          rpcUrl: 'https://ghostnet.api.tez.ie'
+          type: 'shadownet',
+          name: 'Tezos Shadownet',
+          rpcUrl: 'https://rpc.shadownet.teztnets.com'
         }
       }
 
@@ -150,18 +150,18 @@
           for (const [key, namespace] of Object.entries(requiredNamespaces)) {
             if (key === 'tezos') {
               namespaces[key] = {
-                accounts: [`tezos:ghostnet:${walletData.address}`],
+                accounts: [`tezos:${walletData.network.type}:${walletData.address}`],
                 methods: namespace.methods || ['tezos_getAccounts', 'tezos_send', 'tezos_sign'],
                 events: namespace.events || [],
-                chains: namespace.chains || ['tezos:ghostnet']
+                chains: namespace.chains || [`tezos:${walletData.network.type}`]
               }
             } else {
               // Fallback for any other namespace
               namespaces[key] = {
-                accounts: [`${key}:ghostnet:${walletData.address}`],
+                accounts: [`${key}:${walletData.network.type}:${walletData.address}`],
                 methods: namespace.methods,
                 events: namespace.events,
-                chains: namespace.chains || [`${key}:ghostnet`]
+                chains: namespace.chains || [`${key}:${walletData.network.type}`]
               }
             }
           }
@@ -171,17 +171,17 @@
               if (!namespaces[key]) {
                 if (key === 'tezos') {
                   namespaces[key] = {
-                    accounts: [`tezos:ghostnet:${walletData.address}`],
+                    accounts: [`tezos:${walletData.network.type}:${walletData.address}`],
                     methods: namespace.methods || ['tezos_getAccounts', 'tezos_send', 'tezos_sign'],
                     events: namespace.events || [],
-                    chains: namespace.chains || ['tezos:ghostnet']
+                    chains: namespace.chains || [`tezos:${walletData.network.type}`]
                   }
                 } else {
                   namespaces[key] = {
-                    accounts: [`${key}:ghostnet:${walletData.address}`],
+                    accounts: [`${key}:${walletData.network.type}:${walletData.address}`],
                     methods: namespace.methods,
                     events: namespace.events,
-                    chains: namespace.chains || [`${key}:ghostnet`]
+                    chains: namespace.chains || [`${key}:${walletData.network.type}`]
                   }
                 }
               }
@@ -421,10 +421,10 @@
           const namespaces = { ...session.namespaces }
 
           // 4) Update the Tezos account entry (index 0) to use the new address
-          //    Format is “tezos:ghostnet:<address>”
+          //    Format is “tezos:shadownet:<address>”
           //    (if you also need to update publicKey in index 1, do so here)
           const oldEntry = namespaces.tezos.accounts[0].split(':')
-          // oldEntry is [ "tezos", "ghostnet", "<oldAddress>" ]
+          // oldEntry is [ "tezos", "shadownet", "<oldAddress>" ]
           oldEntry[2] = newAddress
           namespaces.tezos.accounts[0] = oldEntry.join(':')
 

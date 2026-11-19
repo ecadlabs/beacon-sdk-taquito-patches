@@ -762,7 +762,7 @@ describe('DAppClient.getActiveWalletInfo', () => {
   ] as const)(
     'selects $expected for browser=$browser desktop=$desktop stored=$storedType',
     async ({ web, browser, desktop, storedType, expected }) => {
-      selectAccount({ ...account, network: { type: NetworkType.GHOSTNET } })
+      selectAccount({ ...account, network: { type: NetworkType.SHADOWNET } })
       vi.mocked(isBrowser).mockReturnValue(browser)
       vi.mocked(isDesktop).mockReturnValue(desktop)
       const app = {
@@ -777,7 +777,7 @@ describe('DAppClient.getActiveWalletInfo', () => {
           ? [
               {
                 ...app,
-                links: { [NetworkType.MAINNET]: 'mainnet', [NetworkType.GHOSTNET]: 'ghostnet' }
+                links: { [NetworkType.MAINNET]: 'mainnet', [NetworkType.SHADOWNET]: 'shadownet' }
               }
             ]
           : []
@@ -808,7 +808,7 @@ describe('DAppClient.getActiveWalletInfo', () => {
           ? {}
           : {
               deeplink: {
-                web: 'ghostnet',
+                web: 'shadownet',
                 desktop: 'desktop-link',
                 mobile: 'mobile-link'
               }[expected]

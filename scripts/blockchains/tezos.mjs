@@ -53,7 +53,6 @@ export const tezosWebList = [
     logo: 'web-metamask.png',
     links: {
       [NetworkType.MAINNET]: 'https://metamask.tezos.com/',
-      [NetworkType.GHOSTNET]: 'https://metamask.tezos.com/',
       [NetworkType.WEEKLYNET]: 'https://metamask.tezos.com/',
       [NetworkType.DAILYNET]: 'https://metamask.tezos.com/',
       [NetworkType.SEOULNET]: 'https://metamask.tezos.com/',
@@ -73,7 +72,6 @@ export const tezosWebList = [
     supportedInteractionStandards: ['wallet_connect'],
     links: {
       [NetworkType.MAINNET]: 'https://wallet.kukai.app',
-      [NetworkType.GHOSTNET]: 'https://ghostnet.kukai.app',
       [NetworkType.WEEKLYNET]: 'https://weeklynet.kukai.app',
       [NetworkType.DAILYNET]: 'https://dailynet.kukai.app',
       [NetworkType.SEOULNET]: 'https://seoulnet.kukai.app',
@@ -93,12 +91,7 @@ export const tezosWebList = [
     logo: 'tzsafe.svg',
     links: {
       [NetworkType.MAINNET]: 'https://tzsafe.marigold.dev',
-      [NetworkType.GHOSTNET]: 'https://ghostnet.tzsafe.marigold.dev',
-      [NetworkType.WEEKLYNET]: 'https://ghostnet.tzsafe.marigold.dev',
-      [NetworkType.DAILYNET]: 'https://ghostnet.tzsafe.marigold.dev',
-      [NetworkType.SEOULNET]: 'https://ghostnet.tzsafe.marigold.dev',
       [NetworkType.SHADOWNET]: '',
-      [NetworkType.TALLINNNET]: 'https://ghostnet.tzsafe.marigold.dev',
       [NetworkType.TEZLINK_SHADOWNET]: '',
       [NetworkType.TEZOSX_PREVIEWNET]: '',
       [NetworkType.USHUAIANET]: ''

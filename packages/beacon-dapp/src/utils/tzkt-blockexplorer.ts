@@ -5,7 +5,6 @@ export class TzktBlockExplorer extends BlockExplorer {
   constructor(
     public readonly rpcUrls: { [key in NetworkType]?: string } = {
       [NetworkType.MAINNET]: 'https://tzkt.io',
-      [NetworkType.GHOSTNET]: 'https://ghostnet.tzkt.io',
       [NetworkType.WEEKLYNET]: 'https://weeklynet.tzkt.io',
       [NetworkType.DAILYNET]: 'https://dailynet.tzkt.io',
       [NetworkType.SEOULNET]: 'https://seoulnet.tzkt.io',

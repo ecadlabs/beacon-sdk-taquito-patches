@@ -158,7 +158,7 @@ describe('useConnect hook', () => {
       await result.current[7]('wallet1', {
         title: 'test',
         pairingPayload: {
-          networkType: NetworkType.GHOSTNET,
+          networkType: NetworkType.SHADOWNET,
           p2pSyncCode: resolvedPayload('test'),
           postmessageSyncCode: resolvedPayload('test'),
           walletConnectSyncCode: resolvedPayload('test')
@@ -209,7 +209,7 @@ describe('useConnect hook', () => {
       await result.current[7]('wallet-ext', {
         title: 'test',
         pairingPayload: {
-          networkType: NetworkType.GHOSTNET,
+          networkType: NetworkType.SHADOWNET,
           p2pSyncCode: resolvedPayload('test'),
           postmessageSyncCode: resolvedPayload('test'),
           walletConnectSyncCode: resolvedPayload('test')
@@ -278,7 +278,7 @@ describe('useConnect hook', () => {
       await result.current[7]('wallet-ext', {
         title: 'test',
         pairingPayload: {
-          networkType: NetworkType.GHOSTNET,
+          networkType: NetworkType.SHADOWNET,
           p2pSyncCode: resolvedPayload('test'),
           postmessageSyncCode: resolvedPayload('test'),
           walletConnectSyncCode: resolvedPayload('test')
@@ -326,7 +326,7 @@ describe('useConnect hook', () => {
       await result.current[7]('wallet-desktop', {
         title: 'test',
         pairingPayload: {
-          networkType: NetworkType.GHOSTNET,
+          networkType: NetworkType.SHADOWNET,
           p2pSyncCode: resolvedPayload('test'),
           postmessageSyncCode: resolvedPayload('test'),
           walletConnectSyncCode: resolvedPayload('test')
@@ -379,7 +379,7 @@ describe('useConnect hook', () => {
       await result.current[7]('wallet-desktop', {
         title: 'test',
         pairingPayload: {
-          networkType: NetworkType.GHOSTNET,
+          networkType: NetworkType.SHADOWNET,
           p2pSyncCode: resolvedPayload('test'),
           postmessageSyncCode: resolvedPayload('test'),
           walletConnectSyncCode: resolvedPayload('test')
@@ -431,7 +431,7 @@ describe('useConnect hook', () => {
       await result.current[7]('wallet-wc-valid', {
         title: 'wc test',
         pairingPayload: {
-          networkType: NetworkType.GHOSTNET,
+          networkType: NetworkType.SHADOWNET,
           p2pSyncCode: resolvedPayload('test'),
           postmessageSyncCode: resolvedPayload('test'),
           walletConnectSyncCode: resolvedPayload('test')
@@ -476,7 +476,7 @@ describe('useConnect hook', () => {
       clickPromise = result.current[7]('wallet-web-wc', {
         title: 'wc web fallback test',
         pairingPayload: {
-          networkType: NetworkType.GHOSTNET,
+          networkType: NetworkType.SHADOWNET,
           p2pSyncCode: resolvedPayload('test'),
           postmessageSyncCode: resolvedPayload('test'),
           walletConnectSyncCode: resolvedPayload('test')
@@ -526,7 +526,7 @@ describe('useConnect hook', () => {
       await result.current[7]('wallet-wc-invalid', {
         title: 'wc invalid test',
         pairingPayload: {
-          networkType: NetworkType.GHOSTNET,
+          networkType: NetworkType.SHADOWNET,
           p2pSyncCode: resolvedPayload('test'),
           postmessageSyncCode: resolvedPayload('test'),
           walletConnectSyncCode: resolvedPayload('test')
@@ -569,7 +569,7 @@ describe('useConnect hook', () => {
       await result.current[7]('wallet-final', {
         title: 'final test',
         pairingPayload: {
-          networkType: NetworkType.GHOSTNET,
+          networkType: NetworkType.SHADOWNET,
           p2pSyncCode: resolvedPayload('test'),
           postmessageSyncCode: resolvedPayload('test'),
           walletConnectSyncCode: resolvedPayload('test')
@@ -614,7 +614,7 @@ describe('useConnect hook', () => {
         {
           title: 'new tab test',
           pairingPayload: {
-            networkType: NetworkType.GHOSTNET,
+            networkType: NetworkType.SHADOWNET,
             p2pSyncCode: resolvedPayload('test'),
             postmessageSyncCode: resolvedPayload('test'),
             walletConnectSyncCode: resolvedPayload('test')
@@ -906,7 +906,7 @@ describe('useConnect launch lifetime', () => {
   const config = {
     title: 'Pair wallet',
     pairingPayload: {
-      networkType: NetworkType.GHOSTNET,
+      networkType: NetworkType.SHADOWNET,
       p2pSyncCode: resolvedPayload('unused'),
       postmessageSyncCode: resolvedPayload('unused'),
       walletConnectSyncCode: resolvedPayload('unused')

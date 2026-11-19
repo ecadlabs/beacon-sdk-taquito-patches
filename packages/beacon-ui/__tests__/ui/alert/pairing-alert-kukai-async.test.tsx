@@ -112,7 +112,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
         p2pSyncCode: Promise.resolve('p2p-code'),
         postmessageSyncCode: Promise.resolve('post-code'),
         walletConnectSyncCode: wcPairing.promise,
-        networkType: NetworkType.GHOSTNET
+        networkType: NetworkType.SHADOWNET
       }
     }
 
@@ -195,7 +195,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
             p2pSyncCode: Promise.resolve('p2p-code'),
             postmessageSyncCode: Promise.resolve('post-code'),
             walletConnectSyncCode: Promise.resolve({ ok: false, reason }),
-            networkType: NetworkType.GHOSTNET
+            networkType: NetworkType.SHADOWNET
           }}
         />
       )
@@ -225,7 +225,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
           p2pSyncCode: Promise.resolve('p2p-code'),
           postmessageSyncCode: Promise.resolve('post-code'),
           walletConnectSyncCode: firstAttempt.promise,
-          networkType: NetworkType.GHOSTNET
+          networkType: NetworkType.SHADOWNET
         }
       }
       const view = render(<PairingAlert {...props} />)
@@ -281,7 +281,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
         p2pSyncCode: Promise.resolve('p2p-code'),
         postmessageSyncCode: Promise.resolve('post-code'),
         walletConnectSyncCode: firstAttempt.promise,
-        networkType: NetworkType.GHOSTNET
+        networkType: NetworkType.SHADOWNET
       }
     }
     const view = render(<PairingAlert {...props} />)
@@ -317,7 +317,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
         p2pSyncCode: Promise.resolve('p2p-1'),
         postmessageSyncCode: Promise.resolve('post-1'),
         walletConnectSyncCode: firstWc.promise,
-        networkType: NetworkType.GHOSTNET
+        networkType: NetworkType.SHADOWNET
       }
     }
     const view = render(<PairingAlert {...props} />)
@@ -332,7 +332,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
             ok: true,
             uri: 'wc:fresh@2?symKey=abc&relay-protocol=irn'
           }),
-          networkType: NetworkType.GHOSTNET
+          networkType: NetworkType.SHADOWNET
         }}
       />
     )
@@ -357,7 +357,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
           p2pSyncCode: Promise.resolve('p2p-code'),
           postmessageSyncCode: Promise.resolve('post-code'),
           walletConnectSyncCode: Promise.resolve('wc:first@2?symKey=abc&relay-protocol=irn'),
-          networkType: NetworkType.GHOSTNET
+          networkType: NetworkType.SHADOWNET
         }
       }
       try {
@@ -412,7 +412,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
           p2pSyncCode: Promise.resolve('p2p-code'),
           postmessageSyncCode: Promise.resolve('post-code'),
           walletConnectSyncCode: Promise.resolve('wc:old@2?symKey=abc&relay-protocol=irn'),
-          networkType: NetworkType.GHOSTNET
+          networkType: NetworkType.SHADOWNET
         }
       }
       const view = render(<PairingAlert {...props} />)
@@ -455,7 +455,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
           p2pSyncCode: pairing.promise,
           postmessageSyncCode: Promise.resolve('post'),
           walletConnectSyncCode: Promise.resolve('unused'),
-          networkType: NetworkType.GHOSTNET
+          networkType: NetworkType.SHADOWNET
         }
       }
       const view = render(<PairingAlert {...props} />)
