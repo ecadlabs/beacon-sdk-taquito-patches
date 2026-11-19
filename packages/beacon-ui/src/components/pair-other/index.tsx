@@ -1,5 +1,9 @@
 import { reportDiagnostic } from '@ecadlabs/beacon-core'
-import { getBeaconMessages, WalletConnectPairingFailureReason } from '@ecadlabs/beacon-types'
+import {
+  getBeaconMessages,
+  interpolateBeaconMessage,
+  WalletConnectPairingFailureReason
+} from '@ecadlabs/beacon-types'
 import React, { useState, useLayoutEffect, useRef } from 'react'
 import { QR } from '../qr'
 import { WCInitError } from '../../ui/alert/components/pairing-alert/components/wc-init-error'
@@ -32,14 +36,14 @@ const isSelectionCurrent = (
 
 export const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
   const { p2pPayload, wcPayload } = props
-  const [beaconAvailability, setBeaconAvailability] = useState({
-    payload: p2pPayload,
-    available: false
-  })
-  const [wcAvailability, setWcAvailability] = useState({
-    payload: wcPayload,
-    available: false
-  })
+  const [beaconAvailability, setBeaconAvailability] = useState<{
+    payload: typeof p2pPayload
+    available: boolean
+  }>()
+  const [wcAvailability, setWcAvailability] = useState<{
+    payload: typeof wcPayload
+    available: boolean
+  }>()
   const [selection, setSelection] = useState<PairOtherSelection>()
   const clickGeneration = useRef(0)
   const latestPayloads = useRef({ p2pPayload, wcPayload })
@@ -60,7 +64,7 @@ export const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
 
   useLayoutEffect(() => {
     let current = true
-    setBeaconAvailability({ payload: p2pPayload, available: false })
+    setBeaconAvailability(undefined)
     setSelection((prev) => (prev?.kind === 'p2p' && prev.payload !== p2pPayload ? undefined : prev))
     p2pPayload.then(
       (payload) => {
@@ -82,7 +86,7 @@ export const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
 
   useLayoutEffect(() => {
     let current = true
-    setWcAvailability({ payload: wcPayload, available: false })
+    setWcAvailability(undefined)
     setSelection((prev) =>
       prev?.kind === 'walletconnect' && prev.payload !== wcPayload ? undefined : prev
     )
@@ -107,8 +111,10 @@ export const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
     }
   }, [wcPayload])
 
-  const hasBeacon = beaconAvailability.payload === p2pPayload && beaconAvailability.available
-  const hasWalletConnect = wcAvailability.payload === wcPayload && wcAvailability.available
+  const hasBeacon =
+    beaconAvailability?.payload === p2pPayload ? beaconAvailability.available : undefined
+  const hasWalletConnect =
+    wcAvailability?.payload === wcPayload ? wcAvailability.available : undefined
   const currentSelection = isSelectionCurrent(selection, p2pPayload, wcPayload)
     ? selection
     : undefined
@@ -154,6 +160,13 @@ export const PairOther: React.FC<PairOtherProps> = (props: PairOtherProps) => {
       <div>
         <span className="pair-other-info">{ui.selectQrType}</span>
         <br />
+        {!hasBeacon && !hasWalletConnect && (
+          <span role="status">
+            {hasBeacon === undefined || hasWalletConnect === undefined
+              ? interpolateBeaconMessage(ui.preparingQrCode, { wallet: ui.defaultWalletName })
+              : ui.notConnected}
+          </span>
+        )}
         {hasBeacon && (
           <button
             type="button"

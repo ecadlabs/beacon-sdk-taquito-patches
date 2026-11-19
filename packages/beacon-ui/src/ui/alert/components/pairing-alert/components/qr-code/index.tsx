@@ -33,7 +33,7 @@ export const QRCode: React.FC<QRCodeProps> = ({
 
   useLayoutEffect(() => {
     let current = true
-    if (qrCode || supportsWalletConnect) {
+    if (!defaultPairing || qrCode || supportsWalletConnect) {
       return
     }
     const finishLoading = () =>

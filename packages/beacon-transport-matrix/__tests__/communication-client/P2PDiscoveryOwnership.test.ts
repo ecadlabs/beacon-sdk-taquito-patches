@@ -34,14 +34,14 @@ describe('Matrix discovery ownership', () => {
     localStorage.clear()
   })
 
-  const create = async () => {
+  const create = async (servers = [relay]) => {
     const storage = new LocalStorage('discovery-ownership')
     const client = new P2PCommunicationClient(
       'Test',
       await getKeypairFromSeed('discovery-ownership'),
       1,
       storage,
-      { [Regions.EUROPE_WEST]: [relay] }
+      { [Regions.EUROPE_WEST]: servers }
     )
     clients.push(client)
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => relayResponse())
@@ -65,6 +65,36 @@ describe('Matrix discovery ownership', () => {
     // Drain queued storage events before checking discovery timer disposal.
     await vi.advanceTimersByTimeAsync(0)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('retires remaining probes when a selected relay session is stopped', async () => {
+    const slow = 'held.example'
+    const { client, fetch, storage } = await create([relay, slow])
+    const held = new ExposedPromise<Response>()
+    let signal: AbortSignal | null | undefined
+    fetch.mockImplementation(async (url, init) => {
+      if (String(url).includes(slow)) {
+        signal = init?.signal
+        return held.promise
+      }
+      return relayResponse()
+    })
+    const discovery = client.getRelayServer()
+    const outcome = Promise.allSettled([discovery])
+    try {
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(client.currentRelayServer).toBe(relay)
+      await client.stop()
+      expect(signal?.aborted).toBe(true)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(vi.getTimerCount()).toBe(0)
+      held.resolve(relayResponse(67890))
+      await setImmediate()
+      await expect(storage.get(StorageKey.MATRIX_SELECTED_NODE)).resolves.toBeUndefined()
+    } finally {
+      held.resolve(relayResponse())
+      await outcome
+    }
   })
 
   it('retains stored relay recovery when a relay-change callback throws synchronously', async () => {

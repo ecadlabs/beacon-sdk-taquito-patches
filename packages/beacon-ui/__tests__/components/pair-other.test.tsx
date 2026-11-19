@@ -38,6 +38,16 @@ describe('PairOther Component', () => {
     onClickLearnMore: vi.fn()
   }
 
+  test('clears preparation feedback when both pairing methods are unavailable', async () => {
+    const pending = deferred()
+    render(
+      <PairOther {...defaultProps} p2pPayload={pending.promise} wcPayload={Promise.resolve('')} />
+    )
+    expect(await screen.findByText(/preparing.*qr/i)).toBeVisible()
+    await act(async () => pending.reject(new Error('relay unavailable')))
+    expect(screen.queryByText(/preparing.*qr/i)).not.toBeInTheDocument()
+  })
+
   test('replaces resolved QR and ignores obsolete availability when payloads change', async () => {
     const oldWC = deferred()
     const nextP2P = deferred()
