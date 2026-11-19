@@ -2344,8 +2344,8 @@ export class DAppClient extends Client {
         service: 'DAppClient',
         method: 'commitActiveAccount',
         args: [
-          `An active account has been received, but no active subscription was found for BeaconEvent.ACTIVE_ACCOUNT_SET.
-        For more information, visit: https://docs.walletbeacon.io/guides/migration-guide`
+          'Subscribe to account changes with client.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, handler). ' +
+            'https://github.com/ecadlabs/beacon-sdk-taquito-patches/blob/taquito-patches/docs/account-lifecycle.md#subscribe-to-active-account-changes'
         ]
       })
     }

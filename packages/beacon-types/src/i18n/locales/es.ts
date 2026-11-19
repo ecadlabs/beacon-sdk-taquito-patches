@@ -1,5 +1,6 @@
 import { BeaconErrorType } from '../../types/BeaconErrorType'
 import { BeaconLocaleMessages } from '../schema'
+import { walletConnectionHelpUrl } from '../wallet-connection-help'
 
 export const esMessages = {
   meta: {
@@ -76,9 +77,8 @@ export const esMessages = {
     preparingRequest: 'Preparando solicitud...',
     noPermissionTitle: 'Sin permiso',
     noPermissionBody: 'Permite que la billetera gestione este tipo de solicitud.',
-    invalidStateTitle: 'Estado no válido',
-    invalidStateBody: `Se recibió una cuenta activa, pero no se encontró ninguna suscripción activa para BeaconEvent.ACTIVE_ACCOUNT_SET.
-    Para obtener más información, visita: https://docs.walletbeacon.io/guides/migration-guide`,
+    invalidStateTitle: 'Conexión con la billetera restablecida',
+    invalidStateBody: 'Vuelve a conectar tu billetera para continuar.',
     errorTitle: 'Error',
     sessionExpiredBody: 'Tu sesión ha expirado. Vuelve a vincular tu billetera.',
     pleaseTryAgain: 'Inténtalo de nuevo.',
@@ -176,10 +176,10 @@ export const esMessages = {
     walletConnectErrors: {
       'relay-unreachable': {
         heading: 'Ocurrió un error de red.',
-        body: 'No se pudo conectar con el repetidor de WalletConnect. Verifica tu conexión a Internet o inténtalo de nuevo; un firewall o proveedor de red también podría estar bloqueando las solicitudes. Como alternativa, intenta conectarte mediante una VPN.',
+        body: 'No se pudo contactar con el servidor de retransmisión de WalletConnect. Revisa tu conexión a Internet y vuelve a intentarlo.',
         link: {
           label: 'Ver guía de solución de problemas de conexión',
-          url: 'https://docs.walletbeacon.io/guides/failed-to-connect'
+          url: walletConnectionHelpUrl
         }
       },
       timeout: {

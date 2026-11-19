@@ -145,7 +145,7 @@ describe('PairingAlert Kukai async pairing paths', () => {
     [
       'relay-unreachable',
       'A network error occurred.',
-      /blocking requests to the WalletConnect relayer/i,
+      /check your internet connection and try again/i,
       'Kukai'
     ],
     [

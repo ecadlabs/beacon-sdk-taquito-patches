@@ -8,6 +8,28 @@ Restoration checks that the shared pointer still names the account and that the 
 
 Custom storage must deliver change notifications for writes from other clients. The storage interface has no conditional transaction operation, so it does not provide atomic ordering across clients using arbitrary asynchronous storage backends.
 
+## Subscribe to active account changes
+
+A wallet can switch accounts or disconnect after the initial permission request.
+Subscribe to `BeaconEvent.ACTIVE_ACCOUNT_SET` when setting up the dApp, before
+requesting permissions. The callback receives the selected account, or
+`undefined` when the selection is cleared.
+
+```ts
+import { BeaconEvent, DAppClient } from '@ecadlabs/beacon-dapp'
+
+export async function bindAccountLabel(client: DAppClient, label: HTMLElement) {
+  return client.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, (account) => {
+    label.textContent = account?.address ?? 'No wallet connected'
+  })
+}
+```
+
+Pass your existing client and the element displaying the connected address to
+`bindAccountLabel`. Await the result and call the returned unsubscribe function
+when that view is removed. For a Taquito `BeaconWallet`, use `wallet.client`
+to register the same event handler.
+
 ## Storage change subscriptions
 
 `StorageChangeEvent` carries physical keys and serialized string values, including

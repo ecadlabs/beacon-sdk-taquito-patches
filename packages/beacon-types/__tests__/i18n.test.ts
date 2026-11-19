@@ -100,6 +100,18 @@ describe('Beacon i18n catalog and error localization', () => {
     }
   })
 
+  it('tells wallet users how to recover after an account reset', () => {
+    expect(enMessages.dapp.invalidStateTitle).toBe('Wallet connection reset')
+    expect(enMessages.dapp.invalidStateBody).toBe('Reconnect your wallet to continue.')
+  })
+
+  it.each(Object.entries(builtInLocales))('uses wallet-facing guidance in %s', (_, catalog) => {
+    expect(catalog.dapp.invalidStateBody).not.toMatch(/ACTIVE_ACCOUNT_SET|https?:\/\//)
+    expect(catalog.ui.walletConnectErrors['relay-unreachable'].link?.url).toBe(
+      'https://github.com/ecadlabs/beacon-sdk-taquito-patches/blob/taquito-patches/docs/wallet-connection-help.md'
+    )
+  })
+
   it('uses a self-contained descriptive link label rather than a sentence fragment in relay-unreachable error copy', () => {
     const linkLabel = enMessages.ui.walletConnectErrors['relay-unreachable'].link?.label
     expect(linkLabel).toBeDefined()

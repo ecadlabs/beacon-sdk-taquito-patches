@@ -1,5 +1,6 @@
 import { BeaconErrorType } from '../../types/BeaconErrorType'
 import { BeaconLocaleMessages } from '../schema'
+import { walletConnectionHelpUrl } from '../wallet-connection-help'
 
 export const deMessages = {
   meta: {
@@ -77,9 +78,8 @@ export const deMessages = {
     preparingRequest: 'Anfrage wird vorbereitet...',
     noPermissionTitle: 'Keine Berechtigung',
     noPermissionBody: 'Bitte erlaube der Wallet, diese Art von Anfrage zu verarbeiten.',
-    invalidStateTitle: 'Ungültiger Zustand',
-    invalidStateBody: `Ein aktives Konto wurde empfangen, aber es wurde keine aktive Subscription für BeaconEvent.ACTIVE_ACCOUNT_SET gefunden.
-    Weitere Informationen unter: https://docs.walletbeacon.io/guides/migration-guide`,
+    invalidStateTitle: 'Wallet-Verbindung zurückgesetzt',
+    invalidStateBody: 'Verbinde deine Wallet erneut, um fortzufahren.',
     errorTitle: 'Fehler',
     sessionExpiredBody: 'Deine Sitzung ist abgelaufen. Bitte kopple deine Wallet erneut.',
     pleaseTryAgain: 'Bitte versuche es erneut.',
@@ -175,10 +175,10 @@ export const deMessages = {
     walletConnectErrors: {
       'relay-unreachable': {
         heading: 'Ein Netzwerkfehler ist aufgetreten.',
-        body: 'Der WalletConnect-Relayer konnte nicht erreicht werden. Überprüfe deine Internetverbindung oder versuche es erneut; möglicherweise blockiert auch eine Firewall oder dein Netzwerkanbieter Anfragen an den Relayer. Versuche alternativ eine Verbindung über ein VPN.',
+        body: 'Der WalletConnect-Relayserver ist nicht erreichbar. Prüfe deine Internetverbindung und versuche es erneut.',
         link: {
           label: 'Anleitung zur Fehlerbehebung bei Verbindungsproblemen anzeigen',
-          url: 'https://docs.walletbeacon.io/guides/failed-to-connect'
+          url: walletConnectionHelpUrl
         }
       },
       timeout: {

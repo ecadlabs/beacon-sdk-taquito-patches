@@ -1,5 +1,6 @@
 import { BeaconErrorType } from '../../types/BeaconErrorType'
 import { BeaconLocaleMessages } from '../schema'
+import { walletConnectionHelpUrl } from '../wallet-connection-help'
 
 export const arMessages = {
   meta: {
@@ -74,9 +75,8 @@ export const arMessages = {
     preparingRequest: 'جاري تحضير الطلب...',
     noPermissionTitle: 'لا يوجد إذن',
     noPermissionBody: 'يرجى السماح للمحفظة بمعالجة هذا النوع من الطلبات.',
-    invalidStateTitle: 'حالة غير صالحة',
-    invalidStateBody: `تم استلام حساب نشط، ولكن لم يتم العثور على اشتراك نشط لـ BeaconEvent.ACTIVE_ACCOUNT_SET.
-    لمزيد من المعلومات، تفضل بزيارة: https://docs.walletbeacon.io/guides/migration-guide`,
+    invalidStateTitle: 'أُعيد ضبط الاتصال بالمحفظة',
+    invalidStateBody: 'أعد توصيل محفظتك للمتابعة.',
     errorTitle: 'خطأ',
     sessionExpiredBody: 'انتهت صلاحية جلستك. يرجى إقران محفظتك مرة أخرى.',
     pleaseTryAgain: 'يرجى المحاولة مرة أخرى.',
@@ -170,10 +170,10 @@ export const arMessages = {
     walletConnectErrors: {
       'relay-unreachable': {
         heading: 'حدث خطأ في الشبكة.',
-        body: 'تعذر الوصول إلى مرحل WalletConnect. تحقق من اتصالك بالإنترنت أو حاول مرة أخرى؛ قد يقوم جدار الحماية أو مزود الشبكة بحظر الطلبات إلى مرحل WalletConnect. كحل بديل، جرب الاتصال عبر شبكة VPN.',
+        body: 'تعذر الوصول إلى خادم ترحيل WalletConnect. تحقق من اتصالك بالإنترنت ثم حاول مرة أخرى.',
         link: {
           label: 'عرض دليل استكشاف أخطاء الاتصال وإصلاحها',
-          url: 'https://docs.walletbeacon.io/guides/failed-to-connect'
+          url: walletConnectionHelpUrl
         }
       },
       timeout: {

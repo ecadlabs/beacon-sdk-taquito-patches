@@ -1,5 +1,6 @@
 import { BeaconErrorType } from '../../types/BeaconErrorType'
 import { BeaconLocaleMessages } from '../schema'
+import { walletConnectionHelpUrl } from '../wallet-connection-help'
 
 export const plMessages = {
   meta: {
@@ -74,9 +75,8 @@ export const plMessages = {
     preparingRequest: 'Przygotowywanie żądania...',
     noPermissionTitle: 'Brak uprawnień',
     noPermissionBody: 'Zezwól portfelowi na obsługę tego typu żądań.',
-    invalidStateTitle: 'Nieprawidłowy stan',
-    invalidStateBody: `Odebrano aktywne konto, ale nie znaleziono aktywnej subskrypcji zdarzenia BeaconEvent.ACTIVE_ACCOUNT_SET.
-    Więcej informacji: https://docs.walletbeacon.io/guides/migration-guide`,
+    invalidStateTitle: 'Zresetowano połączenie z portfelem',
+    invalidStateBody: 'Połącz portfel ponownie, aby kontynuować.',
     errorTitle: 'Błąd',
     sessionExpiredBody: 'Twoja sesja wygasła. Sparuj portfel ponownie.',
     pleaseTryAgain: 'Spróbuj ponownie.',
@@ -175,10 +175,10 @@ export const plMessages = {
     walletConnectErrors: {
       'relay-unreachable': {
         heading: 'Wystąpił błąd sieci.',
-        body: 'Nie udało się połączyć z serwerem przekaźnikowym WalletConnect. Sprawdź połączenie z internetem lub spróbuj ponownie; żądania do serwera WalletConnect może też blokować zapora sieciowa lub dostawca internetu. Możesz też spróbować połączyć się przez VPN.',
+        body: 'Nie udało się połączyć z serwerem przekaźnikowym WalletConnect. Sprawdź połączenie z internetem i spróbuj ponownie.',
         link: {
           label: 'Zobacz przewodnik rozwiązywania problemów z połączeniem',
-          url: 'https://docs.walletbeacon.io/guides/failed-to-connect'
+          url: walletConnectionHelpUrl
         }
       },
       timeout: {

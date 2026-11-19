@@ -1,5 +1,6 @@
 import { BeaconErrorType } from '../../types/BeaconErrorType'
 import { BeaconLocaleMessages } from '../schema'
+import { walletConnectionHelpUrl } from '../wallet-connection-help'
 
 export const jaMessages = {
   meta: {
@@ -76,9 +77,8 @@ export const jaMessages = {
     preparingRequest: 'リクエストを準備中...',
     noPermissionTitle: '権限がありません',
     noPermissionBody: 'この種類のリクエストを処理できるようウォレットで許可してください。',
-    invalidStateTitle: '無効な状態',
-    invalidStateBody: `アクティブなアカウントを受信しましたが、BeaconEvent.ACTIVE_ACCOUNT_SET の有効なサブスクリプションが見つかりませんでした。
-    詳細はこちらをご覧ください: https://docs.walletbeacon.io/guides/migration-guide`,
+    invalidStateTitle: 'ウォレットとの接続がリセットされました',
+    invalidStateBody: '続行するには、ウォレットを再接続してください。',
     errorTitle: 'エラー',
     sessionExpiredBody:
       'セッションの有効期限が切れました。再度ウォレットとペアリングしてください。',
@@ -176,10 +176,10 @@ export const jaMessages = {
     walletConnectErrors: {
       'relay-unreachable': {
         heading: 'ネットワークエラーが発生しました。',
-        body: 'WalletConnectリレイヤーに接続できませんでした。インターネット接続を確認して再試行してください。ファイアウォールやネットワークプロバイダーが接続をブロックしている場合は、VPN経由での接続をお試しください。',
+        body: 'WalletConnect のリレーサーバーに接続できませんでした。インターネット接続を確認して、もう一度お試しください。',
         link: {
           label: '接続トラブルシューティングガイドを見る',
-          url: 'https://docs.walletbeacon.io/guides/failed-to-connect'
+          url: walletConnectionHelpUrl
         }
       },
       timeout: {

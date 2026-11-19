@@ -1,5 +1,6 @@
 import { BeaconErrorType } from '../../types/BeaconErrorType'
 import { BeaconLocaleMessages } from '../schema'
+import { walletConnectionHelpUrl } from '../wallet-connection-help'
 
 export const frMessages = {
   meta: {
@@ -77,9 +78,8 @@ export const frMessages = {
     preparingRequest: 'Préparation de la requête...',
     noPermissionTitle: 'Aucune autorisation',
     noPermissionBody: 'Veuillez autoriser le portefeuille à traiter ce type de requête.',
-    invalidStateTitle: 'État invalide',
-    invalidStateBody: `Un compte actif a été reçu, mais aucun abonnement actif n'a été trouvé pour BeaconEvent.ACTIVE_ACCOUNT_SET.
-    Pour plus d'informations, consultez : https://docs.walletbeacon.io/guides/migration-guide`,
+    invalidStateTitle: 'Connexion au portefeuille réinitialisée',
+    invalidStateBody: 'Reconnectez votre portefeuille pour continuer.',
     errorTitle: 'Erreur',
     sessionExpiredBody: 'Votre session a expiré. Veuillez jumeler à nouveau votre portefeuille.',
     pleaseTryAgain: 'Veuillez réessayer.',
@@ -177,10 +177,10 @@ export const frMessages = {
     walletConnectErrors: {
       'relay-unreachable': {
         heading: 'Une erreur réseau est survenue.',
-        body: 'Impossible de joindre le relais WalletConnect. Vérifiez votre connexion Internet ou réessayez ; un pare-feu ou votre opérateur réseau bloque peut-être les requêtes vers le relais WalletConnect. Vous pouvez essayer de vous connecter via un VPN.',
+        body: 'Impossible de joindre le relais WalletConnect. Vérifiez votre connexion Internet et réessayez.',
         link: {
           label: 'Consulter le guide de dépannage de connexion',
-          url: 'https://docs.walletbeacon.io/guides/failed-to-connect'
+          url: walletConnectionHelpUrl
         }
       },
       timeout: {
