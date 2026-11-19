@@ -230,6 +230,70 @@ describe('Beacon UI i18n, lang, and RTL support', () => {
     expect(builtUi.getBeaconMessages().meta.locale).toBe('ar')
   })
 
+  it('resolves named i18n exports from the built @ecadlabs/beacon-dapp browser ESM entrypoint without Rollup NAMESPACE_CONFLICT or MISSING_EXPORT warnings', async () => {
+    const path = await import('node:path')
+    const { rollup } = await import('rollup')
+    const { nodeResolve } = await import('@rollup/plugin-node-resolve')
+    const dappEsmEntry = path.resolve(__dirname, '../../beacon-dapp/dist/esm/index.js')
+    const warnings: Array<{ code?: string; message: string }> = []
+
+    const bundle = await rollup({
+      input: 'entry.js',
+      onwarn(warning) {
+        if (warning.code === 'NAMESPACE_CONFLICT' || warning.code === 'MISSING_EXPORT') {
+          warnings.push({ code: warning.code, message: warning.message })
+        }
+      },
+      external: (id) =>
+        id !== 'entry.js' &&
+        !id.startsWith('.') &&
+        !id.startsWith('/') &&
+        !id.startsWith('@ecadlabs/beacon-'),
+      plugins: [
+        {
+          name: 'virtual-entry',
+          resolveId(id) {
+            return id === 'entry.js' ? id : null
+          },
+          load(id) {
+            if (id !== 'entry.js') {
+              return null
+            }
+            return `export {
+              configureBeaconI18n,
+              detectBrowserLocale,
+              hasBuiltInLocale,
+              normalizeLocaleTag,
+              resolveBuiltInLocaleCatalog,
+              setBeaconLocale,
+              getBeaconLocale,
+              resolveBeaconLang,
+              setBeaconDirection,
+              getBeaconDirection,
+              setBeaconTranslations,
+              getBeaconTranslations,
+              getBeaconMessages,
+              getBeaconErrorCopy,
+              interpolateBeaconMessage,
+              resetBeaconI18n,
+              subscribeBeaconI18n,
+              builtInLocales,
+              enMessages,
+              frMessages,
+              esMessages,
+              deMessages,
+              jaMessages,
+              arMessages
+            } from ${JSON.stringify(dappEsmEntry)}`
+          }
+        },
+        nodeResolve({ browser: true })
+      ]
+    })
+    await bundle.close()
+    expect(warnings).toEqual([])
+  })
+
   it('repaints mounted <beacon-alert> and <beacon-toast> on runtime setColorMode, window languagechange, and <html lang/dir> mutations', async () => {
     const { ColorMode } = await import('@ecadlabs/beacon-types')
     const { setColorMode, getColorMode } = await import('../src/utils/colorMode')
