@@ -265,11 +265,6 @@ export class P2PCommunicationClient extends CommunicationClient {
     return info
   }
 
-  /**
-   * To get the fastest region, we can't simply do one request, because sometimes,
-   * DNS and SSL handshakes make "faster" connections slower. So we need to do 2 requests
-   * and check which request was the fastest after 1s.
-   */
   public async findBestRegionAndGetServer(
     session = this.session
   ): Promise<{ server: string; timestamp: number } | undefined> {
@@ -289,42 +284,24 @@ export class P2PCommunicationClient extends CommunicationClient {
       )
       .sort(() => Math.random() - 0.5)
 
-    // 2) Fire off all probes in parallel, each catching its own errors
-    interface Result {
-      server: string
-      region: Regions
-      time: number
-      timestamp: number
-    }
-    const results: Result[] = []
-
-    const probePromises = probes.map(({ server, region }) =>
-      (async () => {
-        const start = Date.now()
+    // Probes start together. Late replies still contribute their known servers to this session.
+    const firstReply = new ExposedPromise<Probe & { timestamp: number }>()
+    const allDone = Promise.all(
+      probes.map(async ({ server, region }) => {
         try {
-          const info = await this.getBeaconInfo(server)
-          this.assertRelaySession(session)
-          results.push({
-            server,
-            region,
-            time: Date.now() - start,
-            timestamp: info.timestamp
-          })
-        } catch (err) {
-          logger.warn(`probe for ${server} failed:`, err)
-          // swallow the error so Promise.all never rejects
+          const { timestamp } = await this.getBeaconInfo(server)
+          firstReply.resolve({ server, region, timestamp })
+        } catch (error) {
+          logger.warn(`probe for ${server} failed:`, error)
         }
-      })()
-    )
+      })
+    ).then(() => undefined)
 
-    // 3) Wait until either:
-    //    • all probes settle (fast regions), or
-    //    • we hit our global timeout
     const signal = this.relayAbort.signal
     let timer: ReturnType<typeof setTimeout> | undefined
     let cancel = (): void => undefined
-    const deadline = new Promise<void>((resolve, reject) => {
-      timer = setTimeout(resolve, RESPONSE_WAIT_TIME_MS)
+    const deadline = new Promise<undefined>((resolve, reject) => {
+      timer = setTimeout(() => resolve(undefined), RESPONSE_WAIT_TIME_MS)
       cancel = () => reject(new DOMException('Matrix discovery cancelled', 'AbortError'))
       signal.addEventListener('abort', cancel, { once: true })
       if (signal.aborted) {
@@ -332,26 +309,18 @@ export class P2PCommunicationClient extends CommunicationClient {
       }
     })
     try {
-      await Promise.race([Promise.all(probePromises), deadline])
+      const best = await Promise.race([firstReply.promise, allDone, deadline])
       this.assertRelaySession(session)
+      if (!best) {
+        throw new Error('No server responded.')
+      }
+      this.selectedRegion = best.region
+
+      return { server: best.server, timestamp: best.timestamp }
     } finally {
       clearTimeout(timer)
       signal.removeEventListener('abort', cancel)
     }
-
-    // 4) If nobody replied, bail out
-    if (results.length === 0) {
-      throw new Error('No server responded.')
-    }
-
-    // 5) Pick the lowest-latency reply
-    const best = results.reduce((a, b) => (b.time < a.time ? b : a))
-
-    if (session === this.session) {
-      this.selectedRegion = best.region
-    }
-
-    return { server: best.server, timestamp: best.timestamp }
   }
 
   public async getRelayServer(): Promise<RelayServer> {

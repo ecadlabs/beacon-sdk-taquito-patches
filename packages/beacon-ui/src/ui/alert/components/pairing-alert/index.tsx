@@ -41,6 +41,7 @@ const stackStyle: CSSProperties = {
 }
 
 interface InstallViewProps {
+  isLoading: boolean
   wallet: MergedWallet
   isMobile: boolean
   isWCWorking: boolean
@@ -50,7 +51,7 @@ interface InstallViewProps {
   onInstallExtension: ConnectResult[12]
   onOpenDesktop: ConnectResult[13]
   onDownloadDesktop: ConnectResult[14]
-  qrProps: Omit<QRCodeProps, 'isMobile'>
+  qrProps: Omit<QRCodeProps, 'isMobile' | 'defaultPairing'>
   mobileContent: ReactNode
 }
 
@@ -91,6 +92,7 @@ const ExtensionInstall = ({
 }
 
 const InstallView = ({
+  isLoading,
   wallet,
   isMobile,
   isWCWorking,
@@ -135,9 +137,9 @@ const InstallView = ({
           ]}
         />
       )}
-      {!mobileOS && Boolean(qrProps.qrCode?.length) && wallet.types.includes('ios') && (
-        <QRCode {...qrProps} isMobile={wallet.types.length <= 1} />
-      )}
+      {!mobileOS &&
+        (isLoading || Boolean(qrProps.qrCode?.length)) &&
+        wallet.types.includes('ios') && <QRCode {...qrProps} isMobile={wallet.types.length <= 1} />}
       {mobileOS &&
         wallet.types.includes('ios') &&
         (isWCWorking && wallet.supportedInteractionStandards?.includes('wallet_connect') ? (
@@ -299,7 +301,6 @@ export const PairingAlert: React.FC<PairingAlertProps> = (props) => {
     isWCWorking,
     wcFailureReason,
     qrCode,
-    defaultPairing: p2pPayload,
     handleIsLoading
   }
 
@@ -336,6 +337,7 @@ export const PairingAlert: React.FC<PairingAlertProps> = (props) => {
       <div>
         {state === AlertState.INSTALL && wallet && (
           <InstallView
+            isLoading={isLoading}
             wallet={wallet}
             isMobile={isMobile}
             isWCWorking={isWCWorking}
@@ -368,7 +370,7 @@ export const PairingAlert: React.FC<PairingAlertProps> = (props) => {
             walletList={walletList}
             p2pPayload={p2pPayload}
             wcPayload={wcPayload}
-            qrProps={qrProps}
+            qrProps={{ ...qrProps, defaultPairing: p2pPayload }}
           />
         )}
         {![AlertState.QR, AlertState.INSTALL].includes(state) && (

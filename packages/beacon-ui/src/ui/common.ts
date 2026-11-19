@@ -84,7 +84,7 @@ export interface QRCodeProps {
   wcFailureReason?: WalletConnectPairingFailureReason
   isMobile: boolean
   qrCode?: string
-  defaultPairing: Promise<string>
+  defaultPairing?: Promise<string>
   handleIsLoading: (isLoading: boolean) => void
 }
 
