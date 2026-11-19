@@ -8,6 +8,7 @@ import {
   deMessages,
   jaMessages,
   arMessages,
+  plMessages,
   getBeaconMessages,
   getBeaconErrorCopy,
   configureBeaconI18n,
@@ -64,7 +65,8 @@ export {
   esMessages,
   deMessages,
   jaMessages,
-  arMessages
+  arMessages,
+  plMessages
 }
 
 export type {

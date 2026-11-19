@@ -5,8 +5,9 @@ import { esMessages } from './es'
 import { deMessages } from './de'
 import { jaMessages } from './ja'
 import { arMessages } from './ar'
+import { plMessages } from './pl'
 
-export { enMessages, frMessages, esMessages, deMessages, jaMessages, arMessages }
+export { enMessages, frMessages, esMessages, deMessages, jaMessages, arMessages, plMessages }
 
 export const builtInLocales: Readonly<Record<string, BeaconLocaleMessages>> = {
   en: enMessages,
@@ -14,5 +15,6 @@ export const builtInLocales: Readonly<Record<string, BeaconLocaleMessages>> = {
   es: esMessages,
   de: deMessages,
   ja: jaMessages,
-  ar: arMessages
+  ar: arMessages,
+  pl: plMessages
 }

@@ -70,6 +70,7 @@ export {
   deMessages,
   jaMessages,
   arMessages,
+  plMessages,
   configureBeaconI18n,
   detectBrowserLocale,
   hasBuiltInLocale,

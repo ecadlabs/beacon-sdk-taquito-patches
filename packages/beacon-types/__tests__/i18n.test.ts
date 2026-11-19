@@ -65,7 +65,7 @@ describe('Beacon i18n catalog and error localization', () => {
     const canonicalEntries = collectStringEntries(enMessages as unknown as Record<string, unknown>)
     expect(canonicalEntries.length).toBeGreaterThan(50)
 
-    const expectedLocaleCodes = ['en', 'fr', 'es', 'de', 'ja', 'ar']
+    const expectedLocaleCodes = ['en', 'fr', 'es', 'de', 'ja', 'ar', 'pl']
     for (const code of expectedLocaleCodes) {
       expect(builtInLocales[code]).toBeDefined()
     }

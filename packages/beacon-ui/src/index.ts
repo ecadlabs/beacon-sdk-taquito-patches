@@ -51,7 +51,8 @@ export {
   esMessages,
   deMessages,
   jaMessages,
-  arMessages
+  arMessages,
+  plMessages
 } from './i18n/messages'
 export type {
   DisplayableWalletConnectFailureReason,

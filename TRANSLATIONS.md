@@ -16,6 +16,7 @@ All built-in locale files live in [`packages/beacon-types/src/i18n/locales/`](pa
 | `de` | German   | Deutsch     | `ltr`     | Informal (`du`)      | `packages/beacon-types/src/i18n/locales/de.ts` |
 | `ja` | Japanese | 日本語      | `ltr`     | Polite (`です/ます`) | `packages/beacon-types/src/i18n/locales/ja.ts` |
 | `ar` | Arabic   | العربية     | `rtl`     | Modern Standard      | `packages/beacon-types/src/i18n/locales/ar.ts` |
+| `pl` | Polish   | Polski      | `ltr`     | Informal (`ty`)      | `packages/beacon-types/src/i18n/locales/pl.ts` |
 
 ## 1. Reviewing or Improving an Existing Translation
 
@@ -36,7 +37,7 @@ To add a new language (for example, Portuguese `pt`):
 1. Copy `packages/beacon-types/src/i18n/locales/en.ts` to `packages/beacon-types/src/i18n/locales/pt.ts`.
 2. Update the `meta` section (`locale`, `name`, `direction: 'ltr' | 'rtl'`, and `status: 'human-reviewed'` or `'ai-draft'`).
 3. Translate all strings in `errors`, `dapp`, `ui`, and `aria`, preserving any `{{wallet}}`, `{{standard}}`, `{{suffix}}`, `{{payloadHash}}`, `{{signature}}`, and `{{index}}` tokens.
-4. Register the new locale in `packages/beacon-types/src/i18n/locales/index.ts` (import `ptMessages` and add it to `builtInLocales`).
+4. Register the new locale in `packages/beacon-types/src/i18n/locales/index.ts` (import `ptMessages` and add it to `builtInLocales`), then add `ptMessages` to the named re-exports in `packages/beacon-types/src/i18n/index.ts`, `packages/beacon-core/src/index.ts`, `packages/beacon-dapp/src/index.ts`, `packages/beacon-ui/src/i18n/messages.ts` and `packages/beacon-ui/src/index.ts`, and add the locale code to `expectedLocaleCodes` in `packages/beacon-types/__tests__/i18n.test.ts`.
 5. Run the i18n unit test suite to verify schema completeness and placeholder token parity:
 
 ```bash

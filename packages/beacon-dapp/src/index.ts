@@ -24,6 +24,7 @@ export {
   interpolateBeaconMessage,
   jaMessages,
   normalizeLocaleTag,
+  plMessages,
   registerBeaconClientI18n,
   resetBeaconI18n,
   resolveBeaconLang,

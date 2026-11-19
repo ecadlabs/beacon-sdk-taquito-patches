@@ -6,7 +6,7 @@ export const deMessages = {
     locale: 'de',
     name: 'Deutsch',
     direction: 'ltr',
-    status: 'ai-draft'
+    status: 'human-reviewed'
   },
   errors: {
     [BeaconErrorType.BROADCAST_ERROR]: {
@@ -45,11 +45,11 @@ export const deMessages = {
     },
     [BeaconErrorType.TRANSACTION_INVALID_ERROR]: {
       title: 'Transaktion ungültig',
-      description: 'Die Transaktion ist ungültig und wurde vom Knoten abgelehnt.'
+      description: 'Die Transaktion ist ungültig und wurde vom Node abgelehnt.'
     },
     [BeaconErrorType.SIGNATURE_TYPE_NOT_SUPPORTED]: {
       title: 'Signaturtyp nicht unterstützt',
-      description: 'Die Wallet kann Nutzdaten dieses Typs nicht signieren.'
+      description: 'Die Wallet kann Payloads dieses Typs nicht signieren.'
     },
     [BeaconErrorType.ABORTED_ERROR]: {
       title: 'Abgebrochen',
@@ -78,7 +78,7 @@ export const deMessages = {
     noPermissionTitle: 'Keine Berechtigung',
     noPermissionBody: 'Bitte erlaube der Wallet, diese Art von Anfrage zu verarbeiten.',
     invalidStateTitle: 'Ungültiger Zustand',
-    invalidStateBody: `Ein aktives Konto wurde empfangen, aber es wurde kein aktives Abonnement für BeaconEvent.ACTIVE_ACCOUNT_SET gefunden.
+    invalidStateBody: `Ein aktives Konto wurde empfangen, aber es wurde keine aktive Subscription für BeaconEvent.ACTIVE_ACCOUNT_SET gefunden.
     Weitere Informationen unter: https://docs.walletbeacon.io/guides/migration-guide`,
     errorTitle: 'Fehler',
     sessionExpiredBody: 'Deine Sitzung ist abgelaufen. Bitte kopple deine Wallet erneut.',
@@ -109,7 +109,7 @@ export const deMessages = {
     errorMessageLabel: 'Fehlermeldung',
     operationSubmittedToast: '{{wallet}}\u00A0 hat die Operation erfolgreich eingereicht',
     openBlockexplorer: 'Blockexplorer öffnen',
-    payloadSignedToast: '{{wallet}}\u00A0 hat die Nutzdaten erfolgreich signiert',
+    payloadSignedToast: '{{wallet}}\u00A0 hat den Payload erfolgreich signiert',
     signatureLabel: 'Signatur: {{signature}}',
     blockchainRequestExecutedToast: 'Anfrage von {{wallet}}\u00A0 erfolgreich ausgeführt',
     operationInjectedToast: '{{wallet}}\u00A0 hat die Operation erfolgreich übertragen',
@@ -119,7 +119,7 @@ export const deMessages = {
     noActiveAccountSet: 'Kein aktives Konto festgelegt!',
     operationDetailsRequired: 'Operationsdetails müssen angegeben werden',
     signedTransactionRequired: 'Signierte Transaktion muss angegeben werden',
-    payloadRequired: 'Nutzdaten müssen angegeben werden',
+    payloadRequired: 'Payload muss angegeben werden',
     beaconIdNotDefined: 'BeaconID nicht definiert'
   },
   ui: {

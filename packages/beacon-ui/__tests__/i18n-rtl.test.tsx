@@ -283,7 +283,8 @@ describe('Beacon UI i18n, lang, and RTL support', () => {
               esMessages,
               deMessages,
               jaMessages,
-              arMessages
+              arMessages,
+              plMessages
             } from ${JSON.stringify(dappEsmEntry)}`
           }
         },

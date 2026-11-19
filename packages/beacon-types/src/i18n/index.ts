@@ -23,7 +23,8 @@ import {
   esMessages,
   deMessages,
   jaMessages,
-  arMessages
+  arMessages,
+  plMessages
 } from './locales'
 
 const RTL_SCRIPTS = new Set([
@@ -579,6 +580,7 @@ export {
   deMessages,
   jaMessages,
   arMessages,
+  plMessages,
   type BeaconErrorCopy,
   type BeaconI18nConfig,
   type BeaconLocaleMessages,
