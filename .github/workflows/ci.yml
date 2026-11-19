@@ -111,7 +111,7 @@ jobs:
 
       - name: Run end-to-end tests
         env:
-          BEACON_WC_PROJECT_ID: ${{ secrets.BEACON_WC_PROJECT_ID }}
+          BEACON_WC_PROJECT_ID: ${{ vars.BEACON_WC_PROJECT_ID }}
         run: ./scripts/npm11.sh run e2e:smoke
 
       - name: Run UI viewport rendering tests (when UI-related files change)
