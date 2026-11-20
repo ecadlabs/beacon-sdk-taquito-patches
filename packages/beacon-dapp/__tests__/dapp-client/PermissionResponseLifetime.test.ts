@@ -1,3 +1,4 @@
+import tz5 from '../../../../test-fixtures/tz5-account.json'
 import {
   CommunicationClient,
   getAccountIdentifier,
@@ -332,6 +333,18 @@ describe('Permission response lifetime', () => {
       expect(await dapp.getAccounts()).toEqual([])
     }
   )
+
+  it('activates the tz5 account from a wallet permission response containing an mdpk', async () => {
+    const pending = await request()
+    await transport.receive({ ...response(pending.id), publicKey: tz5.publicKey })
+    await vi.advanceTimersByTimeAsync(0)
+
+    await expect(pending.outcome).resolves.toMatchObject({ value: { publicKey: tz5.publicKey } })
+    await expect(dapp.getActiveAccount()).resolves.toMatchObject({
+      publicKey: tz5.publicKey,
+      address: tz5.publicKeyHash
+    })
+  })
 
   it('aborts before account handling starts and does not adopt a later transition', async () => {
     const pending = await request()

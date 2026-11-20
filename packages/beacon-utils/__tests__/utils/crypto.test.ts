@@ -1,3 +1,4 @@
+import tz5 from '../../../../test-fixtures/tz5-account.json'
 import {
   getAddressFromPublicKey,
   isValidAddress,
@@ -18,6 +19,31 @@ import {
 // Test vectors sourced from:
 // - https://tezos.stackexchange.com/questions/4630/manually-calculate-tz1-address-from-privatte-key-mnemonic
 // - https://blog.unit410.com/tezos/2019/05/28/encoding-tezos-ec-keys.html
+
+describe('Octez ML-DSA-44 account', () => {
+  it('derives the Octez public key hash', async () => {
+    expect(await getAddressFromPublicKey(tz5.publicKey)).toBe(tz5.publicKeyHash)
+  })
+
+  it('rejects a full-length mdpk with a damaged checksum', async () => {
+    const damagedKey = tz5.publicKey.slice(0, -1) + '1'
+    expect(damagedKey).not.toBe(tz5.publicKey)
+    await expect(getAddressFromPublicKey(damagedKey)).rejects.toThrow(/checksum/i)
+  })
+
+  it('recognizes the encoded public key', () => {
+    expect(isPublicKeySC(tz5.publicKey)).toBe(true)
+  })
+
+  it('accepts the checksummed address', () => {
+    expect(isValidAddress(tz5.publicKeyHash)).toBe(true)
+  })
+
+  it('rejects a damaged address checksum and a truncated public key', async () => {
+    expect(isValidAddress(tz5.publicKeyHash.slice(0, -1) + '1')).toBe(false)
+    await expect(getAddressFromPublicKey(tz5.publicKey.slice(0, -1))).rejects.toThrow()
+  })
+})
 
 describe('getAddressFromPublicKey', () => {
   describe('edpk (tz1)', () => {

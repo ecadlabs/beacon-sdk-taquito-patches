@@ -1,3 +1,4 @@
+import tz5 from '../../../../test-fixtures/tz5-account.json'
 import { OutgoingResponseInterceptor } from '../../src/interceptors/OutgoingResponseInterceptor'
 import {
   AppMetadataManager,
@@ -110,6 +111,19 @@ it('derives and persists the permission address and metadata', async () => {
     appMetadata: ownAppMetadata
   })
 })
+it.each([
+  ['wallet supplies the address', tz5.publicKeyHash],
+  ['wallet supplies only the public key', undefined]
+])('persists the tz5 permission when the %s', async (_label, suppliedAddress) => {
+  const config = setup({ ...permission, publicKey: tz5.publicKey, address: suppliedAddress })
+  await config.appMetadataManager.addAppMetadata(metadata)
+  await OutgoingResponseInterceptor.intercept(config)
+  expect(await config.permissionManager.getPermissions()).toMatchObject([
+    { address: tz5.publicKeyHash, publicKey: tz5.publicKey }
+  ])
+  expect(config.interceptorCallback).toHaveBeenCalledTimes(1)
+})
+
 it('rejects missing metadata before persisting a permission', async () => {
   const config = setup()
   await expect(OutgoingResponseInterceptor.intercept(config)).rejects.toThrow(

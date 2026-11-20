@@ -15,6 +15,11 @@ import {
 export const secretbox_NONCEBYTES = 24 // crypto_secretbox_NONCEBYTES
 export const secretbox_MACBYTES = 16 // crypto_secretbox_MACBYTES
 
+// Octez Base58Check encodings for an ML-DSA-44 public key and its account hash.
+const MDPK_PREFIX = Uint8Array.from([13, 7, 237, 67])
+const TZ5_PREFIX = Uint8Array.from([6, 161, 169])
+const ML_DSA_44_PUBLIC_KEY_BYTES = 1312
+
 const POE_CHALLENGE_BYTES_LENGTH = 20
 const POE_CHALLENGE_PREFIX = 110
 
@@ -159,6 +164,22 @@ export async function openCryptobox(
  * @param publicKey
  */
 export async function getAddressFromPublicKey(publicKey: string): Promise<string> {
+  if (publicKey.startsWith('mdpk')) {
+    if (publicKey.length !== 1802) {
+      throw new Error('invalid publicKey: invalid mdpk length')
+    }
+    const decoded = bs58check.decode(publicKey)
+    if (
+      decoded.length !== MDPK_PREFIX.length + ML_DSA_44_PUBLIC_KEY_BYTES ||
+      !MDPK_PREFIX.every((byte, index) => decoded[index] === byte)
+    ) {
+      throw new Error('invalid publicKey: invalid mdpk encoding')
+    }
+    const accountHash = hash(decoded.subarray(MDPK_PREFIX.length), 20)
+
+    return bs58check.encode(concat(TZ5_PREFIX, accountHash))
+  }
+
   const prefixes = {
     // tz1...
     edpk: {
@@ -275,14 +296,20 @@ export const signMessage = async (
 }
 
 export const isValidAddress = (address: string): boolean => {
-  const prefixes = ['tz1', 'tz2', 'tz3', 'tz4', 'KT1', 'txr1', 'sr1']
+  const prefixes = ['tz1', 'tz2', 'tz3', 'tz4', 'tz5', 'KT1', 'txr1', 'sr1']
 
   if (!prefixes.some((p) => address.toLowerCase().startsWith(p.toLowerCase()))) {
     return false
   }
 
   try {
-    bs58check.decode(address)
+    const decoded = bs58check.decode(address)
+    if (address.toLowerCase().startsWith('tz5')) {
+      return (
+        decoded.length === TZ5_PREFIX.length + 20 &&
+        TZ5_PREFIX.every((byte, index) => decoded[index] === byte)
+      )
+    }
   } catch {
     return false
   }
@@ -316,6 +343,7 @@ export function isPublicKeySC(publicKey: string): boolean {
     publicKey.startsWith('edpk') ||
     publicKey.startsWith('sppk') ||
     publicKey.startsWith('p2pk') ||
-    publicKey.startsWith('BLpk')
+    publicKey.startsWith('BLpk') ||
+    publicKey.startsWith('mdpk')
   )
 }

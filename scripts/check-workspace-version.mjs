@@ -9,6 +9,15 @@ const workspacePackages = getWorkspacePackages()
 const workspaceNames = new Set(workspacePackages.map((pkg) => pkg.manifest.name))
 const versionErrors = []
 
+if (process.env.GITHUB_REF_TYPE === 'tag') {
+  const releaseTag = process.env.GITHUB_REF_NAME
+  if (releaseTag !== `v${expectedVersion}`) {
+    versionErrors.push(
+      `Release tag ${releaseTag} must match workspace version v${expectedVersion}.`
+    )
+  }
+}
+
 for (const pkg of workspacePackages) {
   if (pkg.manifest.version !== expectedVersion) {
     versionErrors.push(
