@@ -1,1 +1,1 @@
-import '@testing-library/jest-dom/vitest'
+import '../../test-fixtures/vitest-dom-matchers'

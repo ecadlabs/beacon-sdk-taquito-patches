@@ -6,8 +6,10 @@ test and tooling projects with `--noEmit`. The named groups can also run as
 Run the normal package build first so workspace declaration dependencies exist.
 The checks use the root's pinned TypeScript compiler.
 
-Production uses each package's `tsconfig.json`. These projects select source
-files and do not provide Vitest globals. The UI source config matches the
+The canonical `getWorkspacePackages()` catalog owns the required production
+projects. Every catalogued package must have a `tsconfig.json`; deleting a config
+fails coverage rather than removing that package from the inventory.
+These projects select source files and do not provide Vitest globals. The UI source config matches the
 source-only selection already used by Rollup; test files belong to its separate
 test config. Production emit targets, module formats and output paths are
 unchanged by the no-emit checks.
@@ -20,25 +22,24 @@ models the supported Node 22+ test runtime, including `Promise.withResolvers`;
 it does not change the production browser target. Cross-package helpers can be
 imported without placing them under a production `rootDir`.
 
-Only the UI no-emit test project sets `skipLibCheck: true`. The installed
-`@testing-library/jest-dom` 7.0.1 augmentation declares `Assertion<T>`, while
-Vitest 5.1.1 declares `Assertion<R, T>`. This exception skips all declaration
-checking in that UI test program, including project declarations; its test and
-source TypeScript remain checked. Remove it after a compatible augmentation is
-available and verified.
+All targets check declaration files. Six packages no longer load unused DOM
+matcher setup files. Their tests use Vitest's own matchers; utilities retain
+their crypto setup and UI retains its required DOM matchers.
 
-Six SDK packages no longer load unused DOM matcher setup files. Their tests use
-Vitest's own matchers, so their declaration checks stay enabled. Utilities keep
-their crypto setup, and UI keeps its required DOM matchers. The other eight new
-test projects, the retained narrow wallet compiler check, production and tooling
-all retain declaration checking.
+The shared DOM matcher setup imports
+jest-dom's standalone matchers and extends Vitest's public `Matchers` interface.
+The package's `/vitest` augmentation currently declares a one-parameter
+`Assertion`, incompatible with Vitest 5's two-parameter declaration. Using the
+standalone integration preserves the same runtime `expect.extend` registration
+without skipping declaration diagnostics. The root compatibility project owns
+this shared test helper.
 
 | Project                | Ownership and environment                                                                               |
 | ---------------------- | ------------------------------------------------------------------------------------------------------- |
 | `tsconfig.tools.json`  | UI Vite TS config; ES modules, bundler resolution, Node types                                           |
 | `tsconfig.e2e.json`    | Playwright configuration, browser tests and e2e helpers; NodeNext resolution, Node/Chrome types and DOM |
 | `tsconfig.server.json` | Legacy `server.ts`; NodeNext resolution and Node types                                                  |
-| `tsconfig.compat.json` | Root client-options compatibility fixtures; Node/Chrome types                                           |
+| `tsconfig.compat.json` | Root compatibility fixtures and shared test helpers; Node/Chrome types                                  |
 
 These tooling projects have no Vitest globals. Compiler-backed negative tests
 still run through their existing test cases, including the narrow Wallet
@@ -55,8 +56,8 @@ generated build, coverage and browser-report directories:
 and `playwright-report`. New intended tests or tooling need a parsed target,
 even when their runtime test runner already discovers them.
 
-The package Vitest configs are `.mjs` after #268. They remain under lint and
-runtime checks, not these TypeScript targets.
+Package Vitest configs are `.mjs` after #268. They remain under lint and
+runtime checks, outside these TypeScript targets.
 
 JavaScript scripts, tests, config files and mocks are explicitly outside this
 static typecheck policy: `allowJs` and `checkJs` are false in the new targets.

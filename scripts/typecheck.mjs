@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import { getWorkspacePackages } from './workspace-utils.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
@@ -18,12 +19,8 @@ const testPackages = [
   'beacon-utils',
   'beacon-wallet'
 ]
-const production = readdirSync(resolve(root, 'packages'), { withFileTypes: true })
-  .filter(
-    (entry) =>
-      entry.isDirectory() && existsSync(resolve(root, 'packages', entry.name, 'tsconfig.json'))
-  )
-  .map((entry) => `packages/${entry.name}/tsconfig.json`)
+const production = getWorkspacePackages()
+  .map(({ directory }) => relative(root, resolve(directory, 'tsconfig.json')))
   .sort()
 const groups = {
   production,

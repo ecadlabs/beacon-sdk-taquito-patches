@@ -1,5 +1,4 @@
 import { render, screen, fireEvent } from '@testing-library/react'
-import '@testing-library/jest-dom/vitest'
 import { Info } from '../../src/components/info/index'
 import { InfoProps } from '../../src/ui/common'
 
