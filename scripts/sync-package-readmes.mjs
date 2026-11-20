@@ -1,8 +1,13 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 const repoRoot = process.cwd()
 const packagesRoot = path.join(repoRoot, 'packages')
+
+// Authored content has a tracked source independent of the generated README.
+const packageDocumentation = {
+  'beacon-dapp': readFileSync(new URL('./readme-sections/beacon-dapp.md', import.meta.url), 'utf8')
+}
 
 const primaryPackages = new Set(['beacon-sdk', 'beacon-dapp', 'beacon-wallet'])
 const addOnPackages = new Set(['beacon-blockchain-tezos', 'beacon-blockchain-tezos-sapling'])
@@ -90,26 +95,33 @@ ${recommendedEntryPoints(dirName)}## Notes
 - Release notes, package policy, and the current package list live in the repository README
 `
 
-for (const dirName of packageDirs) {
+// Read all inputs before writing so missing or malformed inputs leave outputs intact.
+const readmes = packageDirs.map((dirName) => {
   const packageDir = path.join(packagesRoot, dirName)
-  const packageJson = JSON.parse(readFileSync(path.join(packageDir, 'package.json'), 'utf8'))
-  const readmePath = path.join(packageDir, 'README.md')
+  const manifestPath = path.join(packageDir, 'package.json')
+  const packageJson = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  for (const field of ['name', 'description']) {
+    if (typeof packageJson?.[field] !== 'string' || packageJson[field].trim().length === 0) {
+      throw new Error(
+        `Invalid package metadata in ${manifestPath}: ${field} must be a nonempty string`
+      )
+    }
+  }
+  const documentation = packageDocumentation[dirName]
 
-  const guide =
-    dirName === 'beacon-dapp'
-      ? '\n' + readFileSync(new URL('./readme-sections/beacon-dapp.md', import.meta.url), 'utf8')
-      : ''
+  return {
+    path: path.join(packageDir, 'README.md'),
+    content:
+      template({
+        packageName: packageJson.name,
+        description: packageJson.description,
+        dirName
+      }) + (documentation === undefined ? '' : `\n${documentation}`)
+  }
+})
 
-  mkdirSync(packageDir, { recursive: true })
-  writeFileSync(
-    readmePath,
-    template({
-      packageName: packageJson.name,
-      description: packageJson.description,
-      dirName
-    }) + guide,
-    'utf8'
-  )
+for (const readme of readmes) {
+  writeFileSync(readme.path, readme.content, 'utf8')
 }
 
 console.log(`Synced package READMEs for ${packageDirs.length} packages.`)

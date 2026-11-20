@@ -71,7 +71,7 @@ reassess package sourcing in the future.
 1. Apply or merge the desired fix on `taquito-patches`
 2. Set the release version, for example:
    `npm version 4.8.1-ecad.N --no-git-tag-version && npm run version:sync`
-3. Refresh package README files with `npm run readmes:sync`. Edit the [dApp integration guide](scripts/readme-sections/beacon-dapp.md) at its source.
+3. If README inputs changed, run `npm run readmes:sync`. Edit the [dApp integration guide](scripts/readme-sections/beacon-dapp.md) at its source. Version-only releases do not need README regeneration.
 4. Refresh the lockfile: `npm install --package-lock-only --ignore-scripts`
 5. Tag and push: `git tag v4.8.1-ecad.N && git push origin taquito-patches --tags`
 6. GitHub Actions publishes the `@ecadlabs/beacon-*` packages to the public npm registry through npm Trusted Publishers

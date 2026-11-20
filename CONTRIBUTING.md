@@ -66,6 +66,21 @@ scaffolds. Keep formatting changes to generated portions in their generator.
 CI checks formatting once, in the Node 24 build job before package compilation.
 Keep formatting-only normalization separate from behavior changes.
 
+## Package README ownership
+
+Package READMEs are generated from the shared scaffold in
+`scripts/sync-package-readmes.mjs` and package names/descriptions in each
+`package.json`. The dApp guidance has its own required source at
+`scripts/readme-sections/beacon-dapp.md`. Edit these inputs, then run
+`npm run readmes:sync` and commit the generated READMEs with the input changes.
+Do not edit generated package READMEs directly; regeneration replaces them.
+
+Prettier checks the authored Markdown input and generator. Generated package
+READMEs remain excluded. Regeneration requires all inputs before writing any
+README, validates package names and descriptions as nonempty strings, and
+reconstructs deleted outputs. The generator includes no version
+information, so a version-only release does not need README regeneration.
+
 ## Versioning
 
 The workspace root version is the source of truth for the published package
@@ -75,7 +90,6 @@ runtime constant with:
 ```bash
 npm version 4.8.1-ecad.N --no-git-tag-version
 npm run version:sync
-npm run readmes:sync
 npm install --package-lock-only --ignore-scripts
 ```
 
