@@ -331,8 +331,21 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     if (!this.ownsRequest(request)) {
       return
     }
-    this.cancelRequest(id)
-    await this.notifyListeners(this.session?.topic ?? request.topic, response)
+    const topic = this.session?.topic ?? request.topic
+    const listeners = [...this.activeListeners.values()]
+    try {
+      const serialized = await this.serializeMessage(topic, response)
+      // Serialization can outlive cancellation, teardown, or reuse of this ID.
+      if (!this.ownsRequest(request)) {
+        return
+      }
+      this.cancelRequest(id)
+      await Promise.all(listeners.map(async (listener) => listener(serialized)))
+    } finally {
+      if (this.ownsRequest(request)) {
+        this.cancelRequest(id)
+      }
+    }
   }
 
   /**
@@ -2357,20 +2370,27 @@ export class WalletConnectCommunicationClient extends CommunicationClient {
     // }
   }
 
-  private async notifyListeners(
+  private async serializeMessage(
     topic: string,
-    partialResponse: BeaconInputMessage,
-    listeners: MessageListener[] = [...this.activeListeners.values()]
-  ) {
+    partialResponse: BeaconInputMessage
+  ): Promise<string> {
     const response: BeaconBaseMessage = {
       ...partialResponse,
       version: '2',
       senderId: topic
     }
+
+    return new Serializer().serialize(response)
+  }
+
+  private async notifyListeners(
+    topic: string,
+    partialResponse: BeaconInputMessage,
+    listeners: MessageListener[] = [...this.activeListeners.values()]
+  ) {
     // Capture recipients before yielding: teardown may remove these listeners,
     // and a replacement session must not receive the old session's delivery.
-    const serializer = new Serializer()
-    const serialized = await serializer.serialize(response)
+    const serialized = await this.serializeMessage(topic, partialResponse)
 
     await Promise.all(listeners.map(async (listener) => listener(serialized)))
   }

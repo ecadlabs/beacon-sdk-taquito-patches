@@ -104,6 +104,61 @@ describe('WalletConnect request ownership (#102)', () => {
       )
     await flush()
   }
+  it.each(['cancel', 'reuse', 'close'] as const)(
+    'drops a serialized response retired by %s without taking a replacement request',
+    async (retirement) => {
+      const gate = Promise.withResolvers<void>()
+      const original = Serializer.prototype.serialize
+      let serializing = false
+      const writing = vi
+        .spyOn(Serializer.prototype, 'serialize')
+        .mockImplementation(async function (this: Serializer, message) {
+          const encoded = await original.call(this, message)
+          if (
+            typeof message === 'object' &&
+            message !== null &&
+            'type' in message &&
+            'signature' in message &&
+            message.type === BeaconMessageType.SignPayloadResponse &&
+            message.signature === 'stale-signature'
+          ) {
+            serializing = true
+            await gate.promise
+          }
+          return encoded
+        })
+      try {
+        await send('serial-response', 'sign')
+        await send('unrelated-response', 'sign')
+        mockRequests[0].reply.resolve({ signature: 'stale-signature' })
+        await flush()
+        expect(serializing).toBe(true)
+        if (retirement === 'close') {
+          await client.close()
+        } else {
+          client.cancelRequest('serial-response')
+          if (retirement === 'reuse') await send('serial-response', 'sign')
+        }
+        gate.resolve()
+        await flush()
+        expect(responses).not.toContainEqual(
+          expect.objectContaining({ signature: 'stale-signature' })
+        )
+        if (retirement !== 'close') {
+          await complete(1, 'unrelated-response', 'sign', false)
+          if (retirement === 'reuse') await complete(2, 'serial-response', 'sign', false)
+          expect(responses).toEqual([
+            expected('unrelated-response', 'sign', false),
+            ...(retirement === 'reuse' ? [expected('serial-response', 'sign', false)] : [])
+          ])
+        }
+      } finally {
+        gate.resolve()
+        writing.mockRestore()
+      }
+    }
+  )
+
   // Rows are request kinds and outcomes; each runs in both completion orders.
   const cases: Array<[Kind, Kind, boolean]> = [
     ['sign', 'sign', false],
