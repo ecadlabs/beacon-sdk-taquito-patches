@@ -461,6 +461,7 @@ describe('DAppClient plaintext message observers (#149)', () => {
     dapp.subscribeToMessages(() => {
       throw new Error('sync observer failed')
     })
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- This fixture verifies that the observer owner catches an async callback rejection.
     dapp.subscribeToMessages(async () => {
       throw new Error('async observer failed')
     })

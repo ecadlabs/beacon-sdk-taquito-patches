@@ -1,5 +1,11 @@
 import { setImmediate } from 'node:timers/promises'
-import { LocalStorage, Serializer, Transport } from '@ecadlabs/beacon-core'
+import {
+  InternalLogger,
+  LocalStorage,
+  Serializer,
+  Transport,
+  setLogger
+} from '@ecadlabs/beacon-core'
 import { P2PCommunicationClient } from '@ecadlabs/beacon-transport-matrix'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
@@ -80,9 +86,13 @@ class DeliveryTransport extends WalletP2PTransport {
 describe('Wallet listener lifetime', () => {
   const wallets: TestWallet[] = []
 
-  beforeEach(() => localStorage.clear())
+  beforeEach(() => {
+    setLogger(new InternalLogger())
+    localStorage.clear()
+  })
   afterEach(async () => {
     await Promise.allSettled(wallets.splice(0).map((wallet) => wallet.destroy()))
+    setLogger(new InternalLogger())
     vi.restoreAllMocks()
     localStorage.clear()
   })
@@ -155,7 +165,7 @@ describe('Wallet listener lifetime', () => {
 
   it('routes later requests once to the callback supplied by repeated setup', async () => {
     const { wallet, transport } = await create()
-    const first = vi.fn()
+    const first = vi.fn(() => 1)
     const current = vi.fn()
     await wallet.connect(first)
     await wallet.connect(current)
@@ -163,6 +173,44 @@ describe('Wallet listener lifetime', () => {
     await transport.deliver(message)
     expect(first).not.toHaveBeenCalled()
     expect(current).toHaveBeenCalledExactlyOnceWith(message, context)
+  })
+
+  it('reports a synchronous application throw through the existing interceptor handler', async () => {
+    const { wallet, transport } = await create()
+    const failure = new Error('synchronous application failure')
+    const sink = new InternalLogger()
+    const errors = vi.spyOn(sink, 'error')
+    setLogger(sink)
+    await wallet.connect(() => {
+      throw failure
+    })
+
+    await expect(transport.deliver(permission('synchronous-application'))).resolves.toBeUndefined()
+    expect(errors).toHaveBeenCalledWith('WalletClient', 'IncomingRequestInterceptor.intercept', [
+      failure
+    ])
+    await expect(wallet.isConnected).resolves.toBe(true)
+  })
+
+  it('reports a rejected application callback without rejecting delivery or connection readiness', async () => {
+    const { wallet, transport } = await create()
+    const failure = new Error('application callback failed')
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    transport.replay = permission('rejected-application')
+
+    await wallet.connect(async () => {
+      throw failure
+    })
+    await setImmediate()
+
+    await expect(wallet.isConnected).resolves.toBe(true)
+    expect(errors).toHaveBeenCalledWith('Application callback rejected', failure)
+    transport.replay = undefined
+    const received = vi.fn()
+    await wallet.connect(received)
+    const message = permission('after-application-rejection')
+    await transport.deliver(message)
+    expect(received).toHaveBeenCalledExactlyOnceWith(message, context)
   })
 
   it('keeps one-shot readiness across reconnect without awaiting the replay application callback', async () => {

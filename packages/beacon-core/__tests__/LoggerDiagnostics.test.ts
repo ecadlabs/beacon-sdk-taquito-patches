@@ -151,6 +151,7 @@ it('observes rejected asynchronous diagnostic sinks and preserves the original f
     throw new Error('asynchronous sink failed')
   }
   class AsyncLogger extends InternalLogger {
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- This fixture verifies rejection handling for an async sink supplied to the legacy void contract.
     public override async error(): Promise<void> {
       throw new Error('subclass sink failed')
     }

@@ -158,6 +158,7 @@ describe('QR Component', () => {
         if (outcome === 'callback throw') throw failure
         return outcome === 'callback reject' ? Promise.reject(failure) : undefined
       })
+      /* eslint-disable @typescript-eslint/no-misused-promises -- This fixture deliberately supplies a rejecting callback to verify QR's existing failure isolation. */
       const view = render(
         <QR
           isWalletConnect={false}
@@ -167,6 +168,7 @@ describe('QR Component', () => {
           onClickQrCode={onClickQrCode}
         />
       )
+      /* eslint-enable @typescript-eslint/no-misused-promises */
       remove = () => view.unmount()
       const copy = view.container.querySelector('.qr-right')
       if (!copy) throw new Error('Copy action missing')

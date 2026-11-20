@@ -353,7 +353,7 @@ describe('P2PCommunicationClient', () => {
       const event = initialMessage()
       ;(client as any).initialEvent = event
       const gate = createDeferred<void>()
-      vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      vi.spyOn(client, 'isSender').mockResolvedValue(true)
       vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
       vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
       const handler = vi.fn(() => gate.promise)
@@ -420,7 +420,7 @@ describe('P2PCommunicationClient', () => {
       ;(client as any).createCryptoBoxServer.mockImplementation((key: string) =>
         key === otherPublicKey ? keeper.promise : Promise.resolve({ receive: 'key' })
       )
-      vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      vi.spyOn(client, 'isSender').mockResolvedValue(true)
       vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
       vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
       ;(decryptCryptoboxPayload as Mock).mockRejectedValueOnce(new Error('wrong recipient'))
@@ -440,7 +440,7 @@ describe('P2PCommunicationClient', () => {
     it('consumes a matching buffered event once even if its handler rejects', async () => {
       const event = initialMessage()
       ;(client as any).initialEvent = event
-      vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      vi.spyOn(client, 'isSender').mockResolvedValue(true)
       vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
       vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
       const failure = new Error('handler rejected')
@@ -472,7 +472,7 @@ describe('P2PCommunicationClient', () => {
           }
           return []
         })
-        vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+        vi.spyOn(client, 'isSender').mockResolvedValue(true)
         const relay = vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
         const room = vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
         const handler = vi.fn()
@@ -496,7 +496,7 @@ describe('P2PCommunicationClient', () => {
       'ignores a callback resumed after reset at the %s boundary',
       async (boundary) => {
         const gate = createDeferred<void>()
-        const sender = vi.spyOn(client as any, 'isSender').mockImplementation(async () => {
+        const sender = vi.spyOn(client, 'isSender').mockImplementation(async () => {
           if (boundary === 'sender') await gate.promise
           return true
         })
@@ -565,7 +565,7 @@ describe('P2PCommunicationClient', () => {
     )
 
     it('propagates callback rejection after successful message decryption', async () => {
-      vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      vi.spyOn(client, 'isSender').mockResolvedValue(true)
       vi.spyOn(client, 'updateRelayServer').mockResolvedValue(undefined)
       vi.spyOn(client, 'updatePeerRoom').mockResolvedValue(undefined)
       const failure = new Error('message handler failed')
@@ -1140,7 +1140,7 @@ describe('P2PCommunicationClient', () => {
       relay = vi.spyOn(client as any, 'updateRelayServer').mockResolvedValue(undefined)
       vi.spyOn(client as any, 'isTextMessage').mockReturnValue(true)
       vi.spyOn(client as any, 'isChannelOpenMessage').mockResolvedValue(true)
-      vi.spyOn(client as any, 'isSender').mockResolvedValue(true)
+      vi.spyOn(client, 'isSender').mockResolvedValue(true)
       accept = vi.fn()
       await client.listenForChannelOpening(accept)
       handler = fakeMatrixClient.subscribe.mock.calls.at(-1)![1]

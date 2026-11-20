@@ -8,7 +8,8 @@ import {
   getSenderId,
   Logger,
   NOTIFICATION_ORACLE_URL,
-  ClientTransport
+  ClientTransport,
+  reportDiagnostic
 } from '@ecadlabs/beacon-core'
 
 import {
@@ -217,13 +218,15 @@ export class WalletClient extends Client {
    * This method initiates a connection to the P2P network and registers a callback that will be called
    * whenever a message is received.
    *
-   * @param newMessageCallback The callback that will be invoked for every message the transport receives.
+   * @param newMessageCallback The callback invoked for every received message. Returned promises
+   * are observed for rejection without delaying dispatch or connection readiness. A callback
+   * that throws synchronously still reaches the existing interceptor error handler.
    */
   public async connect(
     newMessageCallback: (
       message: WalletRequestOutputMessage,
       connectionContext: ConnectionContext
-    ) => void
+    ) => unknown
   ): Promise<void> {
     const generation = this.deliveryGeneration
     const deliver = (
@@ -232,7 +235,14 @@ export class WalletClient extends Client {
     ): void => {
       // Metadata enrichment can finish after this wallet's listener has been retired.
       if (this.ownsDelivery(generation)) {
-        newMessageCallback(message, connectionContext)
+        Promise.resolve(newMessageCallback(message, connectionContext)).catch((error: unknown) =>
+          reportDiagnostic({
+            level: 'error',
+            service: 'WalletClient',
+            method: 'connect',
+            args: ['Application callback rejected', error]
+          })
+        )
       }
     }
     this.handleResponse = async (

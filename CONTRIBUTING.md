@@ -97,3 +97,10 @@ facade also stay together, as do the WalletConnect error classes. ESLint allows
 only their current class counts in those named files. Other files retain the
 one-class limit. Splitting these families solely to satisfy the file limit would
 scatter the declarations without changing their responsibilities.
+
+## Async callbacks in tests and tooling
+
+The tooling lint gate checks promises passed to void-returning callbacks. Keep spy targets typed
+with their real asynchronous method signatures so test gates retain promise ownership.
+Rejection-isolation fixtures use explained, local exceptions when they deliberately pass an async
+callback through a legacy void contract. Their assertions must still verify rejection handling.

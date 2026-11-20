@@ -595,7 +595,10 @@ describe('DAppClient: basic unit tests', () => {
     vi.spyOn(client as any, 'onNewAccount').mockResolvedValue(output.accountInfo)
     vi.spyOn(client as any, 'notifySuccess').mockResolvedValue(undefined)
     vi.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
-    vi.spyOn((client as any).accountManager, 'addAccount').mockResolvedValue(undefined)
+    vi.spyOn(
+      (client as unknown as { accountManager: DAppClient['accountManager'] }).accountManager,
+      'addAccount'
+    ).mockResolvedValue(undefined)
 
     const firstRequest = client.requestPermissions()
     const secondRequest = client.requestPermissions()
@@ -695,7 +698,10 @@ describe('DAppClient: basic unit tests', () => {
     vi.spyOn(client as any, 'onNewAccount').mockResolvedValue(output.accountInfo)
     vi.spyOn(client as any, 'notifySuccess').mockResolvedValue(undefined)
     vi.spyOn(client as any, 'getWalletInfo').mockResolvedValue({})
-    vi.spyOn((client as any).accountManager, 'addAccount').mockResolvedValue(undefined)
+    vi.spyOn(
+      (client as unknown as { accountManager: DAppClient['accountManager'] }).accountManager,
+      'addAccount'
+    ).mockResolvedValue(undefined)
 
     const firstRequest = client.requestPermissions()
 
@@ -856,7 +862,7 @@ describe('DAppClient: basic unit tests', () => {
       getPairingRequestInfo: vi.fn().mockResolvedValue({ uri: 'wc:test-topic@2?symKey=test' })
     }
     const initInternalTransports = vi
-      .spyOn(client as any, 'initInternalTransports')
+      .spyOn(client, 'initInternalTransports')
       .mockImplementation(async function (this: any) {
         this.postMessageTransport = postMessageTransport
         this.p2pTransport = p2pTransport
@@ -1925,7 +1931,7 @@ describe('DAppClient: basic unit tests', () => {
       [StorageKey.TRANSPORT_P2P_PEERS_DAPP]: [p2pPeer]
     })
     const initInternalTransports = vi
-      .spyOn(DAppClient.prototype as any, 'initInternalTransports')
+      .spyOn(DAppClient.prototype, 'initInternalTransports')
       .mockImplementation(async function (this: any) {
         this.p2pTransport = {
           connectionStatus: TransportStatus.CONNECTED,
@@ -2372,7 +2378,7 @@ describe('DAppClient: basic unit tests', () => {
     const p2pPeer = createV480P2PPeer()
     const disconnectP2P = vi.fn().mockResolvedValue(undefined)
     const initInternalTransports = vi
-      .spyOn(DAppClient.prototype as any, 'initInternalTransports')
+      .spyOn(DAppClient.prototype, 'initInternalTransports')
       .mockImplementation(async function (this: any) {
         this.p2pTransport = {
           connectionStatus: TransportStatus.CONNECTED,
@@ -2999,7 +3005,7 @@ describe('DAppClient: basic unit tests', () => {
     }
 
     const initInternalTransports = vi
-      .spyOn(DAppClient.prototype as any, 'initInternalTransports')
+      .spyOn(DAppClient.prototype, 'initInternalTransports')
       .mockImplementation(async function (this: any) {
         this.p2pTransport = p2pTransport
       })
@@ -3246,7 +3252,7 @@ describe('DAppClient: basic unit tests', () => {
     }
 
     const initInternalTransports = vi
-      .spyOn(DAppClient.prototype as any, 'initInternalTransports')
+      .spyOn(DAppClient.prototype, 'initInternalTransports')
       .mockImplementation(async function (this: any) {
         this.p2pTransport = p2pTransport
       })
@@ -3476,7 +3482,10 @@ describe('DAppClient: basic unit tests', () => {
       (client as any).accountManager
     )
     const addAccountSpy = vi
-      .spyOn((client as any).accountManager, 'addAccount')
+      .spyOn(
+        (client as unknown as { accountManager: DAppClient['accountManager'] }).accountManager,
+        'addAccount'
+      )
       .mockImplementationOnce(async (account: any) => {
         await new Promise<void>((resolve) => {
           releaseAddAccount = resolve
@@ -3485,7 +3494,7 @@ describe('DAppClient: basic unit tests', () => {
         return originalAddAccount(account)
       })
     const initTransportsSpy = vi
-      .spyOn(client as any, 'initInternalTransports')
+      .spyOn(client, 'initInternalTransports')
       .mockResolvedValue(undefined)
 
     try {
@@ -3566,7 +3575,10 @@ describe('DAppClient: basic unit tests', () => {
       (client as any).accountManager
     )
     const addAccountSpy = vi
-      .spyOn((client as any).accountManager, 'addAccount')
+      .spyOn(
+        (client as unknown as { accountManager: DAppClient['accountManager'] }).accountManager,
+        'addAccount'
+      )
       .mockImplementationOnce(async (account: any) => {
         await new Promise<void>((resolve) => {
           releaseFirstAdd = resolve
@@ -3575,7 +3587,7 @@ describe('DAppClient: basic unit tests', () => {
         return originalAddAccount(account)
       })
     const initTransportsSpy = vi
-      .spyOn(client as any, 'initInternalTransports')
+      .spyOn(client, 'initInternalTransports')
       .mockResolvedValue(undefined)
     const getPeerSpy = vi.spyOn(client as any, 'getPeer').mockResolvedValue(wcPeer)
 
@@ -3690,7 +3702,12 @@ describe('DAppClient: basic unit tests', () => {
     let releaseInvalidStateCheck!: () => void
     const entered = new ExposedPromise<void>()
     const invalidStateSpy = vi
-      .spyOn(client as any, 'resetDisconnectedWalletConnectSelection')
+      .spyOn(
+        client as unknown as {
+          resetDisconnectedWalletConnectSelection: DAppClient['resetDisconnectedWalletConnectSelection']
+        },
+        'resetDisconnectedWalletConnectSelection'
+      )
       .mockImplementationOnce(async () => {
         await new Promise<void>((resolve) => {
           releaseInvalidStateCheck = resolve
@@ -3699,7 +3716,7 @@ describe('DAppClient: basic unit tests', () => {
         return false
       })
     const initTransportsSpy = vi
-      .spyOn(client as any, 'initInternalTransports')
+      .spyOn(client, 'initInternalTransports')
       .mockResolvedValue(undefined)
 
     try {
@@ -3773,14 +3790,19 @@ describe('DAppClient: basic unit tests', () => {
 
     let releaseDisconnect!: () => void
     const disconnectSpy = vi
-      .spyOn(client as any, 'removeAllPeersFromTransports')
+      .spyOn(
+        client as unknown as {
+          removeAllPeersFromTransports: DAppClient['removeAllPeersFromTransports']
+        },
+        'removeAllPeersFromTransports'
+      )
       .mockImplementationOnce(async () => {
         await new Promise<void>((resolve) => {
           releaseDisconnect = resolve
         })
       })
     const initTransportsSpy = vi
-      .spyOn(client as any, 'initInternalTransports')
+      .spyOn(client, 'initInternalTransports')
       .mockResolvedValue(undefined)
 
     try {
@@ -3841,7 +3863,7 @@ describe('DAppClient: basic unit tests', () => {
 
     let releaseInit!: () => void
     const initTransportsSpy = vi
-      .spyOn(client as any, 'initInternalTransports')
+      .spyOn(client, 'initInternalTransports')
       .mockImplementationOnce(async () => {
         await new Promise<void>((resolve) => {
           releaseInit = resolve

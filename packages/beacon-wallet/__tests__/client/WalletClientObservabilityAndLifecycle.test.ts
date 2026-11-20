@@ -1533,3 +1533,12 @@ describe('WalletClient observability, pending requests, changeAccount, and lifec
     })
   })
 })
+
+// These callback forms remain accepted by the public setup API.
+const callbackReturnCompatibility = (wallet: WalletClient): void => {
+  const numberResult = (): number => 1
+  const asyncResult = (): Promise<void> => Promise.resolve()
+  void wallet.connect(numberResult)
+  void wallet.connect(asyncResult)
+}
+void callbackReturnCompatibility

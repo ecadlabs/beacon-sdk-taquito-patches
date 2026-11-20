@@ -616,7 +616,10 @@ describe('WalletConnectCommunicationClient basics', () => {
     let resolveFirstFetch!: (res: Accounts) => void
     let resolveSecondFetch!: (res: Accounts) => void
     const fetchAccountsSpy = vi
-      .spyOn(client as any, 'fetchAccounts')
+      .spyOn(
+        client as unknown as { fetchAccounts: WalletConnectCommunicationClient['fetchAccounts'] },
+        'fetchAccounts'
+      )
       .mockImplementationOnce(
         () =>
           new Promise((resolve) => {
