@@ -7,6 +7,7 @@ import {
 } from '@ecadlabs/beacon-core'
 import {
   AccountInfo,
+  isBeaconError,
   BeaconErrorType,
   BeaconMessage,
   BeaconMessageType,
@@ -560,8 +561,16 @@ describe('V3 permission response lifetime', () => {
     blockchain.getAccountInfosFromPermissionResponse = async () => []
     const pending = await begin()
     await expect(pending.outcome).resolves.toEqual({
-      error: new Error('No accounts returned by blockchain "tezos"')
+      error: expect.objectContaining({
+        errorType: BeaconErrorType.UNKNOWN_ERROR,
+        errorOrigin: 'local',
+        description: 'No accounts returned by blockchain "tezos"',
+        errorData: new Error('No accounts returned by blockchain "tezos"')
+      })
     })
+    const result = await pending.outcome
+    if (!('error' in result) || !isBeaconError(result.error))
+      throw new Error('Expected typed permission failure')
     expect(await dapp.getAccounts()).toEqual([])
     expect(await dapp.getActiveAccount()).toBeUndefined()
     expect(callback).not.toHaveBeenCalled()

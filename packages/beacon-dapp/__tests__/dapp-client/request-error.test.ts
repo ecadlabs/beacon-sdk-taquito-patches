@@ -5,6 +5,7 @@ import {
   OperationResponse,
   SigningType
 } from '@ecadlabs/beacon-types'
+import { isValidIncomingResponseMessage } from '../../src/dapp-client/message-observer'
 import {
   classifyLateResponse,
   toRequestError,
@@ -105,6 +106,32 @@ describe('toRequestError', () => {
 })
 
 describe('classifyLateResponse', () => {
+  it.each(['2', '3'] as const)(
+    'classifies an admitted senderless V%s wallet error as late error',
+    (version) => {
+      const payload = {
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.NOT_GRANTED_ERROR
+      }
+      const message =
+        version === '2'
+          ? { id: 'late-error', version, ...payload }
+          : { id: 'late-error', version, message: payload }
+      if (!isValidIncomingResponseMessage(message))
+        throw new Error('Expected routable legacy error')
+      expect(classifyLateResponse(message, false)).toMatchObject({
+        kind: 'error',
+        error: {
+          id: 'late-error',
+          version,
+          senderId: '',
+          errorOrigin: 'wallet',
+          errorType: payload.errorType
+        }
+      })
+    }
+  )
+
   it.each([
     [
       'V2 operation',

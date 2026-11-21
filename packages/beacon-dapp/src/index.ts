@@ -108,7 +108,8 @@ export type {
   TezosRpcError,
   V3ResponsePayload,
   WireErrorMessage,
-  WireErrorPayload
+  WireErrorPayload,
+  WireRequestErrorResponse
 } from './dapp-client/request-error'
 export {
   isBeaconError,

@@ -3,25 +3,6 @@ import { getBeaconErrorCopy } from '../i18n'
 import { BeaconError } from './BeaconError'
 import { BeaconErrorOptions } from './BeaconErrorOptions'
 
-const BEACON_ERROR_OPTION_KEYS = new Set([
-  'id',
-  'version',
-  'senderId',
-  'errorOrigin',
-  'errorData',
-  'description',
-  'title'
-])
-
-const isBeaconErrorOptionsObject = (value: unknown): value is BeaconErrorOptions => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return false
-  }
-  const keys = Object.keys(value)
-
-  return keys.length > 0 && keys.every((key) => BEACON_ERROR_OPTION_KEYS.has(key))
-}
-
 /**
  * @category Error
  */
@@ -33,22 +14,14 @@ export class TransactionInvalidBeaconError extends BeaconError {
     return { description: this.description, data: JSON.stringify(this.data, undefined, 2) }
   }
 
-  constructor(dataOrOptions?: unknown, maybeOptions?: BeaconErrorOptions) {
-    let resolvedOptions: BeaconErrorOptions | undefined
-    let resolvedData: unknown
-
-    if (maybeOptions !== undefined) {
-      resolvedData = dataOrOptions
-      resolvedOptions = {
-        ...maybeOptions,
-        errorData: maybeOptions.errorData !== undefined ? maybeOptions.errorData : resolvedData
-      }
-    } else if (isBeaconErrorOptionsObject(dataOrOptions)) {
-      resolvedOptions = dataOrOptions
-      resolvedData = resolvedOptions.errorData
-    } else {
-      resolvedData = dataOrOptions
-      resolvedOptions = dataOrOptions !== undefined ? { errorData: dataOrOptions } : undefined
+  /**
+   * The first argument is legacy transaction data, even when it resembles metadata.
+   * Pass envelope metadata explicitly as the second argument.
+   */
+  constructor(data?: unknown, options?: BeaconErrorOptions) {
+    const resolvedOptions = {
+      ...options,
+      errorData: options?.errorData !== undefined ? options.errorData : data
     }
 
     const copy = getBeaconErrorCopy(BeaconErrorType.TRANSACTION_INVALID_ERROR)
@@ -59,6 +32,6 @@ export class TransactionInvalidBeaconError extends BeaconError {
       'TransactionInvalidBeaconError',
       resolvedOptions
     )
-    this.data = resolvedData
+    this.data = data
   }
 }

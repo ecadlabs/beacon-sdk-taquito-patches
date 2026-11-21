@@ -1,4 +1,11 @@
-import { LocalStorage, Serializer } from '@ecadlabs/beacon-core'
+import { BroadcastChannel } from 'broadcast-channel'
+import {
+  AbortedBeaconError,
+  LocalStorage,
+  Serializer,
+  UnknownBeaconError,
+  isBeaconError
+} from '@ecadlabs/beacon-core'
 import { ExposedPromise, getKeypairFromSeed } from '@ecadlabs/beacon-utils'
 import {
   StoredAccountInfo,
@@ -8,10 +15,12 @@ import {
   Blockchain,
   ConnectionContext,
   ErrorResponse,
+  isRequestErrorResponse,
   NetworkType,
   Origin,
   PermissionScope,
   SigningType,
+  StorageKey,
   TransportStatus,
   TransportType
 } from '@ecadlabs/beacon-types'
@@ -19,8 +28,11 @@ import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { DappWalletConnectTransport } from '../../src/transports/DappWalletConnectTransport'
 import { BeaconEvent } from '../../src/events'
 import { ResponseMessage } from '../../src/dapp-client/request-error'
+import { parseBroadcastMessage } from '../../src/dapp-client/broadcast-messages'
+import { isValidIncomingResponseMessage } from '../../src/dapp-client/message-observer'
 
 const bus = vi.hoisted(() => ({
+  cloneErrors: [] as unknown[],
   endpoints: [] as {
     leader: boolean
     receive: (message: unknown) => Promise<void>
@@ -46,7 +58,11 @@ vi.mock('@ecadlabs/beacon-core', async (importOriginal) => ({
     async getLeadership() {}
     async close() {}
     postMessage(message: unknown) {
-      this.endpoint.sent.push(message)
+      try {
+        this.endpoint.sent.push(structuredClone(message))
+      } catch (error) {
+        bus.cloneErrors.push(error)
+      }
     }
   },
   IndexedDBStorage: class {
@@ -162,6 +178,7 @@ describe('Delegated request lifetime', () => {
     vi.useFakeTimers()
     localStorage.clear()
     bus.endpoints.length = 0
+    bus.cloneErrors.length = 0
     delivered.clear()
     deliveryErrors.length = 0
     ready = new ExposedPromise<boolean>()
@@ -227,6 +244,7 @@ describe('Delegated request lifetime', () => {
     vi.clearAllTimers()
     vi.useRealTimers()
     expect(deliveryErrors).toEqual([])
+    expect(bus.cloneErrors).toEqual([])
   })
 
   function deliverTo(endpoint: number, message: unknown) {
@@ -279,6 +297,508 @@ describe('Delegated request lifetime', () => {
     await vi.advanceTimersByTimeAsync(0)
     await deliverResponses()
   }
+
+  it.each(['2', '3'] as const)(
+    'preserves unknown wallet diagnostics and headers after real V%s leader forwarding',
+    async (version) => {
+      const pending = await begin(version)
+      const payload = {
+        type: BeaconMessageType.Error,
+        errorType: 'FUTURE_WALLET_ERROR',
+        errorData: { detail: 'wallet diagnostic' }
+      }
+      const response =
+        version === '3'
+          ? { id: pending.id, senderId: 'wallet', version, message: payload }
+          : { id: pending.id, senderId: 'wallet', version, ...payload }
+      await receiveWallet(response)
+      const forwarded =
+        version === '2'
+          ? { ...response, errorOrigin: 'wallet' }
+          : { ...response, message: { ...payload, errorOrigin: 'wallet' } }
+      expect(bus.endpoints[0].sent).toHaveLength(1)
+      expect(bus.endpoints[0].sent[0]).toMatchObject({
+        type: 'RESPONSE',
+        id: pending.id,
+        data: { message: forwarded }
+      })
+      const outcome = await pending.outcome
+      if (!('error' in outcome) || !isBeaconError(outcome.error))
+        throw new Error('Expected forwarded Beacon error')
+      expect(outcome.error).toBeInstanceOf(UnknownBeaconError)
+      expect(outcome.error).toMatchObject({
+        id: pending.id,
+        senderId: 'wallet',
+        version,
+        errorOrigin: 'wallet',
+        errorType: BeaconErrorType.UNKNOWN_ERROR
+      })
+      expect(outcome.error.errorData).toEqual(payload.errorData)
+      expect(followerFailed).toHaveBeenCalledTimes(1)
+      const event = followerFailed.mock.calls[0][0].errorResponse
+      expect(isRequestErrorResponse(event)).toBe(false)
+      expect(event).toMatchObject({
+        id: pending.id,
+        senderId: 'wallet',
+        version,
+        errorOrigin: 'wallet',
+        errorType: payload.errorType,
+        errorData: payload.errorData
+      })
+    }
+  )
+
+  it.each(['2', '3'] as const)(
+    'rejects a V%s follower when the wallet error has no sender',
+    async (version) => {
+      const pending = await begin(version)
+      const payload = {
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.NOT_GRANTED_ERROR
+      }
+      const response =
+        version === '2'
+          ? { id: pending.id, version, ...payload }
+          : { id: pending.id, version, message: payload }
+      if (!isValidIncomingResponseMessage(response))
+        throw new Error('Expected routable legacy error')
+      await receiveWallet(response)
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      expect(await pending.outcome).toMatchObject({
+        error: {
+          id: pending.id,
+          version,
+          senderId: '',
+          errorOrigin: 'wallet',
+          errorType: payload.errorType
+        }
+      })
+    }
+  )
+
+  it.each(['2', '3'] as const)(
+    'preserves V%s unknown envelope diagnostics on delegated preparation rejection',
+    async (version) => {
+      const response = {
+        id: 'preparation-id',
+        senderId: 'wallet',
+        version,
+        type: BeaconMessageType.Error,
+        errorOrigin: 'wallet',
+        errorType: 'FUTURE_WALLET_ERROR',
+        errorData: { detail: 'preparation diagnostic' }
+      }
+      vi.mocked(leader.init).mockRejectedValueOnce(response)
+      const pending = await begin(version)
+      expect(parseBroadcastMessage(bus.endpoints[0].sent[0])).toHaveProperty('kind', 'response')
+      await deliverResponses()
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      const outcome = await pending.outcome
+      if (!('error' in outcome) || !isBeaconError(outcome.error))
+        throw new Error('Expected delegated Beacon error')
+      expect(outcome.error).toMatchObject({
+        id: pending.id,
+        senderId: 'wallet',
+        version,
+        errorOrigin: 'wallet',
+        errorType: BeaconErrorType.UNKNOWN_ERROR
+      })
+      expect(outcome.error.errorData).toEqual(response.errorData)
+      const event = followerFailed.mock.calls[0][0].errorResponse
+      expect(isRequestErrorResponse(event)).toBe(false)
+      expect(event).toMatchObject({
+        errorType: response.errorType,
+        errorData: response.errorData
+      })
+    }
+  )
+
+  it.each([
+    ['2', 'diagnostic'],
+    ['3', 'diagnostic'],
+    ['2', 'code'],
+    ['3', 'code']
+  ] as const)(
+    'settles a V%s follower after a preparation failure with an uncloneable %s',
+    async (version, field) => {
+      const failure =
+        field === 'diagnostic'
+          ? { message: 'storage read failed', retry() {} }
+          : {
+              type: BeaconMessageType.Error,
+              id: 'initialization',
+              version,
+              senderId: '',
+              errorType() {},
+              message: 'storage read failed'
+            }
+      vi.mocked(leader.init).mockRejectedValueOnce(failure)
+      const pending = await begin(version)
+      expect(bus.cloneErrors).toEqual([])
+      expect(parseBroadcastMessage(bus.endpoints[0].sent[0])).toHaveProperty('kind', 'response')
+      await deliverResponses()
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      const outcome = await pending.outcome
+      if (!('error' in outcome) || !isBeaconError(outcome.error))
+        throw new Error('Expected clone-safe follower rejection')
+      expect(outcome.error).toBeInstanceOf(UnknownBeaconError)
+      expect(outcome.error).toMatchObject({ id: pending.id, errorOrigin: 'local' })
+      expect(outcome.error.errorData).toEqual({
+        message: 'storage read failed',
+        diagnostic: 'Uncloneable request diagnostic'
+      })
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+      await deliverResponses()
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it.each([
+    { label: 'missing' },
+    { label: 'empty', code: '' },
+    { label: 'numeric', code: 42 },
+    { label: 'null', code: null }
+  ])('preserves preparation diagnostics with a $label error code', async (entry) => {
+    const failure = {
+      id: 'initialization',
+      senderId: '',
+      version: '2',
+      type: BeaconMessageType.Error,
+      ...('code' in entry ? { errorType: entry.code } : {}),
+      message: 'driver unavailable',
+      detail: { component: 'plugin' }
+    }
+    const packets = captureLocalStoragePosts()
+    vi.mocked(leader.init).mockRejectedValueOnce(failure)
+    const pending = await begin('2')
+    await deliverViaLocalStorage(packets[0])
+    expect(pending.settled).toHaveBeenCalledTimes(1)
+    const outcome = await pending.outcome
+    if (!('error' in outcome) || !isBeaconError(outcome.error))
+      throw new Error('Expected delegated plugin rejection')
+    expect(outcome.error.errorType).toBe(BeaconErrorType.UNKNOWN_ERROR)
+    expect(outcome.error.errorData).toEqual(failure)
+    expect(follower['requestTracker'].size).toBe(0)
+    expect(leader['requestTracker'].size).toBe(0)
+  })
+
+  function captureLocalStoragePosts() {
+    // Keep the same reference that the async localStorage encoder receives.
+    const packets: unknown[] = []
+    vi.spyOn(leader['multiTabChannel'], 'postMessage').mockImplementation((packet) => {
+      packets.push(packet)
+    })
+    return packets
+  }
+
+  async function deliverViaLocalStorage(packet: unknown) {
+    // The dependency throws from a detached callback for an unencodable packet.
+    expect(() => JSON.stringify(packet)).not.toThrow()
+    const sender = new BroadcastChannel<unknown>('diagnostic', { type: 'localstorage' })
+    const receiver = new BroadcastChannel<unknown>('diagnostic', { type: 'localstorage' })
+    receiver.onmessage = (message) => deliverTo(1, message)
+    try {
+      const posted = sender.postMessage(packet)
+      await vi.advanceTimersByTimeAsync(1)
+      await posted
+    } finally {
+      await Promise.all([sender.close(), receiver.close()])
+    }
+  }
+
+  it.each([
+    ['2', 'typed'],
+    ['3', 'typed'],
+    ['2', 'missing-code'],
+    ['3', 'missing-code'],
+    ['2', 'future-code'],
+    ['3', 'future-code']
+  ] as const)(
+    'settles a V%s follower after a %s preparation error with an empty version',
+    async (version, kind) => {
+      const failure =
+        kind === 'typed'
+          ? new AbortedBeaconError({ version: '', errorOrigin: 'local' })
+          : {
+              id: 'initialization',
+              senderId: '',
+              version: '',
+              type: BeaconMessageType.Error,
+              ...(kind === 'future-code' ? { errorType: 'FUTURE_ERROR' } : {}),
+              errorData: { detail: 'preparation failed' }
+            }
+      const packets = captureLocalStoragePosts()
+      vi.mocked(leader.init).mockRejectedValueOnce(failure)
+      const pending = await begin(version)
+      expect(packets).toHaveLength(1)
+      await deliverViaLocalStorage(packets[0])
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      expect(await pending.outcome).toMatchObject({
+        error: {
+          id: pending.id,
+          version: '2',
+          errorType:
+            kind === 'typed' ? BeaconErrorType.ABORTED_ERROR : BeaconErrorType.UNKNOWN_ERROR
+        }
+      })
+      expect(failure.version).toBe('')
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+      expect(transport.send).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    ['bigint', () => ({ amount: BigInt(12) })],
+    [
+      'cycle',
+      () => {
+        const value = {}
+        return Object.assign(value, { self: value })
+      }
+    ],
+    ['map', () => ({ details: new Map([['attempt', 2]]) })],
+    ['set', () => ({ related: new Set(['permission-cache']) })],
+    ['callback', () => ({ retry() {} })],
+    ['long message', () => ({ message: 'x'.repeat(300), retry() {} })],
+    ['custom JSON conversion', () => ({ nested: new Date(0) })],
+    ['error instance', () => new Error('storage read failed')],
+    [
+      'changing message',
+      () => {
+        let reads = 0
+        return {
+          retry() {},
+          get message() {
+            return ++reads === 1 ? 'first read' : () => {}
+          }
+        }
+      }
+    ]
+  ] as const)(
+    'delivers a marked %s diagnostic through the localStorage channel',
+    async (label, makeFailure) => {
+      const packets = captureLocalStoragePosts()
+      vi.mocked(leader.init).mockRejectedValueOnce(makeFailure())
+      const pending = await begin('3')
+      expect(packets).toHaveLength(1)
+      await deliverViaLocalStorage(packets[0])
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      const outcome = await pending.outcome
+      if (!('error' in outcome) || !isBeaconError(outcome.error))
+        throw new Error('Expected typed follower rejection')
+      expect(outcome.error).toMatchObject({
+        id: pending.id,
+        errorOrigin: 'local',
+        errorData: {
+          diagnostic: 'Uncloneable request diagnostic',
+          message:
+            label === 'error instance'
+              ? 'storage read failed'
+              : label === 'long message'
+                ? 'x'.repeat(256)
+                : 'The request diagnostic could not be copied between tabs.'
+        }
+      })
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+    }
+  )
+
+  it.each([
+    ['root', 'method'],
+    ['root', 'accessor'],
+    ['nested', 'method'],
+    ['nested', 'accessor']
+  ] as const)('copies a %s diagnostic without invoking its toJSON %s', async (location, kind) => {
+    const failure = { message: 'original diagnostic', details: { phase: 'original' } }
+    const details = failure.details
+    const hook = vi.fn(() => {
+      failure.message = 'mutated diagnostic'
+      return { message: 'replacement' }
+    })
+    Object.defineProperty(location === 'root' ? failure : details, 'toJSON', {
+      enumerable: true,
+      ...(kind === 'method' ? { value: hook } : { get: hook })
+    })
+    const packets = captureLocalStoragePosts()
+    vi.mocked(leader.init).mockRejectedValueOnce(failure)
+    const pending = await begin('2')
+    expect(packets).toHaveLength(1)
+    await deliverViaLocalStorage(packets[0])
+    expect(hook).not.toHaveBeenCalled()
+    expect(failure.message).toBe('original diagnostic')
+    expect(failure.details).toBe(details)
+    expect(failure.details.phase).toBe('original')
+    expect(await pending.outcome).toMatchObject({
+      error: {
+        errorData: {
+          message: 'original diagnostic',
+          diagnostic: 'Uncloneable request diagnostic'
+        }
+      }
+    })
+    expect(pending.settled).toHaveBeenCalledTimes(1)
+    expect(follower['requestTracker'].size).toBe(0)
+    expect(leader['requestTracker'].size).toBe(0)
+  })
+
+  it.each(['type', 'id', 'version', 'senderId', 'errorType', 'errorData', 'errorOrigin'] as const)(
+    'forwards a rejected envelope without invoking its %s getter',
+    async (field) => {
+      const details = { phase: 'original' }
+      const hook = vi.fn(() => {
+        details.phase = 'mutated'
+        throw new Error('error envelope getter must not run')
+      })
+      const failure = Object.defineProperty(
+        {
+          type: BeaconMessageType.Error,
+          id: 'preparation',
+          version: '3',
+          senderId: 'wallet',
+          errorType: BeaconErrorType.NOT_GRANTED_ERROR,
+          errorData: details,
+          errorOrigin: 'local',
+          message: 'preparation failed'
+        },
+        field,
+        { enumerable: true, get: hook }
+      )
+      const packets = captureLocalStoragePosts()
+      vi.mocked(leader.init).mockRejectedValueOnce(failure)
+      const pending = await begin('3')
+      expect(packets).toHaveLength(1)
+      await deliverViaLocalStorage(packets[0])
+      expect(hook).not.toHaveBeenCalled()
+      expect(details.phase).toBe('original')
+      expect(await pending.outcome).toMatchObject({
+        error: {
+          errorType: BeaconErrorType.UNKNOWN_ERROR,
+          errorOrigin: 'local',
+          errorData: {
+            message: 'preparation failed',
+            diagnostic: 'Uncloneable request diagnostic'
+          }
+        }
+      })
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+    }
+  )
+
+  it.each(['own', 'inherited'] as const)(
+    'does not invoke a rejected diagnostic %s message getter during forwarding',
+    async (location) => {
+      const details = { phase: 'original' }
+      const hook = vi.fn(() => {
+        details.phase = 'mutated'
+        throw new Error('message getter must not run')
+      })
+      const failure: unknown =
+        location === 'own'
+          ? Object.defineProperty({ details }, 'message', { enumerable: true, get: hook })
+          : Object.create(Object.defineProperty({}, 'message', { get: hook }), {
+              details: { value: details, enumerable: true }
+            })
+      const packets = captureLocalStoragePosts()
+      vi.mocked(leader.init).mockRejectedValueOnce(failure)
+      const pending = await begin('2')
+      expect(packets).toHaveLength(1)
+      await deliverViaLocalStorage(packets[0])
+      expect(hook).not.toHaveBeenCalled()
+      expect(details.phase).toBe('original')
+      expect(await pending.outcome).toMatchObject({
+        error: {
+          errorData: {
+            message: 'The request diagnostic could not be copied between tabs.',
+            diagnostic: 'Uncloneable request diagnostic'
+          }
+        }
+      })
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+    }
+  )
+
+  it('detaches JSON-compatible diagnostic fields before the channel encodes them', async () => {
+    const packets = captureLocalStoragePosts()
+    const failure = {
+      message: 'storage read failed',
+      details: [{ attempt: 2, retry: false }, null]
+    }
+    vi.mocked(leader.init).mockRejectedValueOnce(failure)
+    const pending = await begin('2')
+    expect(packets).toHaveLength(1)
+    failure.details.splice(0)
+    await deliverViaLocalStorage(packets[0])
+    expect(pending.settled).toHaveBeenCalledTimes(1)
+    const outcome = await pending.outcome
+    if (!('error' in outcome) || !isBeaconError(outcome.error))
+      throw new Error('Expected follower diagnostic')
+    expect(outcome.error.errorData).toEqual({
+      message: 'storage read failed',
+      details: [{ attempt: 2, retry: false }, null]
+    })
+  })
+
+  it.each(['wallet', 'preparation'] as const)(
+    'settles a V3 %s error without reading peer metadata',
+    async (source) => {
+      const error = {
+        version: '3',
+        id: 'leader-preparation',
+        senderId: 'wallet',
+        type: BeaconMessageType.Error,
+        errorType: BeaconErrorType.NOT_GRANTED_ERROR
+      }
+      if (source === 'preparation') vi.mocked(leader.init).mockRejectedValueOnce(error)
+      const pending = await begin('3')
+      const storageError = new Error('peer database unavailable')
+      const peerRead = vi.spyOn(follower['storage'], 'get').mockRejectedValueOnce(storageError)
+      if (source === 'wallet') {
+        await receiveWallet({ version: '3', id: pending.id, senderId: 'wallet', message: error })
+      } else {
+        await deliverResponses()
+      }
+      expect(peerRead).not.toHaveBeenCalledWith(StorageKey.TRANSPORT_P2P_PEERS_DAPP)
+      expect(pending.settled).toHaveBeenCalledTimes(1)
+      expect(await pending.outcome).toMatchObject({
+        error: {
+          id: pending.id,
+          version: '3',
+          errorOrigin: source === 'wallet' ? 'wallet' : 'local',
+          errorType: error.errorType
+        }
+      })
+      expect(follower['requestTracker'].size).toBe(0)
+      expect(leader['requestTracker'].size).toBe(0)
+      peerRead.mockRestore()
+    }
+  )
+
+  it('rejects a V3 follower success when peer metadata lookup fails', async () => {
+    const pending = await begin('3')
+    const storageError = new Error('peer database unavailable')
+    vi.spyOn(follower['storage'], 'get').mockRejectedValueOnce(storageError)
+    const success = vi.spyOn(blockchain, 'handleResponse')
+    await receiveWallet(walletSuccess('3', pending.id))
+    expect(pending.settled).toHaveBeenCalledTimes(1)
+    const outcome = await pending.outcome
+    if (!('error' in outcome) || !isBeaconError(outcome.error))
+      throw new Error('Expected typed metadata lookup failure')
+    expect(outcome.error).toMatchObject({
+      id: pending.id,
+      errorOrigin: 'local',
+      errorType: BeaconErrorType.UNKNOWN_ERROR
+    })
+    expect(outcome.error.errorData).toBe(storageError)
+    expect(success).not.toHaveBeenCalled()
+    expect(follower['requestTracker'].size).toBe(0)
+  })
 
   it('does not let a tab response settle a request sent directly by this tab', async () => {
     const pending = observe(
@@ -546,7 +1066,17 @@ describe('Delegated request lifetime', () => {
         type: 'RESPONSE',
         id: pending.id,
         data: {
-          message: localWireError(pending.id, errorType),
+          message: {
+            ...localWireError(pending.id, errorType),
+            ...(kind === 'plain'
+              ? {
+                  errorData: {
+                    message: 'Initialization failed',
+                    diagnostic: 'Uncloneable request diagnostic'
+                  }
+                }
+              : {})
+          },
           connectionInfo: { origin: Origin.WALLETCONNECT, id: '' }
         }
       }

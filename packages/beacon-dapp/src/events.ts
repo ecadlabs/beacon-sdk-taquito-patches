@@ -43,17 +43,19 @@ import {
   interpolateBeaconMessage
 } from '@ecadlabs/beacon-types'
 import {
-  UnknownBeaconError,
   type ClientTransport,
-  Logger,
-  getError
+  Logger
   // EncryptPayloadResponseOutput,
   // EncryptionOperation
 } from '@ecadlabs/beacon-core'
 import type { DAppClientOptions } from './dapp-client/DAppClientOptions'
 import { BlockExplorer } from './utils/block-explorer'
 import { shortenString } from './utils/shorten-string'
-import { LateResponseInfo, RequestErrorResponse } from './dapp-client/request-error'
+import {
+  LateResponseInfo,
+  WireRequestErrorResponse,
+  toBeaconError
+} from './dapp-client/request-error'
 
 const logger = new Logger('BeaconEvents')
 
@@ -247,8 +249,8 @@ export type {
  * The payload types emitted by each BeaconEvent.
  *
  * While DAppClient request methods reject with BeaconError instances (isBeaconError(err) === true),
- * *_REQUEST_ERROR events emit { errorResponse } as a plain RequestErrorResponse object
- * (isRequestErrorResponse(data.errorResponse) === true) for backward compatibility with existing event handlers.
+ * *_REQUEST_ERROR events emit { errorResponse } as a plain WireRequestErrorResponse object.
+ * Wallets may use unfamiliar error codes; isRequestErrorResponse narrows known SDK codes.
  * Event subscribers can call toBeaconError(data.errorResponse) when they want a BeaconError instance.
  */
 export interface BeaconEventType {
@@ -256,11 +258,12 @@ export interface BeaconEventType {
   [BeaconEvent.PERMISSION_REQUEST_SUCCESS]: RequestResponseInfo & PermissionResponseInfo
   /**
    * Emitted when a permission request fails.
-   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * The plain errorResponse preserves unfamiliar wallet codes. Narrow with isRequestErrorResponse
+   * before indexing by BeaconErrorType.
    * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
    */
   [BeaconEvent.PERMISSION_REQUEST_ERROR]: RequestResponseInfo & {
-    errorResponse: RequestErrorResponse
+    errorResponse: WireRequestErrorResponse
     walletInfo: WalletInfo
   }
   [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT]: RequestSentInfo
@@ -273,11 +276,12 @@ export interface BeaconEventType {
   }
   /**
    * Emitted when a proof of event challenge request fails.
-   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * The plain errorResponse preserves unfamiliar wallet codes. Narrow with isRequestErrorResponse
+   * before indexing by BeaconErrorType.
    * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
    */
   [BeaconEvent.PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]: RequestResponseInfo & {
-    errorResponse: RequestErrorResponse
+    errorResponse: WireRequestErrorResponse
     walletInfo: WalletInfo
   }
   [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_SENT]: RequestSentInfo
@@ -290,11 +294,12 @@ export interface BeaconEventType {
   }
   /**
    * Emitted when a simulated proof of event challenge request fails.
-   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * The plain errorResponse preserves unfamiliar wallet codes. Narrow with isRequestErrorResponse
+   * before indexing by BeaconErrorType.
    * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
    */
   [BeaconEvent.SIMULATED_PROOF_OF_EVENT_CHALLENGE_REQUEST_ERROR]: RequestResponseInfo & {
-    errorResponse: RequestErrorResponse
+    errorResponse: WireRequestErrorResponse
     walletInfo: WalletInfo
   }
   [BeaconEvent.OPERATION_REQUEST_SENT]: RequestSentInfo
@@ -307,11 +312,12 @@ export interface BeaconEventType {
   }
   /**
    * Emitted when an operation request fails.
-   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * The plain errorResponse preserves unfamiliar wallet codes. Narrow with isRequestErrorResponse
+   * before indexing by BeaconErrorType.
    * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
    */
   [BeaconEvent.OPERATION_REQUEST_ERROR]: RequestResponseInfo & {
-    errorResponse: RequestErrorResponse
+    errorResponse: WireRequestErrorResponse
     walletInfo: WalletInfo
     errorMessages: Record<string, Record<string | number, string>>
   }
@@ -323,11 +329,12 @@ export interface BeaconEventType {
   }
   /**
    * Emitted when a sign payload request fails.
-   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * The plain errorResponse preserves unfamiliar wallet codes. Narrow with isRequestErrorResponse
+   * before indexing by BeaconErrorType.
    * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
    */
   [BeaconEvent.SIGN_REQUEST_ERROR]: RequestResponseInfo & {
-    errorResponse: RequestErrorResponse
+    errorResponse: WireRequestErrorResponse
     walletInfo: WalletInfo
   }
   // TODO: ENCRYPTION
@@ -337,7 +344,7 @@ export interface BeaconEventType {
   //   connectionContext: ConnectionContext
   //   walletInfo: WalletInfo
   // }
-  // [BeaconEvent.ENCRYPT_REQUEST_ERROR]: { errorResponse: RequestErrorResponse; walletInfo: WalletInfo }
+  // [BeaconEvent.ENCRYPT_REQUEST_ERROR]: { errorResponse: WireRequestErrorResponse; walletInfo: WalletInfo }
   [BeaconEvent.BLOCKCHAIN_REQUEST_SUCCESS]: RequestResponseInfo & { walletInfo: WalletInfo }
   [BeaconEvent.BROADCAST_REQUEST_SENT]: RequestSentInfo
   [BeaconEvent.BROADCAST_REQUEST_SUCCESS]: RequestResponseInfo & {
@@ -349,11 +356,12 @@ export interface BeaconEventType {
   }
   /**
    * Emitted when a broadcast request fails.
-   * The errorResponse is a plain RequestErrorResponse (isRequestErrorResponse(data.errorResponse) === true).
+   * The plain errorResponse preserves unfamiliar wallet codes. Narrow with isRequestErrorResponse
+   * before indexing by BeaconErrorType.
    * Call toBeaconError(data.errorResponse) if a BeaconError instance is needed.
    */
   [BeaconEvent.BROADCAST_REQUEST_ERROR]: RequestResponseInfo & {
-    errorResponse: RequestErrorResponse
+    errorResponse: WireRequestErrorResponse
     walletInfo: WalletInfo
   }
   [BeaconEvent.ACKNOWLEDGE_RECEIVED]: AcknowledgeInfo
@@ -547,7 +555,7 @@ const showGenericErrorAlert = async (errorMessage: string): Promise<void> => {
  * An error the dApp produced itself (timeout, abort) did not come from the wallet, so the
  * toast must not say the wallet returned it.
  */
-const errorToastBody = (errorType: BeaconErrorType, local: boolean): string => {
+const errorToastBody = (errorType: string, local: boolean): string => {
   const { dapp } = getBeaconMessages()
   if (!local) {
     return dapp.walletReturnedError
@@ -569,16 +577,13 @@ const errorToastBody = (errorType: BeaconErrorType, local: boolean): string => {
  */
 const showErrorToast = async (
   response: {
-    errorResponse: RequestErrorResponse
+    errorResponse: WireRequestErrorResponse
     walletInfo: WalletInfo
     errorMessages?: Record<string, Record<string | number, string>>
   },
   buttons?: AlertButton[]
 ): Promise<void> => {
-  const resolveError = () =>
-    response.errorResponse.errorType
-      ? getError(response.errorResponse.errorType, response.errorResponse.errorData)
-      : new UnknownBeaconError()
+  const resolveError = () => toBeaconError(response.errorResponse)
   const local = response.errorResponse.errorOrigin === 'local'
 
   const actions: ToastAction[] = [

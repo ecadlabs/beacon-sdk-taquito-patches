@@ -105,8 +105,8 @@ import {
   StorageValidator,
   MultiTabChannel,
   observeMultiTabChannel,
-  getError,
   getPairingPeerOwnership,
+  BeaconError,
   AbortedBeaconError,
   NoAddressBeaconError,
   NotGrantedBeaconError,
@@ -165,17 +165,20 @@ import { DAppClientOptions } from './DAppClientOptions'
 import { RequestTracker, RequestKey, RequestRoute } from './RequestTracker'
 import {
   classifyLateResponse,
+  diagnosticMessage,
   errorEventResponse,
   isBeaconError,
-  isErrorOrigin,
   isErrorResponse,
   LateResponseInfo,
   localError,
   RequestErrorResponse,
+  WireRequestErrorResponse,
   ResponseMessage,
   responseOutput,
   stampErrorOrigin,
   toRequestError,
+  normalizeErrorResponse,
+  readErrorResponse,
   toBeaconError
 } from './request-error'
 import { PermissionRequestOwner } from './PermissionRequestOwner'
@@ -186,6 +189,7 @@ import {
   MessageObserver
 } from './message-observer'
 import {
+  broadcastErrorData,
   ForwardedBroadcastRequest,
   ForwardedV2Request,
   parseBroadcastMessage,
@@ -364,7 +368,7 @@ type AccountSelectionPublication = Pick<
  * wallets and sending requests.
  *
  * Public DAppClient request methods reject with typed BeaconError subclasses (isBeaconError(err) === true),
- * while *_REQUEST_ERROR events emit { errorResponse } as a plain RequestErrorResponse object
+ * while *_REQUEST_ERROR events emit { errorResponse } as a plain WireRequestErrorResponse object
  * for backward compatibility.
  *
  * @category DApp
@@ -408,6 +412,7 @@ export class DAppClient extends Client {
 
   // Object ownership keeps receipt times through async preparation without retaining settled IDs.
   private readonly responseReceivedAt = new WeakMap<object, number>()
+  private readonly admissionErrors = new WeakSet()
 
   private readonly messageObserver = new MessageObserver()
 
@@ -715,7 +720,6 @@ export class DAppClient extends Client {
       // The WalletConnect adapter builds every message it delivers from WalletConnect results, so
       // the marks it sets are trusted. Messages relayed between tabs arrive without a transport.
       const fromAdapter = transportType === TransportType.WALLETCONNECT
-      const isV3WrappedMessage = message.version === '3' && 'message' in message
 
       const typedMessage = responseOutput(message)
 
@@ -761,11 +765,11 @@ export class DAppClient extends Client {
         this.clearPendingRequestAckTimer(message.id, request.key)
       }
 
-      let appMetadata = responseAppMetadata(message)
-
-      if (!appMetadata && isV3WrappedMessage) {
-        appMetadata = await this.loadResponseAppMetadata(message)
-      }
+      const appMetadata = responseAppMetadata(message)
+      const metadata =
+        !appMetadata && this.needsResponseMetadata(message, typedMessage.type)
+          ? await this.loadResponseAppMetadata(message)
+          : { appMetadata }
 
       if (!request || !this.isRequestCurrent(request.key)) {
         // The deadline can fire while V3 metadata loads. The response is then late, not unknown.
@@ -786,6 +790,12 @@ export class DAppClient extends Client {
         return
       }
 
+      if ('cause' in metadata) {
+        this.rejectMetadataFailure(request.key, metadata.cause, preparing === true, receivedAt)
+        this.messageObserver.notifyIncoming(transportType, message, 'handled')
+
+        return
+      }
       if (typedMessage.type === BeaconMessageType.Acknowledge) {
         return this.handleResponseAcknowledgement({
           key: request.key,
@@ -803,7 +813,9 @@ export class DAppClient extends Client {
         response: { message, connectionInfo },
         receivedAt,
         fromAdapter,
-        preparation: preparing ? { kind: 'permission', appMetadata } : { kind: 'ordinary' },
+        preparation: preparing
+          ? { kind: 'permission', appMetadata: metadata.appMetadata }
+          : { kind: 'ordinary' },
         transportType
       })
     }
@@ -1216,29 +1228,30 @@ export class DAppClient extends Client {
     }
   }
 
-  private buildDelegatedRequestError(id: string, error: unknown): RequestErrorResponse {
-    if (isErrorResponse(error)) {
-      const origin =
-        'errorOrigin' in error && isErrorOrigin(error.errorOrigin) ? error.errorOrigin : 'local'
-
-      return {
+  private buildDelegatedRequestError(id: string, error: unknown): ResponseMessage {
+    const response =
+      readErrorResponse(error) ??
+      localError({
         id,
         type: BeaconMessageType.Error,
-        errorType: error.errorType,
-        senderId: error.senderId ?? '',
-        version: error.version ?? '2',
-        errorOrigin: origin,
-        ...(error.errorData !== undefined ? { errorData: error.errorData } : {})
-      }
-    }
-
-    return localError({
-      id,
+        errorType: BeaconErrorType.UNKNOWN_ERROR,
+        senderId: '',
+        version: '2',
+        errorData: error
+      })
+    const payload = {
       type: BeaconMessageType.Error,
-      errorType: BeaconErrorType.UNKNOWN_ERROR,
-      senderId: '',
-      version: '2'
-    })
+      errorType: response.errorType,
+      errorOrigin: response.errorOrigin,
+      ...(response.errorData !== undefined
+        ? { errorData: broadcastErrorData(response.errorData) }
+        : {})
+    }
+    // Local BeaconError metadata may be empty, but a transport reply must be routable.
+    const version = response.version || '2'
+    const header = { id, senderId: response.senderId, version }
+
+    return version === '3' ? { ...header, message: payload } : { ...header, ...payload }
   }
 
   private async onStorageChanged(
@@ -3166,6 +3179,12 @@ export class DAppClient extends Client {
   }
 
   public async permissionRequest(input: PermissionRequestV3): Promise<PermissionResponseV3> {
+    return this.runPublicRequest(() => this.permissionRequestInternal(input))
+  }
+
+  private async permissionRequestInternal(
+    input: PermissionRequestV3
+  ): Promise<PermissionResponseV3> {
     logger.log('permissionRequest', input)
     const blockchainIdentifier = input.blockchainIdentifier
     const blockchain = this.blockchains.get(blockchainIdentifier)
@@ -3201,16 +3220,21 @@ export class DAppClient extends Client {
       owner.assertCurrent()
 
       const permission = structuredClone(response.message)
+      const invalidResponse = (description: string, errorData: unknown) =>
+        new ParametersInvalidBeaconError({ description, errorOrigin: 'local', errorData })
       if (permission.blockchainIdentifier !== blockchainIdentifier) {
-        throw new Error('Unexpected blockchain in V3 permission response')
+        throw invalidResponse(
+          'Unexpected blockchain in V3 permission response',
+          permission.blockchainIdentifier
+        )
       }
       const rawScopes: unknown = permission.blockchainData?.scopes
       if (!Array.isArray(rawScopes)) {
-        throw new Error('Invalid scopes in V3 permission response')
+        throw invalidResponse('Invalid scopes in V3 permission response', rawScopes)
       }
       const scopes: unknown[] = Array.from(rawScopes)
       if (!scopes.every((scope): scope is string => typeof scope === 'string')) {
-        throw new Error('Invalid scopes in V3 permission response')
+        throw invalidResponse('Invalid scopes in V3 permission response', rawScopes)
       }
       permission.blockchainData.scopes = scopes
       const permissionEnvelope = { ...response, message: permission }
@@ -3270,6 +3294,10 @@ export class DAppClient extends Client {
   }
 
   public async request(input: BlockchainRequestV3): Promise<BlockchainResponseV3> {
+    return this.runPublicRequest(() => this.requestInternal(input))
+  }
+
+  private async requestInternal(input: BlockchainRequestV3): Promise<BlockchainResponseV3> {
     logger.log('request', input)
     const blockchain = this.blockchains.get(input.blockchainIdentifier)
     if (!blockchain) {
@@ -3336,6 +3364,12 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the PermissionRequest message.
    */
   public async requestPermissions(
+    input?: RequestPermissionInput
+  ): Promise<PermissionResponseOutput> {
+    return this.runPublicRequest(() => this.requestPermissionsCoalesced(input))
+  }
+
+  private async requestPermissionsCoalesced(
     input?: RequestPermissionInput
   ): Promise<PermissionResponseOutput> {
     this.assertNotDestroyed()
@@ -3466,6 +3500,10 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the ProofOfEventChallenge message.
    */
   public async requestProofOfEventChallenge(input: RequestProofOfEventChallengeInput) {
+    return this.runPublicRequest(() => this.requestProofOfEventChallengeInternal(input))
+  }
+
+  private async requestProofOfEventChallengeInternal(input: RequestProofOfEventChallengeInput) {
     const activeAccount = await this.getActiveAccount()
 
     if (!activeAccount || !activeAccount.network) {
@@ -3546,6 +3584,12 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the SimulatedProofOfEventChallenge message.
    */
   public async requestSimulatedProofOfEventChallenge(
+    input: RequestSimulatedProofOfEventChallengeInput
+  ) {
+    return this.runPublicRequest(() => this.requestSimulatedProofOfEventChallengeInternal(input))
+  }
+
+  private async requestSimulatedProofOfEventChallengeInternal(
     input: RequestSimulatedProofOfEventChallengeInput
   ) {
     const activeAccount = await this.getActiveAccount()
@@ -3631,6 +3675,12 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the SignPayloadRequest message.
    */
   public async requestSignPayload(
+    input: RequestSignPayloadInput
+  ): Promise<SignPayloadResponseOutput> {
+    return this.runPublicRequest(() => this.requestSignPayloadInternal(input))
+  }
+
+  private async requestSignPayloadInternal(
     input: RequestSignPayloadInput
   ): Promise<SignPayloadResponseOutput> {
     if (!input.payload) {
@@ -3797,6 +3847,12 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the OperationRequest message.
    */
   public async requestOperation(input: RequestOperationInput): Promise<OperationResponseOutput> {
+    return this.runPublicRequest(() => this.requestOperationInternal(input))
+  }
+
+  private async requestOperationInternal(
+    input: RequestOperationInput
+  ): Promise<OperationResponseOutput> {
     if (!input.operationDetails) {
       throw await this.sendInternalError('operationDetailsRequired')
     }
@@ -3857,6 +3913,12 @@ export class DAppClient extends Client {
    * @param input The message details we need to prepare the BroadcastRequest message.
    */
   public async requestBroadcast(input: RequestBroadcastInput): Promise<BroadcastResponseOutput> {
+    return this.runPublicRequest(() => this.requestBroadcastInternal(input))
+  }
+
+  private async requestBroadcastInternal(
+    input: RequestBroadcastInput
+  ): Promise<BroadcastResponseOutput> {
     if (!input.signedTransaction) {
       throw await this.sendInternalError('signedTransactionRequired')
     }
@@ -4128,54 +4190,65 @@ export class DAppClient extends Client {
     // handleRequestError only inspects `.type` plus optional fields it already
     // guards on. Catch params are `unknown` under strict TS, same story.
     const typedRequest = request as BeaconRequestInputMessage
-    const requestError = rawError as ErrorResponse
+    const requestError = rawError as WireRequestErrorResponse
     logger.time(false, logId)
+    if (typeof rawError === 'object' && rawError !== null && this.admissionErrors.has(rawError)) {
+      return
+    }
     await this.handleRequestError(typedRequest, requestError, resetPermissionState).catch(
       () => undefined
     )
   }
 
+  private localAdmissionError(error: BeaconError): BeaconError {
+    this.admissionErrors.add(error)
+
+    return error
+  }
+
+  // Normalize only at the public seam. Existing dispatch error handlers retain
+  // ownership of wire events, account reset and request settlement side effects.
+  private async runPublicRequest<T>(request: () => Promise<T>): Promise<T> {
+    try {
+      return await request()
+    } catch (error) {
+      throw this.toPublicRequestError(error)
+    }
+  }
+
   /**
    * Normalizes internal errors and wallet error responses into public BeaconError instances.
    * Public DAppClient request methods reject with BeaconError subclasses (isBeaconError(err) === true),
-   * while *_REQUEST_ERROR events emit { errorResponse } as a plain RequestErrorResponse object
+   * while *_REQUEST_ERROR events emit { errorResponse } as a plain WireRequestErrorResponse object
    * for backward compatibility.
    */
   private toPublicError(error: unknown): unknown {
-    if (isBeaconError(error)) {
-      return error
-    }
-    if (isErrorResponse(error)) {
-      const origin =
-        'errorOrigin' in error && isErrorOrigin(error.errorOrigin) ? error.errorOrigin : undefined
+    return this.knownRequestError(error) ?? error
+  }
 
-      return toBeaconError({
-        ...error,
-        ...(origin ? { errorOrigin: origin } : {})
+  private knownRequestError(error: unknown): BeaconError | undefined {
+    try {
+      if (isBeaconError(error)) {
+        return error
+      }
+    } catch {
+      // A proxy may throw during prototype inspection.
+      return undefined
+    }
+    const response = normalizeErrorResponse(error)
+
+    return response ? toBeaconError(response) : undefined
+  }
+
+  private toPublicRequestError(error: unknown): BeaconError {
+    return (
+      this.knownRequestError(error) ??
+      new UnknownBeaconError({
+        description: diagnosticMessage(error, 'error'),
+        errorOrigin: 'local',
+        errorData: error
       })
-    }
-    if (error instanceof Error) {
-      if (error.message === 'rate limit reached') {
-        return new UnknownBeaconError({
-          description: error.message,
-          errorOrigin: 'local',
-          id: '',
-          senderId: '',
-          version: '2'
-        })
-      }
-      if (error.message === 'No permissions to send this request to wallet!') {
-        return new NotGrantedBeaconError({
-          description: error.message,
-          errorOrigin: 'local',
-          id: '',
-          senderId: '',
-          version: '2'
-        })
-      }
-    }
-
-    return error
+    )
   }
 
   /**
@@ -4186,7 +4259,7 @@ export class DAppClient extends Client {
    */
   private async handleRequestError(
     request: BeaconRequestInputMessage,
-    beaconError: ErrorResponse,
+    beaconError: WireRequestErrorResponse,
     resetPermissionState = true
   ): Promise<void> {
     const receivedAt = this.responseReceivedAt.get(beaconError) ?? Date.now()
@@ -4268,7 +4341,7 @@ export class DAppClient extends Client {
         )
         .catch((emitError) => logger.error('handleRequestError', emitError))
 
-      throw getError(beaconError.errorType, beaconError.errorData)
+      throw toBeaconError(beaconError)
     }
 
     throw beaconError
@@ -4650,7 +4723,9 @@ export class DAppClient extends Client {
         this.events
           .emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
           .catch((emitError) => logger.warn('requestDispatch', emitError))
-        throw new Error('rate limit reached')
+        throw this.localAdmissionError(
+          new UnknownBeaconError({ description: 'rate limit reached', errorOrigin: 'local' })
+        )
       }
 
       await this.init()
@@ -4666,7 +4741,12 @@ export class DAppClient extends Client {
         this.events
           .emit(BeaconEvent.NO_PERMISSIONS)
           .catch((emitError) => logger.warn('requestDispatch', emitError))
-        throw new Error('No permissions to send this request to wallet!')
+        throw this.localAdmissionError(
+          new NotGrantedBeaconError({
+            description: 'No permissions to send this request to wallet!',
+            errorOrigin: 'local'
+          })
+        )
       }
       if (!this.beaconId) {
         throw await this.sendInternalError('beaconIdNotDefined')
@@ -4741,7 +4821,9 @@ export class DAppClient extends Client {
         this.events
           .emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
           .catch((emitError) => logger.warn('requestDispatch', emitError))
-        throw new Error('rate limit reached')
+        throw this.localAdmissionError(
+          new UnknownBeaconError({ description: 'rate limit reached', errorOrigin: 'local' })
+        )
       }
       await this.init()
       if (delegated && !stillAdmitted()) {
@@ -4819,7 +4901,9 @@ export class DAppClient extends Client {
       this.events
         .emit(BeaconEvent.LOCAL_RATE_LIMIT_REACHED)
         .catch((emitError) => logger.warn('requestDispatch', emitError))
-      throw new Error('rate limit reached')
+      throw this.localAdmissionError(
+        new UnknownBeaconError({ description: 'rate limit reached', errorOrigin: 'local' })
+      )
     }
     const id = await generateGUID()
     assertCurrent(id)
@@ -5470,28 +5554,64 @@ export class DAppClient extends Client {
     }
   }
 
+  private needsResponseMetadata(message: ResponseMessage, type: unknown): boolean {
+    return message.version === '3' && 'message' in message && type !== BeaconMessageType.Error
+  }
+
+  private rejectMetadataFailure(
+    key: RequestKey,
+    errorData: unknown,
+    preparing: boolean,
+    receivedAt: number
+  ): void {
+    const error = localError({
+      id: key.id,
+      type: BeaconMessageType.Error,
+      errorType: BeaconErrorType.UNKNOWN_ERROR,
+      senderId: '',
+      version: '2',
+      errorData
+    })
+    this.responseReceivedAt.set(error, receivedAt)
+    if (preparing) {
+      this.requestTracker.preparationFailed(key, error)
+    } else {
+      this.requestTracker.reject(key, error)
+    }
+  }
+
   private async loadResponseAppMetadata(
     message: ResponseMessage
-  ): Promise<AppMetadata | undefined> {
-    const storedMetadata = await Promise.all([
-      this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
-      this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP),
-      this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
-    ])
+  ): Promise<{ appMetadata: AppMetadata | undefined } | { cause: unknown }> {
+    try {
+      const storedMetadata = await Promise.all([
+        this.storage.get(StorageKey.TRANSPORT_P2P_PEERS_DAPP),
+        this.storage.get(StorageKey.TRANSPORT_WALLETCONNECT_PEERS_DAPP),
+        this.storage.get(StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP)
+      ])
 
-    for (const peers of storedMetadata) {
-      const peer = peers.find(
-        (candidate) => 'senderId' in candidate && candidate.senderId === message.senderId
-      )
-      if (!peer) {
-        continue
+      for (const peers of storedMetadata) {
+        const peer = peers.find(
+          (candidate) => 'senderId' in candidate && candidate.senderId === message.senderId
+        )
+        if (!peer) {
+          continue
+        }
+        const wallet = await this.getWalletInfo()
+
+        return { appMetadata: { name: peer.name, senderId: message.senderId, icon: wallet.icon } }
       }
-      const wallet = await this.getWalletInfo()
 
-      return { name: peer.name, senderId: message.senderId, icon: wallet.icon }
+      return { appMetadata: undefined }
+    } catch (cause) {
+      // An acknowledgement is advisory. A failed lookup leaves the request's
+      // deadline and wallet response ownership intact.
+      if (responseOutput(message).type === BeaconMessageType.Acknowledge) {
+        throw cause
+      }
+
+      return { cause }
     }
-
-    return undefined
   }
 
   private async handleResponseAcknowledgement({
@@ -5604,17 +5724,8 @@ export class DAppClient extends Client {
       if (preparation.appMetadata) {
         try {
           await this.appMetadataManager.addAppMetadata(preparation.appMetadata)
-        } catch {
-          this.requestTracker.preparationFailed(
-            key,
-            localError({
-              id: message.id,
-              type: BeaconMessageType.Error,
-              errorType: BeaconErrorType.UNKNOWN_ERROR,
-              senderId: '',
-              version: '2'
-            })
-          )
+        } catch (errorData) {
+          this.rejectMetadataFailure(key, errorData, true, receivedAt)
           this.messageObserver.notifyIncoming(transportType, message, 'handled')
 
           return

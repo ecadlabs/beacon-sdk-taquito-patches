@@ -61,13 +61,16 @@ test('should rate limit', async () => {
 
   await dapp.waitForSelector('div.alert-wrapper-show', { state: 'visible', timeout: 30_000 })
 
-  await dapp.waitForSelector('h3:has-text("Error")')
-  await dapp.waitForSelector('div:has-text("Rate")', {
-    state: 'visible',
-    timeout: 30_000
-  })
+  const alert = dapp.locator('beacon-alert .alert-wrapper-show')
+  await expect(alert.getByRole('heading', { name: 'Error', exact: true })).toBeVisible()
+  await expect(
+    alert.getByText('Rate limit reached. Please slow down', { exact: true })
+  ).toBeVisible()
 
-  await dapp.click('button:has-text("Close")')
+  await alert
+    .locator('button')
+    .filter({ hasText: /^Close$/ })
+    .click()
 
   await dapp.waitForSelector('div.alert-wrapper-show', { state: 'detached', timeout: 30_000 })
 })

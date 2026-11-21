@@ -97,7 +97,10 @@ describe('BeaconError hierarchy and runtime behavior', () => {
     it.each(errorMappings)(
       'preserves metadata when passed directly to subclass constructor for $errorType',
       ({ errorType, subclass }) => {
-        const error = new subclass(metadata)
+        const error =
+          subclass === TransactionInvalidBeaconError
+            ? new TransactionInvalidBeaconError(metadata.errorData, metadata)
+            : new subclass(metadata)
 
         expect(error.type).toBe(BeaconMessageType.Error)
         expect(error.errorType).toBe(errorType)
@@ -234,6 +237,8 @@ describe('BeaconError hierarchy and runtime behavior', () => {
               checkRequestErrorResponse({
                 type: BeaconMessageType.Error,
                 id: 'req-1',
+                version: '2',
+                senderId: 'wallet',
                 errorType: BeaconErrorType.NOT_GRANTED_ERROR,
                 errorOrigin: 'somewhere'
               })
@@ -243,6 +248,8 @@ describe('BeaconError hierarchy and runtime behavior', () => {
               checkRequestErrorResponse({
                 type: BeaconMessageType.Acknowledge,
                 id: 'req-2',
+                version: '2',
+                senderId: 'wallet',
                 errorType: BeaconErrorType.NOT_GRANTED_ERROR
               })
             ).toBe(false)

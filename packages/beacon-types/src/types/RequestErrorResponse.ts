@@ -7,5 +7,6 @@ import { ErrorOrigin } from './ErrorOrigin'
  * @category Error
  */
 export interface RequestErrorResponse extends ErrorResponse {
-  errorOrigin?: ErrorOrigin
+  /** An unset origin can be omitted or explicitly undefined. */
+  errorOrigin?: ErrorOrigin | undefined
 }

@@ -386,10 +386,10 @@ describe('Beacon i18n catalog and error localization', () => {
       builtInLocales.fr.errors[BeaconErrorType.TRANSACTION_INVALID_ERROR].title
     )
 
-    const txOptionsOnly = new TransactionInvalidBeaconError({
+    const txMetadataOnly = new TransactionInvalidBeaconError(undefined, {
       title: 'Custom TX Invalid Title'
     })
-    expect(txOptionsOnly.title).toBe('Custom TX Invalid Title')
+    expect(txMetadataOnly.title).toBe('Custom TX Invalid Title')
   })
 
   describe('browser language auto-detection and clearing global overrides', () => {

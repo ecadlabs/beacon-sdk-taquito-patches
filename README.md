@@ -194,6 +194,8 @@ All timestamps are epoch milliseconds. Correlate by ID rather than event arrival
 order. An error before request admission can have an empty ID and no preceding
 SENT event. V3 correlation uses the outer Beacon envelope ID.
 
+See [request errors](docs/request-errors.md) for typed rejections, validated error guards and transaction-error data compatibility.
+
 ACK events distinguish real protocol acknowledgements from WalletConnect pairing
 status. Narrow `correlated` before accessing `message` or `requestId`:
 

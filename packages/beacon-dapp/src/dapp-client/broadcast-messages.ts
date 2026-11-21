@@ -8,7 +8,7 @@ import {
   ConnectionContext,
   Origin
 } from '@ecadlabs/beacon-types'
-import { ResponseMessage } from './request-error'
+import type { ResponseMessage } from './request-error'
 
 /** Only the routing contract is owned here; operation data is validated by the wallet. */
 export interface ForwardedV2Request {
@@ -229,5 +229,99 @@ export const parseBroadcastMessage = (value: unknown): BroadcastPacket | undefin
     return parsePacket(value)
   } catch {
     return undefined
+  }
+}
+
+function jsonDiagnosticKeys(value: object): (string | symbol)[] {
+  const array = Array.isArray(value)
+  const prototype: object | null = Object.getPrototypeOf(value)
+  if (!array && prototype !== null && Object.getPrototypeOf(prototype) !== null) {
+    throw new TypeError('Request diagnostic has no lossless JSON representation')
+  }
+  const keys = Reflect.ownKeys(value)
+  const length: unknown = Object.getOwnPropertyDescriptor(value, 'length')?.value
+  if (array && (typeof length !== 'number' || keys.length !== length + 1)) {
+    throw new TypeError('Request diagnostic has no lossless JSON representation')
+  }
+
+  return keys
+}
+
+// Copy data descriptors without calling toJSON or property getters.
+function copyJsonDiagnostic(value: unknown, ancestors: Set<object>): unknown {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0))
+  ) {
+    return value
+  }
+  if (typeof value !== 'object' || ancestors.has(value)) {
+    throw new TypeError('Request diagnostic has no lossless JSON representation')
+  }
+
+  const array = Array.isArray(value)
+  const keys = jsonDiagnosticKeys(value)
+
+  const copied: unknown[] | Record<string, unknown> = array ? [] : {}
+  ancestors.add(value)
+  try {
+    for (const [index, key] of keys.entries()) {
+      if (array && key === 'length') {
+        continue
+      }
+      const field = Object.getOwnPropertyDescriptor(value, key)
+      if (
+        typeof key !== 'string' ||
+        (array && key !== String(index)) ||
+        field?.enumerable !== true ||
+        !('value' in field)
+      ) {
+        throw new TypeError('Request diagnostic has no lossless JSON representation')
+      }
+      Object.defineProperty(copied, key, {
+        value: copyJsonDiagnostic(field.value, ancestors),
+        enumerable: true,
+        writable: true,
+        configurable: true
+      })
+    }
+
+    return copied
+  } finally {
+    ancestors.delete(value)
+  }
+}
+
+function diagnosticSummaryMessage(value: unknown): string | undefined {
+  try {
+    if (typeof value === 'string') {
+      return value.slice(0, 256)
+    }
+    if (typeof value !== 'object' || value === null) {
+      return undefined
+    }
+    const field = Object.getOwnPropertyDescriptor(value, 'message')
+
+    return field && 'value' in field && typeof field.value === 'string'
+      ? field.value.slice(0, 256)
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Detach diagnostics before handing a terminal reply to any broadcast-channel transport. */
+export const broadcastErrorData = (value: unknown): unknown => {
+  try {
+    return copyJsonDiagnostic(value, new Set())
+  } catch {
+    return {
+      message:
+        diagnosticSummaryMessage(value) ??
+        'The request diagnostic could not be copied between tabs.',
+      diagnostic: 'Uncloneable request diagnostic'
+    }
   }
 }

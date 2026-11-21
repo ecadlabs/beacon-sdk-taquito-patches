@@ -33,6 +33,7 @@ import {
 import { DAppClient } from '../../src/dapp-client/DAppClient'
 import { ExposedPromise } from '@ecadlabs/beacon-utils'
 import { BeaconEvent } from '../../src/events'
+import type { LateErrorResponseInfo } from '../../src/dapp-client/request-error'
 import { messageEvents } from '../../src/beacon-message-events'
 
 // Request deadline policy, local error attribution and late-response reporting over a
@@ -476,6 +477,74 @@ describe('Request timeout policy', () => {
         (error: unknown) => ({ error })
       )
     }
+
+    it.each([
+      ['2', BeaconErrorType.NOT_GRANTED_ERROR, BeaconErrorType.NOT_GRANTED_ERROR],
+      ['3', BeaconErrorType.NOT_GRANTED_ERROR, BeaconErrorType.NOT_GRANTED_ERROR],
+      ['2', 'FUTURE_WALLET_ERROR', BeaconErrorType.UNKNOWN_ERROR],
+      ['3', 'FUTURE_WALLET_ERROR', BeaconErrorType.UNKNOWN_ERROR]
+    ] as const)(
+      'keeps a V%s late %s error safe for an exhaustive typed consumer',
+      async (version, errorType, expectedCode) => {
+        await startPublic(1000)
+        const known = vi.fn()
+        const unknown = vi.fn()
+        const handlers: Record<BeaconErrorType, () => void> = {
+          [BeaconErrorType.BROADCAST_ERROR]: known,
+          [BeaconErrorType.NETWORK_NOT_SUPPORTED]: known,
+          [BeaconErrorType.NO_ADDRESS_ERROR]: known,
+          [BeaconErrorType.NO_PRIVATE_KEY_FOUND_ERROR]: known,
+          [BeaconErrorType.NOT_GRANTED_ERROR]: known,
+          [BeaconErrorType.PARAMETERS_INVALID_ERROR]: known,
+          [BeaconErrorType.TOO_MANY_OPERATIONS]: known,
+          [BeaconErrorType.TRANSACTION_INVALID_ERROR]: known,
+          [BeaconErrorType.SIGNATURE_TYPE_NOT_SUPPORTED]: known,
+          [BeaconErrorType.ABORTED_ERROR]: known,
+          [BeaconErrorType.PEER_UNREACHABLE]: known,
+          [BeaconErrorType.UNKNOWN_ERROR]: unknown
+        }
+        const received: LateErrorResponseInfo[] = []
+        await dapp.subscribeToEvent(BeaconEvent.LATE_RESPONSE_RECEIVED, (info) => {
+          if (info.kind === 'error') {
+            received.push(info)
+            handlers[info.error.errorType]()
+          }
+        })
+        const outcome = observe(publicRequest({ kind: 'operation', version }))
+        await vi.advanceTimersByTimeAsync(0)
+        const id = await sentId()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(await outcome).toEqual({
+          error: expect.objectContaining({ errorType: BeaconErrorType.PEER_UNREACHABLE })
+        })
+        const errorData = { detail: 'original wallet diagnostic' }
+        const payload = {
+          type: BeaconMessageType.Error,
+          errorType,
+          errorData,
+          errorOrigin: 'local'
+        }
+        const header = { id, version, senderId: peer.senderId }
+        const message =
+          version === '2' ? { ...header, ...payload } : { ...header, message: payload }
+        await dapp['handleResponse'](message, context)
+        await vi.advanceTimersByTimeAsync(0)
+        expect(received).toHaveLength(1)
+        const info = received[0]
+        expect(info.error.errorType).toBe(expectedCode)
+        expect(info.error.errorData).toBe(errorData)
+        expect(info.error.errorOrigin).toBe('wallet')
+        expect(info.message).toEqual(
+          version === '2'
+            ? { ...message, errorOrigin: 'wallet' }
+            : { ...header, message: { ...payload, errorOrigin: 'wallet' } }
+        )
+        expect(unknown).toHaveBeenCalledTimes(
+          expectedCode === BeaconErrorType.UNKNOWN_ERROR ? 1 : 0
+        )
+        expect(known).toHaveBeenCalledTimes(expectedCode === BeaconErrorType.UNKNOWN_ERROR ? 0 : 1)
+      }
+    )
 
     it.each(allCases)('identifies V$version $kind SENT at transport dispatch', async (request) => {
       await start()

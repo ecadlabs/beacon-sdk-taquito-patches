@@ -1,3 +1,4 @@
+import { BeaconErrorType } from '../types/BeaconErrorType'
 import { BeaconMessageType } from '../types/beacon/BeaconMessageType'
 import { ErrorResponse } from '../types/beacon/messages/ErrorResponse'
 import { ErrorOrigin } from '../types/ErrorOrigin'
@@ -10,22 +11,43 @@ export const isBeaconError = (value: unknown): value is BeaconError => value ins
 export const isErrorOrigin = (value: unknown): value is ErrorOrigin =>
   value === 'wallet' || value === 'local'
 
-export const isErrorResponse = (value: unknown): value is ErrorResponse =>
-  typeof value === 'object' &&
-  value !== null &&
-  'type' in value &&
-  value.type === BeaconMessageType.Error &&
-  'errorType' in value &&
-  typeof value.errorType === 'string'
+export const isErrorResponse = (value: unknown): value is ErrorResponse => {
+  try {
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      Array.isArray(value) ||
+      !('type' in value) ||
+      value.type !== BeaconMessageType.Error ||
+      !('id' in value) ||
+      typeof value.id !== 'string' ||
+      !('version' in value) ||
+      typeof value.version !== 'string' ||
+      !('senderId' in value) ||
+      typeof value.senderId !== 'string' ||
+      !('errorType' in value)
+    ) {
+      return false
+    }
+    const errorType = value.errorType
 
-export const isRequestErrorResponse = (value: unknown): value is RequestErrorResponse => {
-  if (!isErrorResponse(value)) {
+    return Object.values(BeaconErrorType).some((candidate) => candidate === errorType)
+  } catch {
     return false
   }
+}
 
-  return (
-    !('errorOrigin' in value) || value.errorOrigin === undefined || isErrorOrigin(value.errorOrigin)
-  )
+export const isRequestErrorResponse = (value: unknown): value is RequestErrorResponse => {
+  try {
+    if (!isErrorResponse(value)) {
+      return false
+    }
+    const origin = 'errorOrigin' in value ? value.errorOrigin : undefined
+
+    return origin === undefined || isErrorOrigin(origin)
+  } catch {
+    return false
+  }
 }
 
 export const isTezosRpcError = (value: unknown): value is TezosRpcError =>

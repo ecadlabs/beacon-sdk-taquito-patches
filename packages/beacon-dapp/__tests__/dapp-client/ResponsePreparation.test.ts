@@ -1,5 +1,6 @@
 import {
   CommunicationClient,
+  isBeaconError,
   LocalStorage,
   PeerManager,
   Serializer,
@@ -82,7 +83,7 @@ class ControlledTransport extends Transport<
 
   async listen(): Promise<void> {}
 
-  async receive(message: BeaconMessage | BeaconMessageWrapper<{ type: unknown }>): Promise<void> {
+  async receive(message: unknown): Promise<void> {
     await this.notifyListeners(await new Serializer().serialize(message), connectionInfo)
   }
 }
@@ -337,6 +338,43 @@ describe('Response metadata preparation', () => {
     })
   }
 
+  it('rejects V3 permission preparation when peer metadata lookup fails', async () => {
+    await start(0)
+    const pending = await request('3')
+    const incoming: BeaconMessageRecord[] = []
+    dapp.subscribeToMessages((record) => {
+      if (record.direction === 'incoming') incoming.push(record)
+    })
+    const storageError = new Error('peer database unavailable')
+    vi.spyOn(storage, 'get').mockRejectedValueOnce(storageError)
+    await transport.receive({
+      id: pending.id,
+      senderId: peer.senderId,
+      version: '3',
+      message: {
+        type: BeaconMessageType.PermissionResponse,
+        blockchainIdentifier: 'tezos',
+        blockchainData: { scopes: [PermissionScope.SIGN] }
+      }
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(pending.settled).toHaveBeenCalledTimes(1)
+    const outcome = await pending.outcome
+    if (!('error' in outcome) || !isBeaconError(outcome.error))
+      throw new Error('Expected typed permission preparation failure')
+    expect(outcome.error).toMatchObject({
+      id: pending.id,
+      errorOrigin: 'local',
+      errorType: BeaconErrorType.UNKNOWN_ERROR
+    })
+    expect(outcome.error.errorData).toBe(storageError)
+    expect(incoming.map((record) => record.disposition)).toEqual([undefined, 'handled'])
+    expect(succeeded).not.toHaveBeenCalled()
+    expect(changed).not.toHaveBeenCalled()
+    expect(await dapp.getAccounts()).toEqual([])
+    expect(dapp['requestTracker'].size).toBe(0)
+  })
+
   it.each(['2', '3'] as const)(
     'rejects a V%s permission request when its response metadata cannot be stored',
     async (version) => {
@@ -361,6 +399,10 @@ describe('Response metadata preparation', () => {
       const expected = expectedError(pending.id, BeaconErrorType.UNKNOWN_ERROR)
       expect(pending.settled).toHaveBeenCalledExactlyOnceWith({ error: expected })
       await expect(pending.outcome).resolves.toEqual({ error: expected })
+      const outcome = await pending.outcome
+      if (!('error' in outcome) || !isBeaconError(outcome.error))
+        throw new Error('Expected metadata failure diagnostic')
+      expect(outcome.error.errorData).toBe(storageError)
       expect(deliveryErrors).toEqual([])
       expect(incoming.map((record) => record.disposition)).toEqual([undefined, 'handled'])
       expect(failed).toHaveBeenCalledExactlyOnceWith(

@@ -14,7 +14,7 @@ export abstract class BeaconError extends Error implements RequestErrorResponse 
   public readonly id: string
   public readonly version: string
   public readonly senderId: string
-  public readonly errorOrigin?: ErrorOrigin
+  public readonly errorOrigin?: ErrorOrigin | undefined
   public readonly errorData?: unknown
   public readonly title: string
   public readonly description: string

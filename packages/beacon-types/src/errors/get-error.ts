@@ -40,7 +40,7 @@ export const getError = (
     case BeaconErrorType.TOO_MANY_OPERATIONS:
       return new TooManyOperationsBeaconError(mergedOptions)
     case BeaconErrorType.TRANSACTION_INVALID_ERROR:
-      return new TransactionInvalidBeaconError(mergedOptions)
+      return new TransactionInvalidBeaconError(mergedOptions.errorData, mergedOptions)
     case BeaconErrorType.SIGNATURE_TYPE_NOT_SUPPORTED:
       return new SignatureTypeNotSupportedBeaconError(mergedOptions)
     case BeaconErrorType.ABORTED_ERROR:
