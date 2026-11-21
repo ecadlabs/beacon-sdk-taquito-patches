@@ -7,5 +7,5 @@
     "allowJs": false,
     "checkJs": false
   },
-  "include": ["test-fixtures/client-options/**/*.ts"]
+  "include": ["test-fixtures/**/*.ts"]
 }

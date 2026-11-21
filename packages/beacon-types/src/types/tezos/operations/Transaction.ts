@@ -1,10 +1,13 @@
+import type { MichelsonPrimitives } from '../MichelsonPrimitives'
 import { TezosBaseOperation, TezosOperationType, TezosTransactionParameters } from '../../..'
 
 /**
  * @internalapi
  * @category Tezos
  */
-export interface TezosTransactionOperation extends TezosBaseOperation {
+export interface TezosTransactionOperation<
+  Primitive extends string = MichelsonPrimitives
+> extends TezosBaseOperation {
   kind: TezosOperationType.TRANSACTION
   source: string
   fee: string
@@ -13,5 +16,5 @@ export interface TezosTransactionOperation extends TezosBaseOperation {
   storage_limit: string
   amount: string
   destination: string
-  parameters?: TezosTransactionParameters
+  parameters?: TezosTransactionParameters<Primitive>
 }

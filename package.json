@@ -151,6 +151,7 @@
     "webpack": "^5.112.2",
     "webpack-cli": "^7.3.1",
     "@testing-library/jest-dom": "7.0.1",
-    "vite": "^8.3.8"
+    "vite": "^8.3.8",
+    "@taquito/michel-codec": "25.1.1"
   }
 }

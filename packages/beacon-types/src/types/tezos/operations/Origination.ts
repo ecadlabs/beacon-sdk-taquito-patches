@@ -1,3 +1,4 @@
+import type { MichelsonPrimitives } from '../MichelsonPrimitives'
 import { TezosBaseOperation, TezosOperationType } from '../../..'
 import { ScriptedContracts } from '../common'
 
@@ -5,7 +6,9 @@ import { ScriptedContracts } from '../common'
  * @internalapi
  * @category Tezos
  */
-export interface TezosOriginationOperation extends TezosBaseOperation {
+export interface TezosOriginationOperation<
+  Primitive extends string = MichelsonPrimitives
+> extends TezosBaseOperation {
   kind: TezosOperationType.ORIGINATION
   source: string
   fee: string
@@ -14,5 +17,5 @@ export interface TezosOriginationOperation extends TezosBaseOperation {
   storage_limit: string
   balance: string
   delegate?: string
-  script?: ScriptedContracts
+  script?: ScriptedContracts<Primitive>
 }

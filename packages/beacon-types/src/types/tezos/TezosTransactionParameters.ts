@@ -1,10 +1,11 @@
+import type { MichelsonPrimitives } from './MichelsonPrimitives'
 import { MichelineMichelsonV1Expression } from './MichelineMichelsonV1Expression'
 
 /**
  * @internalapi
  * @category Tezos
  */
-export interface TezosTransactionParameters {
+export interface TezosTransactionParameters<Primitive extends string = MichelsonPrimitives> {
   entrypoint:
     | 'default'
     | 'root'
@@ -17,5 +18,5 @@ export interface TezosTransactionParameters {
     | 'finalize_unstake'
     | 'set_delegate_parameters'
     | string
-  value: MichelineMichelsonV1Expression
+  value: MichelineMichelsonV1Expression<Primitive>
 }

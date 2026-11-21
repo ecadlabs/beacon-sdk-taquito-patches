@@ -9,9 +9,17 @@
   "module": "dist/esm/index.js",
   "types": "dist/esm/index.d.ts",
   "exports": {
-    "node": "./dist/cjs/index.js",
-    "require": "./dist/cjs/index.js",
-    "import": "./dist/esm/index.js"
+    ".": {
+      "node": "./dist/cjs/index.js",
+      "require": "./dist/cjs/index.js",
+      "import": "./dist/esm/index.js"
+    },
+    "./wallet": {
+      "types": "./dist/esm/wallet.d.ts",
+      "node": "./dist/cjs/wallet.js",
+      "require": "./dist/cjs/wallet.js",
+      "import": "./dist/esm/wallet.js"
+    }
   },
   "directories": {
     "lib": "dist/esm",
@@ -33,6 +41,7 @@
     "url": "https://github.com/ecadlabs/beacon-sdk-taquito-patches/issues"
   },
   "dependencies": {
+    "@ecadlabs/beacon-types": "4.9.0-ecad-rc.0",
     "@stablelib/blake2b": "^2.0.1",
     "@stablelib/bytes": "^2.0.1",
     "@stablelib/ed25519": "^2.1.1",
@@ -43,5 +52,13 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "peerDependencies": {
+    "@taquito/michel-codec": "^25.1.1 || ^25.2.0-beta3"
+  },
+  "peerDependenciesMeta": {
+    "@taquito/michel-codec": {
+      "optional": true
+    }
   }
 }

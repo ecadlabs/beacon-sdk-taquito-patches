@@ -417,3 +417,13 @@ export { Notification } from './types/Notification'
 // TS helpers
 
 export { Optional }
+
+export type { WalletPartialTezosOperation } from './types/tezos/WalletPartialTezosOperation'
+export type { TezosUpdateConsensusKeyOperation as TezosUpdateCompanionKeyOperation } from './types/tezos/operations/UpdateCompanionKey'
+
+export { PvmKind } from './types/tezos/common'
+export {
+  SmartRollupRefutationOptions,
+  SmartRollupInputProofKind,
+  SmartRollupRefuteRevealProofKind
+} from './types/tezos/operations/SmartRollupRefute'
