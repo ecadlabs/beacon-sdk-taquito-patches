@@ -1,6 +1,6 @@
 # `@ecadlabs/beacon-blockchain-tezos-sapling`
 
-Tezos Sapling support package for the Beacon SDK.
+Experimental Tezos Sapling support package for the Beacon SDK. The message types are a draft: transfer is the only transaction request, and the shapes may change.
 
 This is an add-on package in the ECAD-maintained Beacon SDK line. Most consumers get it transitively through higher-level Beacon packages.
 

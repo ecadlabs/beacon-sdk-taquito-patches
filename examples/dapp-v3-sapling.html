@@ -15,6 +15,8 @@
     </script>
 
     <script src="./walletbeacon.min.js"></script>
+    <!-- The repository build does not produce walletbeacon.sapling.min.js yet, so this
+         page cannot start. The requests below match the current message types. -->
     <script src="./walletbeacon.sapling.min.js"></script>
 
     <style>
@@ -177,7 +179,6 @@
                 sourceAddress: activeAccount.address,
                 amount: '1',
                 recipient: activeAccount.address,
-                network: {},
                 mode: 'return'
               }
             })
@@ -198,7 +199,11 @@
                 name: 'Test dApp'
               },
               scopes: ['viewing_key', 'transfer'],
-              network: {}
+              network: {
+                // Sapling pool used by the Taquito test dApp on Shadownet
+                contract: 'KT1GFkBEDZtngCS737gNgtt6LemG2a8kaifC',
+                type: beacon.NetworkType.SHADOWNET
+              }
             }
           })
           .then((permissions) => {
