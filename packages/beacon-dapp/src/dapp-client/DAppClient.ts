@@ -5893,7 +5893,8 @@ export class DAppClient extends Client {
     ].join(' ')
 
     const bytes = toHex(constructedString)
-    const payloadBytes = `05` + `01${bytes.length.toString(16).padStart(8, '0')}${bytes}`
+    const byteLength = bytes.length / 2
+    const payloadBytes = `05` + `01${byteLength.toString(16).padStart(8, '0')}${bytes}`
 
     const signature = await signMessage(payloadBytes, {
       secretKey: Buffer.from(keypair.secretKey)

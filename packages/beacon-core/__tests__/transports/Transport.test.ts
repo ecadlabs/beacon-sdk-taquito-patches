@@ -4,6 +4,7 @@ import { PeerManager } from '../../src/managers/PeerManager'
 import { Transport } from '../../src/transports/Transport'
 import { CommunicationClient } from '../../src/transports/clients/CommunicationClient'
 
+const mockLoggerLog = vi.fn()
 const mockLoggerWarn = vi.fn()
 
 vi.mock('../../src/utils/Logger', () => ({
@@ -11,7 +12,9 @@ vi.mock('../../src/utils/Logger', () => ({
     constructor(_name: string) {}
     debug() {}
     error() {}
-    log() {}
+    log(...args: unknown[]) {
+      mockLoggerLog(...args)
+    }
     time() {}
     timeLog() {}
     warn(...args: unknown[]) {
@@ -50,6 +53,7 @@ class TestTransport extends Transport<
 
 describe('Transport', () => {
   beforeEach(() => {
+    mockLoggerLog.mockClear()
     mockLoggerWarn.mockClear()
   })
 
@@ -138,6 +142,27 @@ describe('Transport', () => {
 
     await expect(transport.notify('message')).rejects.toBe(failure)
     expect(nextListener).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not log the transport instance when notifying listeners', async () => {
+    const transport = new TestTransport(
+      'test-transport',
+      new TestCommunicationClient(vi.fn().mockResolvedValue(undefined)),
+      {} as PeerManager<StorageKey.TRANSPORT_POSTMESSAGE_PEERS_DAPP>
+    )
+
+    await transport.notify('message-without-listeners')
+    expect(mockLoggerWarn).toHaveBeenCalledTimes(1)
+    for (const arg of mockLoggerWarn.mock.calls[0] ?? []) {
+      expect(arg).not.toBe(transport)
+    }
+
+    await transport.addListener(() => undefined)
+    await transport.notify('message-with-listener')
+    expect(mockLoggerLog).toHaveBeenCalledTimes(1)
+    for (const arg of mockLoggerLog.mock.calls[0] ?? []) {
+      expect(arg).not.toBe(transport)
+    }
   })
 })
 

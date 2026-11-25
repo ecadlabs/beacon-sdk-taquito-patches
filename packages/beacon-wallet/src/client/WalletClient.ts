@@ -256,7 +256,7 @@ export class WalletClient extends Client {
         const disconnectSenderId = this.getDisconnectSenderId(message)
 
         if (disconnectSenderId) {
-          return this.disconnect(disconnectSenderId)
+          return this.disconnect(disconnectSenderId, connectionContext)
         }
 
         if (!isV3Envelope(message)) {
@@ -307,7 +307,7 @@ export class WalletClient extends Client {
         const typedMessage = message as BeaconRequestMessage | DisconnectMessage
 
         if (typedMessage.type === BeaconMessageType.Disconnect) {
-          return this.disconnect(typedMessage.senderId)
+          return this.disconnect(typedMessage.senderId, connectionContext)
         }
 
         if (!this.pendingRequests.some((request) => request[0].id === message.id)) {
@@ -1145,7 +1145,7 @@ export class WalletClient extends Client {
     }
   }
 
-  private async disconnect(senderId: string) {
+  private async disconnect(senderId: string, connectionContext?: ConnectionContext) {
     const peers = await this.getPeers()
     const peer = peers.find((peerEl) => {
       if (!('senderId' in peerEl)) {
@@ -1158,6 +1158,21 @@ export class WalletClient extends Client {
 
     if (!peer) {
       this.evictPendingRequestsForPeer({ senderId })
+
+      return
+    }
+
+    if (
+      connectionContext &&
+      (connectionContext.origin === Origin.P2P ||
+        connectionContext.origin === Origin.WALLETCONNECT) &&
+      peer.publicKey !== connectionContext.id
+    ) {
+      logger.warn(
+        'disconnect',
+        'Ignoring disconnect for senderId that does not match the transport peer key',
+        senderId
+      )
 
       return
     }

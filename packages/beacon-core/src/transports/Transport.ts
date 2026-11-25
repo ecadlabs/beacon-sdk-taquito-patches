@@ -463,9 +463,9 @@ export abstract class Transport<
     ) => void | Promise<void>
   ): Promise<void> {
     if (this.listeners.length === 0) {
-      logger.warn('notifyListeners', '0 listeners notified!', this)
+      logger.warn('notifyListeners', '0 listeners notified!', this.type)
     } else {
-      logger.log('notifyListeners', `Notifying ${this.listeners.length} listeners`, this)
+      logger.log('notifyListeners', `Notifying ${this.listeners.length} listeners`, this.type)
     }
 
     await Promise.all(
