@@ -286,6 +286,9 @@ client
 
 For a more complete example, see [`examples/wallet.html`](./examples/wallet.html).
 
+Wallets can opt into [operation sanitization and signing-payload previews](docs/wallet-request-helpers.md)
+through `@ecadlabs/beacon-utils/wallet`.
+
 ## Adding a wallet to Beacon SDK
 
 Please create a PR and add your wallet in

@@ -1,3 +1,4 @@
+import type { MichelsonPrimitives } from './MichelsonPrimitives'
 import { MichelineMichelsonV1Expression } from './MichelineMichelsonV1Expression'
 import { TezosOperationType } from './OperationTypes'
 
@@ -65,9 +66,9 @@ export interface TransactionOperationParameter {
   value: MichelineMichelsonV1Expression
 }
 
-export interface ScriptedContracts {
-  code: MichelineMichelsonV1Expression[]
-  storage: MichelineMichelsonV1Expression
+export interface ScriptedContracts<Primitive extends string = MichelsonPrimitives> {
+  code: MichelineMichelsonV1Expression<Primitive>[]
+  storage: MichelineMichelsonV1Expression<Primitive>
 }
 
 export type ContractBigMapDiff = ContractBigMapDiffItem[]
