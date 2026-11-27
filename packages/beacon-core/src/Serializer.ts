@@ -1,4 +1,4 @@
-import { sha256 } from '@noble/hashes/sha256'
+import { sha256 } from '@noble/hashes/sha2.js'
 import bs58check from 'bs58check'
 import { decodeBase58, encodeBase58 } from './utils/base58'
 
